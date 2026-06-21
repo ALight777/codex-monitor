@@ -27,7 +27,7 @@ final class CodexNotchSettings: ObservableObject {
     static let cliproxyKeychainService = "com.alight.codexnotch.cliproxy.management-key"
     static let cliproxyKeychainAccount = "default"
     static let newAPIKeychainService = "com.alight.codexnotch.newapi.password"
-    static let subAPIKeychainService = "com.alight.codexnotch.subapi.management-key"
+    static let subAPIKeychainService = "com.alight.codexnotch.subapi.password"
 
     private enum Keys {
         static let activeRefreshInterval = "activeRefreshInterval"
@@ -55,6 +55,7 @@ final class CodexNotchSettings: ObservableObject {
         static let newAPIAllowInsecureTLS = "newAPIAllowInsecureTLS"
         static let subAPIMonitorEnabled = "subAPIMonitorEnabled"
         static let subAPIPanelURL = "subAPIPanelURL"
+        static let subAPIUsername = "subAPIUsername"
         static let subAPIRefreshInterval = "subAPIRefreshInterval"
         static let subAPIRequestTimeout = "subAPIRequestTimeout"
         static let subAPIAllowInsecureTLS = "subAPIAllowInsecureTLS"
@@ -266,6 +267,17 @@ final class CodexNotchSettings: ObservableObject {
         }
     }
 
+    @Published var subAPIUsername: String {
+        didSet {
+            let trimmed = subAPIUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+            if subAPIUsername != trimmed {
+                subAPIUsername = trimmed
+                return
+            }
+            defaults.set(trimmed, forKey: Keys.subAPIUsername)
+        }
+    }
+
     @Published var subAPIRefreshInterval: TimeInterval {
         didSet {
             normalizeSubAPIRefreshInterval()
@@ -339,6 +351,7 @@ final class CodexNotchSettings: ObservableObject {
         self.newAPIAllowInsecureTLS = defaults.object(forKey: Keys.newAPIAllowInsecureTLS) as? Bool ?? false
         self.subAPIMonitorEnabled = defaults.object(forKey: Keys.subAPIMonitorEnabled) as? Bool ?? false
         self.subAPIPanelURL = defaults.string(forKey: Keys.subAPIPanelURL) ?? ""
+        self.subAPIUsername = defaults.string(forKey: Keys.subAPIUsername) ?? ""
         self.subAPIManagementKey = initialSubAPIKey ?? ((try? KeychainStore.read(
             service: Self.subAPIKeychainService,
             account: Self.cliproxyKeychainAccount
@@ -471,7 +484,7 @@ final class CodexNotchSettings: ObservableObject {
         case .newAPI:
             newAPIUsername
         case .subAPI:
-            ""
+            subAPIUsername
         }
     }
 

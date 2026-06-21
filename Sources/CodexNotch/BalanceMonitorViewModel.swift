@@ -57,7 +57,7 @@ final class BalanceMonitorViewModel: ObservableObject {
         let settingsSnapshot = BalanceMonitorSettingsSnapshot(source: source, settings: settings)
         guard !panelURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              source != .newAPI || !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             invalidateInFlightRefresh()
             loadedSettings = nil
             snapshot = .notConfigured(source: source)
@@ -226,7 +226,7 @@ final class BalanceMonitorViewModel: ObservableObject {
         let username = settings.balanceUsername(for: source)
         guard !panelURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              source != .newAPI || !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
         return currentConfiguration(panelURL: panelURL, key: key)

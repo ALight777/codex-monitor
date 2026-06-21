@@ -69,6 +69,7 @@ private struct SettingsDraft: Equatable {
     var newAPIAllowInsecureTLS = false
     var subAPIMonitorEnabled = false
     var subAPIPanelURL = ""
+    var subAPIUsername = ""
     var subAPIManagementKey = ""
     var subAPIRefreshInterval: TimeInterval = 300
     var subAPIRequestTimeout: TimeInterval = 6
@@ -103,6 +104,7 @@ private struct SettingsDraft: Equatable {
         newAPIAllowInsecureTLS = settings.newAPIAllowInsecureTLS
         subAPIMonitorEnabled = settings.subAPIMonitorEnabled
         subAPIPanelURL = settings.subAPIPanelURL
+        subAPIUsername = settings.subAPIUsername
         subAPIManagementKey = settings.subAPIManagementKey
         subAPIRefreshInterval = settings.subAPIRefreshInterval
         subAPIRequestTimeout = settings.subAPIRequestTimeout
@@ -249,7 +251,7 @@ struct SettingsView: View {
                     enabled: $draft.newAPIMonitorEnabled,
                     panelURL: $draft.newAPIPanelURL,
                     managementKey: $draft.newAPIManagementKey,
-                    newAPIUsername: $draft.newAPIUsername,
+                    loginUsername: $draft.newAPIUsername,
                     refreshInterval: $draft.newAPIRefreshInterval,
                     requestTimeout: $draft.newAPIRequestTimeout,
                     allowInsecureTLS: $draft.newAPIAllowInsecureTLS,
@@ -263,6 +265,7 @@ struct SettingsView: View {
                     enabled: $draft.subAPIMonitorEnabled,
                     panelURL: $draft.subAPIPanelURL,
                     managementKey: $draft.subAPIManagementKey,
+                    loginUsername: $draft.subAPIUsername,
                     refreshInterval: $draft.subAPIRefreshInterval,
                     requestTimeout: $draft.subAPIRequestTimeout,
                     allowInsecureTLS: $draft.subAPIAllowInsecureTLS,
@@ -407,7 +410,7 @@ struct SettingsView: View {
         enabled: Binding<Bool>,
         panelURL: Binding<String>,
         managementKey: Binding<String>,
-        newAPIUsername: Binding<String>? = nil,
+        loginUsername: Binding<String>? = nil,
         refreshInterval: Binding<TimeInterval>,
         requestTimeout: Binding<TimeInterval>,
         allowInsecureTLS: Binding<Bool>,
@@ -427,12 +430,12 @@ struct SettingsView: View {
             )
             .disabled(!enabled.wrappedValue)
 
-            if let newAPIUsername {
+            if let loginUsername {
                 labeledTextField(
-                    "用户名",
-                    text: newAPIUsername,
-                    placeholder: "NewAPI 登录用户名",
-                    help: "用于调用 NewAPI POST /api/user/login 登录接口。"
+                    balanceUsernameTitle(source: source),
+                    text: loginUsername,
+                    placeholder: balanceUsernamePlaceholder(source: source),
+                    help: balanceUsernameHelp(source: source)
                 )
                 .disabled(!enabled.wrappedValue)
             }
@@ -478,7 +481,34 @@ struct SettingsView: View {
         case .newAPI:
             "启用后详情页会出现 \(title) tab，通过登录接口读取 NewAPI 当前用户额度和渠道余额。"
         case .subAPI:
-            "启用后详情页会出现 \(title) tab，用于读取 Sub2API 管理后台中的用户余额。"
+            "启用后详情页会出现 \(title) tab，通过登录接口读取 Sub2API 当前用户余额和平台配额。"
+        }
+    }
+
+    private func balanceUsernameTitle(source: BalanceMonitorSource) -> String {
+        switch source {
+        case .newAPI:
+            "用户名"
+        case .subAPI:
+            "用户名/邮箱"
+        }
+    }
+
+    private func balanceUsernamePlaceholder(source: BalanceMonitorSource) -> String {
+        switch source {
+        case .newAPI:
+            "NewAPI 登录用户名"
+        case .subAPI:
+            "Sub2API 登录邮箱"
+        }
+    }
+
+    private func balanceUsernameHelp(source: BalanceMonitorSource) -> String {
+        switch source {
+        case .newAPI:
+            "用于调用 NewAPI POST /api/user/login 登录接口。"
+        case .subAPI:
+            "用于调用 Sub2API POST /api/v1/auth/login 登录接口。Sub2API 当前登录字段名是 email。"
         }
     }
 
@@ -487,7 +517,7 @@ struct SettingsView: View {
         case .newAPI:
             "密码"
         case .subAPI:
-            "管理员 API Key"
+            "密码"
         }
     }
 
@@ -496,7 +526,7 @@ struct SettingsView: View {
         case .newAPI:
             "NewAPI 登录密码"
         case .subAPI:
-            "admin-..."
+            "Sub2API 登录密码"
         }
     }
 
@@ -505,7 +535,7 @@ struct SettingsView: View {
         case .newAPI:
             "用于调用 NewAPI POST /api/user/login。密码只保存到 macOS Keychain。"
         case .subAPI:
-            "用于调用 Sub2API 管理接口，会作为 x-api-key 发送。API Key 只保存到 macOS Keychain。"
+            "用于调用 Sub2API POST /api/v1/auth/login。密码只保存到 macOS Keychain。"
         }
     }
 
@@ -592,6 +622,7 @@ struct SettingsView: View {
             return draft.subAPIMonitorEnabled != current.subAPIMonitorEnabled
                 || draft.subAPIPanelURL != current.subAPIPanelURL
                 || draft.subAPIManagementKey != current.subAPIManagementKey
+                || draft.subAPIUsername != current.subAPIUsername
                 || draft.subAPIRefreshInterval != current.subAPIRefreshInterval
                 || draft.subAPIRequestTimeout != current.subAPIRequestTimeout
                 || draft.subAPIAllowInsecureTLS != current.subAPIAllowInsecureTLS
@@ -733,6 +764,7 @@ struct SettingsView: View {
         }
 
         settings.subAPIPanelURL = next.subAPIPanelURL
+        settings.subAPIUsername = next.subAPIMonitorEnabled ? next.subAPIUsername : ""
         settings.subAPIRefreshInterval = next.subAPIRefreshInterval
         settings.subAPIRequestTimeout = next.subAPIRequestTimeout
         settings.subAPIAllowInsecureTLS = next.subAPIAllowInsecureTLS

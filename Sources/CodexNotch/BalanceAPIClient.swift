@@ -24,9 +24,9 @@ enum BalanceAPIError: LocalizedError {
         case .missingKey:
             "缺少认证信息"
         case .missingUsername:
-            "缺少 NewAPI 用户名"
+            "缺少登录用户名"
         case .loginRequiresTwoFactor:
-            "NewAPI 账号需要二次验证，暂不支持自动登录"
+            "账号需要二次验证，暂不支持自动登录"
         case .httpStatus(let status):
             status == 401 || status == 403 ? "认证信息无效或无权限" : "面板返回 HTTP \(status)"
         case .emptyResponse:
@@ -53,30 +53,7 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         case .newAPI:
             return try await fetchNewAPISnapshot(baseURL: baseURL, source: source)
         case .subAPI:
-            let headers = try Self.authenticationHeaders(for: configuration, source: source)
-            return try await fetchSubAPISnapshot(baseURL: baseURL, headers: headers, source: source)
-        }
-    }
-
-    static func authenticationHeaders(
-        for configuration: BalanceAPIConfiguration,
-        source: BalanceMonitorSource
-    ) throws -> [String: String] {
-        let token = configuration.secret.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            throw BalanceAPIError.missingKey
-        }
-
-        switch source {
-        case .newAPI:
-            return [
-                "Accept": "application/json"
-            ]
-        case .subAPI:
-            return [
-                "x-api-key": token,
-                "Accept": "application/json"
-            ]
+            return try await fetchSubAPISnapshot(baseURL: baseURL, source: source)
         }
     }
 
@@ -133,30 +110,53 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
 
     private func fetchSubAPISnapshot(
         baseURL: URL,
-        headers: [String: String],
         source: BalanceMonitorSource
     ) async throws -> BalanceMonitorSnapshot {
-        guard let usersEndpoint = Self.subAPIUsersURL(baseURL: baseURL) else {
-            throw BalanceAPIError.invalidURL
-        }
         let session = makeSession()
         defer {
             session.finishTasksAndInvalidate()
         }
-        let usersData = try await requestData(
-            usersEndpoint,
+        let token = try await loginToSubAPI(baseURL: baseURL, session: session)
+        let headers = Self.bearerHeaders(token: token)
+
+        let profileEndpoint = baseURL
+            .appendingPathComponent("api")
+            .appendingPathComponent("v1")
+            .appendingPathComponent("user")
+            .appendingPathComponent("profile")
+        let profileData = try await requestData(
+            profileEndpoint,
             method: "GET",
             headers: headers,
             session: session,
             timeout: configuration.timeout
         )
-        let accounts = try Self.decodeSubAPIUserAccounts(usersData)
+        var accounts = [try Self.decodeSubAPIProfileAccount(profileData)]
+        var partialMessage: String?
+
+        let quotasEndpoint = baseURL
+            .appendingPathComponent("api")
+            .appendingPathComponent("v1")
+            .appendingPathComponent("user")
+            .appendingPathComponent("platform-quotas")
+        do {
+            let quotasData = try await requestData(
+                quotasEndpoint,
+                method: "GET",
+                headers: headers,
+                session: session,
+                timeout: configuration.timeout
+            )
+            accounts.append(contentsOf: try Self.decodeSubAPIPlatformQuotaAccounts(quotasData))
+        } catch {
+            partialMessage = "平台配额读取失败：\(Self.localizedMessage(for: error))"
+        }
 
         return BalanceMonitorSnapshot(
             source: source,
-            panelState: Self.panelState(for: accounts, partialMessage: nil),
+            panelState: Self.panelState(for: accounts, partialMessage: partialMessage),
             accounts: accounts,
-            message: accounts.isEmpty ? "没有找到 Sub2API 用户余额" : nil,
+            message: partialMessage ?? (accounts.isEmpty ? "没有找到 Sub2API 用户余额" : nil),
             lastUpdated: Date()
         )
     }
@@ -185,6 +185,33 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
             timeout: configuration.timeout
         )
         return try Self.validateNewAPILoginResponse(data)
+    }
+
+    private func loginToSubAPI(baseURL: URL, session: URLSession) async throws -> String {
+        let username = configuration.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !username.isEmpty else {
+            throw BalanceAPIError.missingUsername
+        }
+        guard !configuration.secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw BalanceAPIError.missingKey
+        }
+        let loginEndpoint = baseURL
+            .appendingPathComponent("api")
+            .appendingPathComponent("v1")
+            .appendingPathComponent("auth")
+            .appendingPathComponent("login")
+        let data = try await requestData(
+            loginEndpoint,
+            method: "POST",
+            body: try Self.subAPILoginBody(for: configuration),
+            headers: [
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            ],
+            session: session,
+            timeout: configuration.timeout
+        )
+        return try Self.validateSubAPILoginResponse(data)
     }
 
     private func makeSession() -> URLSession {
@@ -299,24 +326,6 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         return components?.url
     }
 
-    private static func subAPIUsersURL(baseURL: URL) -> URL? {
-        var components = URLComponents(
-            url: baseURL
-                .appendingPathComponent("api")
-                .appendingPathComponent("v1")
-                .appendingPathComponent("admin")
-                .appendingPathComponent("users"),
-            resolvingAgainstBaseURL: false
-        )
-        components?.queryItems = [
-            URLQueryItem(name: "page", value: "1"),
-            URLQueryItem(name: "page_size", value: "100"),
-            URLQueryItem(name: "sort_by", value: "balance"),
-            URLQueryItem(name: "sort_order", value: "desc")
-        ]
-        return components?.url
-    }
-
     private static func isLocalHost(_ host: String) -> Bool {
         let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
         return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
@@ -365,6 +374,28 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         ]
     }
 
+    static func bearerHeaders(token: String) -> [String: String] {
+        [
+            "Accept": "application/json",
+            "Authorization": "Bearer \(token)"
+        ]
+    }
+
+    static func subAPILoginBody(for configuration: BalanceAPIConfiguration) throws -> Data {
+        let username = configuration.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = configuration.secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !username.isEmpty else {
+            throw BalanceAPIError.missingUsername
+        }
+        guard !password.isEmpty else {
+            throw BalanceAPIError.missingKey
+        }
+        return try JSONSerialization.data(withJSONObject: [
+            "email": username,
+            "password": password
+        ])
+    }
+
     @discardableResult
     static func validateNewAPILoginResponse(_ data: Data) throws -> String {
         let envelope = try decodePayload(NewAPILoginData.self, from: data)
@@ -378,14 +409,30 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         return userID
     }
 
-    static func decodeSubAPIUserAccounts(_ data: Data) throws -> [BalanceAccount] {
-        if let list = try? decodeSubAPIPayload(SubAPIUserListData.self, from: data) {
-            return list.items.map { $0.balanceAccount() }
+    static func validateSubAPILoginResponse(_ data: Data) throws -> String {
+        let payload = try decodeSubAPIPayload(SubAPILoginData.self, from: data)
+        if payload.requiresTwoFactor == true {
+            throw BalanceAPIError.loginRequiresTwoFactor
         }
-        if let users = try? decodeSubAPIPayload([SubAPIUserData].self, from: data) {
-            return users.map { $0.balanceAccount() }
+        guard let token = payload.accessToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            throw BalanceAPIError.unsupportedResponse("Sub2API 登录响应缺少 access token")
         }
-        throw BalanceAPIError.unsupportedResponse("Sub2API 用户余额格式不兼容")
+        return token
+    }
+
+    static func decodeSubAPIProfileAccount(_ data: Data) throws -> BalanceAccount {
+        try decodeSubAPIPayload(SubAPIUserData.self, from: data).balanceAccount()
+    }
+
+    static func decodeSubAPIPlatformQuotaAccounts(_ data: Data) throws -> [BalanceAccount] {
+        if let list = try? decodeSubAPIPayload(SubAPIPlatformQuotaListData.self, from: data) {
+            return list.platformQuotas.map { $0.balanceAccount() }
+        }
+        if let quotas = try? decodeSubAPIPayload([SubAPIPlatformQuotaData].self, from: data) {
+            return quotas.map { $0.balanceAccount() }
+        }
+        throw BalanceAPIError.unsupportedResponse("Sub2API 平台配额格式不兼容")
     }
 
     private static func decodePayload<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
@@ -451,6 +498,24 @@ private struct SubAPIEnvelope<T: Decodable>: Decodable {
     let code: Int?
     let message: String?
     let data: T?
+}
+
+private struct SubAPILoginData: Decodable {
+    let accessToken: String?
+    let requiresTwoFactor: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case accessTokenCamel = "accessToken"
+        case requiresTwoFactor = "requires_2fa"
+        case requiresTwoFactorCamel = "requires2FA"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accessToken = container.flexibleString(for: [.accessToken, .accessTokenCamel])
+        requiresTwoFactor = container.flexibleBool(for: [.requiresTwoFactor, .requiresTwoFactorCamel])
+    }
 }
 
 private struct NewAPIUserData: Decodable {
@@ -556,9 +621,95 @@ private struct NewAPIChannelData: Decodable {
     }
 }
 
-private struct SubAPIUserListData: Decodable {
-    let items: [SubAPIUserData]
-    let total: Int?
+private struct SubAPIPlatformQuotaListData: Decodable {
+    let platformQuotas: [SubAPIPlatformQuotaData]
+
+    enum CodingKeys: String, CodingKey {
+        case platformQuotas = "platform_quotas"
+        case platformQuotasCamel = "platformQuotas"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        platformQuotas = (try? container.decodeIfPresent([SubAPIPlatformQuotaData].self, forKey: .platformQuotas))
+            ?? (try? container.decodeIfPresent([SubAPIPlatformQuotaData].self, forKey: .platformQuotasCamel))
+            ?? []
+    }
+}
+
+private struct SubAPIPlatformQuotaData: Decodable {
+    let platform: String?
+    let dailyUsageUSD: Double?
+    let dailyLimitUSD: Double?
+    let weeklyUsageUSD: Double?
+    let weeklyLimitUSD: Double?
+    let monthlyUsageUSD: Double?
+    let monthlyLimitUSD: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case platform
+        case dailyUsageUSD = "daily_usage_usd"
+        case dailyLimitUSD = "daily_limit_usd"
+        case weeklyUsageUSD = "weekly_usage_usd"
+        case weeklyLimitUSD = "weekly_limit_usd"
+        case monthlyUsageUSD = "monthly_usage_usd"
+        case monthlyLimitUSD = "monthly_limit_usd"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        platform = container.flexibleString(for: [.platform])
+        dailyUsageUSD = container.flexibleDouble(for: [.dailyUsageUSD])
+        dailyLimitUSD = container.flexibleDouble(for: [.dailyLimitUSD])
+        weeklyUsageUSD = container.flexibleDouble(for: [.weeklyUsageUSD])
+        weeklyLimitUSD = container.flexibleDouble(for: [.weeklyLimitUSD])
+        monthlyUsageUSD = container.flexibleDouble(for: [.monthlyUsageUSD])
+        monthlyLimitUSD = container.flexibleDouble(for: [.monthlyLimitUSD])
+    }
+
+    func balanceAccount() -> BalanceAccount {
+        let windows = [
+            ("日", dailyUsageUSD, dailyLimitUSD),
+            ("周", weeklyUsageUSD, weeklyLimitUSD),
+            ("30天", monthlyUsageUSD, monthlyLimitUSD)
+        ]
+        let remainingValues = windows.compactMap { _, usage, limit -> Double? in
+            guard let limit else {
+                return nil
+            }
+            return max(0, limit - (usage ?? 0))
+        }
+        let exhausted = windows.contains { _, usage, limit in
+            guard let limit else {
+                return false
+            }
+            return (usage ?? 0) >= limit
+        }
+        let details = windows.compactMap { label, usage, limit -> String? in
+            guard let usage else {
+                return nil
+            }
+            if let limit {
+                return "\(label) \(BalanceMonitorSnapshot.currencyText(usage))/\(BalanceMonitorSnapshot.currencyText(limit))"
+            }
+            return "\(label) 已用 \(BalanceMonitorSnapshot.currencyText(usage))"
+        }.joined(separator: " · ")
+        let platformName = platform?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = platformName?.isEmpty == false ? platformName! : "平台配额"
+
+        return BalanceAccount(
+            id: "subapi-quota-\(displayName)",
+            source: .subAPI,
+            name: displayName,
+            kind: "平台配额",
+            statusCode: nil,
+            amountText: remainingValues.min().map(BalanceMonitorSnapshot.currencyText(_:)) ?? "不限",
+            usedText: nil,
+            requestCount: nil,
+            updatedAt: details.isEmpty ? nil : details,
+            state: exhausted ? .warning : .healthy
+        )
+    }
 }
 
 private struct SubAPIUserData: Decodable {

@@ -117,6 +117,7 @@ settings.newAPIUsername = "owner"
 settings.newAPIRefreshInterval = 180
 settings.subAPIMonitorEnabled = true
 settings.subAPIPanelURL = "https://subapi.example.com"
+settings.subAPIUsername = "user@example.com"
 settings.subAPIRefreshInterval = 240
 let reloadedSettings = CodexNotchSettings(
     defaults: settingsDefaults,
@@ -132,6 +133,7 @@ runner.check(reloadedSettings.newAPIPanelURL == "https://newapi.example.com", "N
 runner.check(reloadedSettings.newAPIUsername == "owner", "NewAPI username should persist")
 runner.check(reloadedSettings.subAPIMonitorEnabled, "SubAPI monitor enablement should persist")
 runner.check(reloadedSettings.subAPIPanelURL == "https://subapi.example.com", "SubAPI panel URL should persist")
+runner.check(reloadedSettings.subAPIUsername == "user@example.com", "SubAPI login name should persist")
 settingsDefaults.removePersistentDomain(forName: settingsSuiteName)
 
 let shellTimeoutStart = Date()
@@ -207,18 +209,45 @@ do {
     runner.check(error.localizedDescription.contains("二次验证"), "NewAPI 2FA login should show a clear message")
 }
 
-let subAPIHeaders = try BalanceAPIClient.authenticationHeaders(
+let subAPILoginBody = try BalanceAPIClient.subAPILoginBody(
     for: BalanceAPIConfiguration(
         panelURL: "https://subapi.example.com",
-        username: "",
-        secret: "admin-token",
+        username: "user@example.com",
+        secret: "subapi-password",
         timeout: 6,
         allowInsecureTLS: false
-    ),
-    source: .subAPI
+    )
 )
-runner.check(subAPIHeaders["x-api-key"] == "admin-token", "SubAPI should use x-api-key admin authentication")
-runner.check(subAPIHeaders["Authorization"] == nil, "SubAPI admin API key should not be sent as bearer authorization")
+let subAPILoginJSON = runner.require(
+    try? JSONSerialization.jsonObject(with: subAPILoginBody) as? [String: String],
+    "Sub2API login body should be JSON"
+)
+runner.check(subAPILoginJSON["email"] == "user@example.com", "Sub2API login should send the login name as email")
+runner.check(subAPILoginJSON["password"] == "subapi-password", "Sub2API login should send password")
+
+let subAPILoginResponse = """
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "access_token": "subapi-access-token",
+    "token_type": "Bearer",
+    "user": {
+      "id": 101,
+      "email": "user@example.com",
+      "username": "user",
+      "role": "user",
+      "balance": 12.5,
+      "concurrency": 3,
+      "status": "active"
+    }
+  }
+}
+""".data(using: .utf8)!
+let subAPIToken = try BalanceAPIClient.validateSubAPILoginResponse(subAPILoginResponse)
+runner.check(subAPIToken == "subapi-access-token", "Sub2API login should return an access token")
+let subAPIUserHeaders = BalanceAPIClient.bearerHeaders(token: subAPIToken)
+runner.check(subAPIUserHeaders["Authorization"] == "Bearer subapi-access-token", "Sub2API user requests should use bearer token auth")
 runner.check(SettingsShortcutFilter.shouldSuppressTextInputKey(
     characters: "⌃⌥⌘V",
     hasCommand: true,
@@ -296,43 +325,49 @@ runner.check(channelBalanceAccounts.count == 2, "NewAPI channel list should deco
 runner.check(channelBalanceAccounts[0].amountText == "$12.35", "NewAPI channel balance should format to dollars")
 runner.check(channelBalanceAccounts[1].state == .warning, "disabled NewAPI channel should become a warning balance account")
 
-let subAPIUsersPayload = """
+let subAPIProfilePayload = """
 {
   "code": 0,
   "message": "success",
   "data": {
-    "items": [
-      {
-        "id": 101,
-        "email": "active@example.com",
-        "username": "active",
-        "role": "user",
-        "balance": 12.5,
-        "concurrency": 3,
-        "status": "active"
-      },
-      {
-        "id": 102,
-        "email": "disabled@example.com",
-        "username": "disabled",
-        "role": "user",
-        "balance": "0.25",
-        "concurrency": 1,
-        "status": "disabled"
-      }
-    ],
-    "total": 2,
-    "page": 1,
-    "page_size": 100,
-    "pages": 1
+    "id": 101,
+    "email": "active@example.com",
+    "username": "active",
+    "role": "user",
+    "balance": 12.5,
+    "concurrency": 3,
+    "status": "active"
   }
 }
 """.data(using: .utf8)!
-let subAPIAccounts = try BalanceAPIClient.decodeSubAPIUserAccounts(subAPIUsersPayload)
-runner.check(subAPIAccounts.count == 2, "SubAPI user list should decode user balances")
-runner.check(subAPIAccounts[0].displayName == "active@example.com", "SubAPI user balance should prefer email")
-runner.check(subAPIAccounts[0].amountText == "$12.50", "SubAPI user balance should format as currency")
-runner.check(subAPIAccounts[1].state == .warning, "disabled SubAPI user should become a warning balance account")
+let subAPIProfileAccount = try BalanceAPIClient.decodeSubAPIProfileAccount(subAPIProfilePayload)
+runner.check(subAPIProfileAccount.displayName == "active@example.com", "Sub2API profile balance should prefer email")
+runner.check(subAPIProfileAccount.amountText == "$12.50", "Sub2API profile balance should format as currency")
+runner.check(subAPIProfileAccount.detailText.contains("并发 3"), "Sub2API profile should include concurrency")
+
+let subAPIPlatformQuotaPayload = """
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "platform_quotas": [
+      {
+        "platform": "openai",
+        "daily_usage_usd": 1.5,
+        "daily_limit_usd": 5,
+        "weekly_usage_usd": 4,
+        "weekly_limit_usd": 20,
+        "monthly_usage_usd": 8,
+        "monthly_limit_usd": 30
+      }
+    ]
+  }
+}
+""".data(using: .utf8)!
+let subAPIQuotaAccounts = try BalanceAPIClient.decodeSubAPIPlatformQuotaAccounts(subAPIPlatformQuotaPayload)
+runner.check(subAPIQuotaAccounts.count == 1, "Sub2API platform quota list should decode")
+runner.check(subAPIQuotaAccounts[0].displayName == "openai", "Sub2API platform quota should use platform name")
+runner.check(subAPIQuotaAccounts[0].amountText == "$3.50", "Sub2API platform quota should display the most constrained remaining quota")
 
 let failedBalanceEnvelope = """
 {

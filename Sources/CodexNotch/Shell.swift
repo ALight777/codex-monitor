@@ -108,7 +108,7 @@ enum Shell {
         return String(output[start...end])
     }
 
-    private static func terminateProcessTree(rootPID: pid_t, signal: Int32) {
+    static func terminateProcessTree(rootPID: pid_t, signal: Int32) {
         for pid in descendantProcessIDs(of: rootPID).reversed() {
             kill(pid, signal)
         }

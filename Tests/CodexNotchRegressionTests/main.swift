@@ -1835,6 +1835,130 @@ runner.check(localSnapshot.tasks.first { $0.id == completedSessionID }?.status =
 runner.check(localSnapshot.tasks.first { $0.id == completedFinalAnswerSessionID }?.status == .recent, "fresh final_answer/task_complete rollout should not be treated as running")
 runner.check(localSnapshot.tasks.first { $0.id == dbBackedSessionID }?.tokenCount == 777, "recent rollout fallback should reuse database tokens even when the database updated_at is outside the task range")
 
+let mixedUsageRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+    .appendingPathComponent("CodexNotchMixedUsage-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: mixedUsageRoot, withIntermediateDirectories: true)
+defer {
+    try? FileManager.default.removeItem(at: mixedUsageRoot)
+}
+let mixedUsageStateDatabase = mixedUsageRoot.appendingPathComponent("state_5.sqlite").path
+let mixedUsageLogsDatabase = mixedUsageRoot.appendingPathComponent("logs_2.sqlite").path
+_ = try Shell.run("/usr/bin/sqlite3", [
+    mixedUsageStateDatabase,
+    """
+    create table threads(
+      id text,
+      title text,
+      tokens_used integer,
+      model text,
+      reasoning_effort text,
+      rollout_path text,
+      updated_at integer,
+      archived integer default 0
+    );
+    """
+])
+_ = try Shell.run("/usr/bin/sqlite3", [
+    mixedUsageLogsDatabase,
+    """
+    create table logs(
+      thread_id text,
+      ts integer,
+      target text,
+      feedback_log_body text
+    );
+    """
+])
+let mixedUsageDirectory = mixedUsageRoot.appendingPathComponent("sessions/2026/06/14", isDirectory: true)
+try FileManager.default.createDirectory(at: mixedUsageDirectory, withIntermediateDirectories: true)
+let mixedUsageSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd5"
+let mixedUsagePath = mixedUsageDirectory.appendingPathComponent("rollout-2026-06-14T02-20-15-\(mixedUsageSessionID).jsonl")
+try #"{"timestamp":"\#(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":100}}}}"#
+    .write(to: mixedUsagePath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: mixedUsagePath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    mixedUsageStateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(mixedUsageSessionID)', '日志更完整的任务', 0, 'gpt-5.5', 'high', '\(mixedUsagePath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+_ = try Shell.run("/usr/bin/sqlite3", [
+    mixedUsageLogsDatabase,
+    """
+    insert into logs(thread_id, ts, target, feedback_log_body)
+    values('\(mixedUsageSessionID)', \(Int(now.timeIntervalSince1970)), 'codex_otel.trace_safe', 'event.kind=response.completed tool_token_count=10000');
+    """
+])
+let mixedUsageStore = CodexUsageStore(codexDirectory: mixedUsageRoot, ripgrepCandidates: [])
+runner.check(mixedUsageStore.loadUsageTotals(now: now)?.day == 10000, "local usage totals should merge logs when logs have more complete token counts than rollouts")
+
+let logCacheRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+    .appendingPathComponent("CodexNotchLogCache-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: logCacheRoot, withIntermediateDirectories: true)
+defer {
+    try? FileManager.default.removeItem(at: logCacheRoot)
+}
+let logCacheStateDatabase = logCacheRoot.appendingPathComponent("state_5.sqlite").path
+let logCacheLogsDatabase = logCacheRoot.appendingPathComponent("logs_2.sqlite").path
+_ = try Shell.run("/usr/bin/sqlite3", [
+    logCacheStateDatabase,
+    """
+    create table threads(
+      id text,
+      title text,
+      tokens_used integer,
+      model text,
+      reasoning_effort text,
+      rollout_path text,
+      updated_at integer,
+      archived integer default 0
+    );
+    """
+])
+_ = try Shell.run("/usr/bin/sqlite3", [
+    logCacheLogsDatabase,
+    """
+    create table logs(
+      thread_id text,
+      ts integer,
+      target text,
+      feedback_log_body text
+    );
+    """
+])
+let logCacheDirectory = logCacheRoot.appendingPathComponent("sessions/2026/06/14", isDirectory: true)
+try FileManager.default.createDirectory(at: logCacheDirectory, withIntermediateDirectories: true)
+let logCacheSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd6"
+let logCachePath = logCacheDirectory.appendingPathComponent("rollout-2026-06-14T02-20-16-\(logCacheSessionID).jsonl")
+try #"{"timestamp":"\#(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"仅日志统计"}]}}"#
+    .write(to: logCachePath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: logCachePath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    logCacheStateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(logCacheSessionID)', '仅日志统计', 0, 'gpt-5.5', 'high', '\(logCachePath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+_ = try Shell.run("/usr/bin/sqlite3", [
+    logCacheLogsDatabase,
+    """
+    insert into logs(thread_id, ts, target, feedback_log_body)
+    values('\(logCacheSessionID)', \(Int(now.timeIntervalSince1970)), 'codex_otel.trace_safe', 'event.kind=response.completed tool_token_count=1000');
+    """
+])
+let logCacheStore = CodexUsageStore(codexDirectory: logCacheRoot, ripgrepCandidates: [])
+runner.check(logCacheStore.loadUsageTotals(now: now)?.day == 1000, "log fallback usage should be available when rollout usage is empty")
+_ = try Shell.run("/usr/bin/sqlite3", [
+    logCacheLogsDatabase,
+    """
+    insert into logs(thread_id, ts, target, feedback_log_body)
+    values('\(logCacheSessionID)', \(Int(now.timeIntervalSince1970) + 1), 'codex_otel.trace_safe', 'event.kind=response.completed tool_token_count=2000');
+    """
+])
+runner.check(logCacheStore.loadUsageTotals(now: now.addingTimeInterval(1))?.day == 3000, "log fallback usage cache should refresh when logs database changes")
+
 let cachedLocalSnapshot = localStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: false,
@@ -1892,6 +2016,12 @@ if let handle = try? FileHandle(forWritingTo: largeUsagePath) {
     try handle.close()
 }
 try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: largeUsagePath.path)
+let fakeRipgrepPath = largeUsageRoot.appendingPathComponent("fake-rg").path
+try """
+#!/bin/sh
+/usr/bin/grep '"token_count"'
+""".write(toFile: fakeRipgrepPath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeRipgrepPath)
 _ = try Shell.run("/usr/bin/sqlite3", [
     largeUsageStateDatabase,
     """
@@ -1899,8 +2029,10 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     values('\(largeUsageSessionID)', '大文件统计任务', 777777, 'gpt-5.5', 'high', '\(largeUsagePath.path)', \(Int(now.timeIntervalSince1970)), 0);
     """
 ])
-let largeUsageStore = CodexUsageStore(codexDirectory: largeUsageRoot)
+let largeUsageStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [fakeRipgrepPath])
 runner.check(largeUsageStore.loadUsageTotals(now: now)?.day == 1, "large rollout usage totals should use exact token events when fast search is available")
+let largeUsageFallbackStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [])
+runner.check(largeUsageFallbackStore.loadUsageTotals(now: now)?.day == 777777, "large rollout usage totals should fall back to database tokens when fast search is unavailable")
 
 let tokenCacheRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchTokenCache-\(UUID().uuidString)")

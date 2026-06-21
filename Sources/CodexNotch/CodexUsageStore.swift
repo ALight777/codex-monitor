@@ -1,6 +1,24 @@
 import Foundation
 import Darwin
 
+private enum UsageScanPolicy {
+    static let ripgrepCandidates = [
+        "/opt/homebrew/bin/rg",
+        "/usr/local/bin/rg",
+        "/usr/bin/rg"
+    ]
+    static let runningActivityWindow = 180
+    static let largeSessionTokenScanLimit: UInt64 = 20 * 1024 * 1024
+    static let staleSessionTokenScanLimit: UInt64 = 2 * 1024 * 1024
+    static let recentSessionScanWindow: TimeInterval = 10 * 60
+    static let periodUsageTailLineLimit = 4_000
+    static let estimatedTokenLineBytes: UInt64 = 1_300
+    static let periodUsageCacheTTL: TimeInterval = 120
+    static let ripgrepTimeout: DispatchTimeInterval = .seconds(12)
+    static let appServerSuccessCacheTTL: TimeInterval = 30
+    static let appServerFailureCacheTTL: TimeInterval = 45
+}
+
 final class CodexUsageStore: @unchecked Sendable {
     private struct SessionLineEvent {
         let timestamp: Date
@@ -15,15 +33,8 @@ final class CodexUsageStore: @unchecked Sendable {
     private let logsDatabase: String
     private let sessionIndexPath: String
     private let appServerExecutable = "/Applications/Codex.app/Contents/Resources/codex"
-    private let ripgrepCandidates = [
-        "/opt/homebrew/bin/rg",
-        "/usr/local/bin/rg",
-        "/usr/bin/rg"
-    ]
+    private let ripgrepCandidates: [String]
     private let tokenPattern = /tool_token_count=([0-9]+)/
-    private let runningActivityWindow = 180
-    private let largeSessionTokenScanLimit: UInt64 = 20 * 1024 * 1024
-    private let periodUsageTailLineLimit = 4_000
     private let terminalEventTypes: Set<String> = [
         "task_complete",
         "task_completed",
@@ -44,8 +55,12 @@ final class CodexUsageStore: @unchecked Sendable {
     private var periodUsageCache: PeriodUsageCache?
     private var sessionTokenTotalCache: [String: SessionTokenTotalCache] = [:]
 
-    init(codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")) {
+    init(
+        codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"),
+        ripgrepCandidates: [String] = UsageScanPolicy.ripgrepCandidates
+    ) {
         self.codexDirectory = codexDirectory
+        self.ripgrepCandidates = ripgrepCandidates
         self.stateDatabase = Self.latestSQLiteDatabase(
             in: codexDirectory,
             prefix: "state_",
@@ -291,48 +306,31 @@ final class CodexUsageStore: @unchecked Sendable {
         includeSubagents: Bool = false,
         knownTokens: [String: Int] = [:]
     ) -> [ThreadRecord] {
-        let since = Int(now.timeIntervalSince1970) - range.seconds
         let names = loadSessionIndexThreadNames()
-        let paths = recentTaskSessionPaths(limit: max(range.queryLimit * 3, 80))
-        let pathSessionIDs = paths.compactMap { sessionID(from: $0)?.lowercased() }
-        var resolvedKnownTokens = knownTokens
-        let missingTokenIDs = pathSessionIDs.filter { resolvedKnownTokens[$0] == nil }
-        if !missingTokenIDs.isEmpty {
-            resolvedKnownTokens.merge(loadThreadTokenMap(for: missingTokenIDs), uniquingKeysWith: max)
-        }
-
-        return paths.compactMap { path in
-            guard let sessionID = sessionID(from: path),
-                  let attributes = try? FileManager.default.attributesOfItem(atPath: path),
-                  let modifiedAt = attributes[.modificationDate] as? Date else {
-                return nil
-            }
-
-            let updatedAt = Int(modifiedAt.timeIntervalSince1970)
-            guard updatedAt >= since else {
-                return nil
-            }
-
-            let meta = sessionMeta(from: path)
+        return loadRecentSessionCandidates(
+            range: range,
+            now: now,
+            knownTokens: knownTokens
+        ).compactMap { candidate in
+            let meta = sessionMeta(from: candidate.path)
             guard includeSubagents || meta?.isSubagent != true else {
                 return nil
             }
 
-            let runtime = sessionRuntimeInfo(from: path)
-            let title = names[sessionID] ?? sessionTitle(from: path) ?? "未命名任务"
-            let tokensUsed = bestTokenCount(
-                sessionID: sessionID,
-                path: path,
-                knownTokens: resolvedKnownTokens
+            let runtime = sessionRuntimeInfo(from: candidate.path)
+            let title = names[candidate.sessionID] ?? sessionTitle(from: candidate.path) ?? "未命名任务"
+            let tokensUsed = tokenTotalForFastSnapshot(
+                path: candidate.path,
+                databaseTokens: candidate.databaseTokens
             )
             return ThreadRecord(
-                id: sessionID,
+                id: candidate.sessionID,
                 title: title,
                 tokensUsed: tokensUsed,
                 model: runtime?.model,
                 reasoningEffort: runtime?.reasoningEffort,
-                rolloutPath: path,
-                updatedAt: updatedAt
+                rolloutPath: candidate.path,
+                updatedAt: candidate.updatedAt
             )
         }
     }
@@ -342,6 +340,38 @@ final class CodexUsageStore: @unchecked Sendable {
         now: Date,
         knownTokens: [String: Int] = [:]
     ) -> [ThreadRecord] {
+        loadRecentSessionCandidates(
+            range: range,
+            now: now,
+            knownTokens: knownTokens
+        ).compactMap { candidate in
+            let tokensUsed = tokenTotalForPeriodUsage(
+                path: candidate.path,
+                databaseTokens: candidate.databaseTokens,
+                modifiedAt: candidate.modifiedAt,
+                now: now
+            )
+            guard tokensUsed > 0 else {
+                return nil
+            }
+
+            return ThreadRecord(
+                id: candidate.sessionID,
+                title: "",
+                tokensUsed: tokensUsed,
+                model: nil,
+                reasoningEffort: nil,
+                rolloutPath: candidate.path,
+                updatedAt: candidate.updatedAt
+            )
+        }
+    }
+
+    private func loadRecentSessionCandidates(
+        range: TaskHistoryRange,
+        now: Date,
+        knownTokens: [String: Int]
+    ) -> [RecentSessionCandidate] {
         let since = Int(now.timeIntervalSince1970) - range.seconds
         let paths = recentTaskSessionPaths(limit: max(range.queryLimit * 3, 80))
         let pathSessionIDs = paths.compactMap { sessionID(from: $0)?.lowercased() }
@@ -363,25 +393,12 @@ final class CodexUsageStore: @unchecked Sendable {
                 return nil
             }
 
-            let databaseTokens = resolvedKnownTokens[sessionID.lowercased()] ?? 0
-            let tokensUsed = tokenTotalForPeriodUsage(
+            return RecentSessionCandidate(
                 path: path,
-                databaseTokens: databaseTokens,
+                sessionID: sessionID,
                 modifiedAt: modifiedAt,
-                now: now
-            )
-            guard tokensUsed > 0 else {
-                return nil
-            }
-
-            return ThreadRecord(
-                id: sessionID,
-                title: "",
-                tokensUsed: tokensUsed,
-                model: nil,
-                reasoningEffort: nil,
-                rolloutPath: path,
-                updatedAt: updatedAt
+                updatedAt: updatedAt,
+                databaseTokens: resolvedKnownTokens[sessionID.lowercased()] ?? 0
             )
         }
     }
@@ -521,15 +538,6 @@ final class CodexUsageStore: @unchecked Sendable {
         return tokenTotalForFastSnapshot(path: thread.rolloutPath, databaseTokens: thread.tokensUsed)
     }
 
-    private func bestTokenCount(
-        sessionID: String,
-        path: String,
-        knownTokens: [String: Int]
-    ) -> Int {
-        let databaseTokens = knownTokens[sessionID.lowercased()] ?? 0
-        return tokenTotalForFastSnapshot(path: path, databaseTokens: databaseTokens)
-    }
-
     private func tokenTotalForFastSnapshot(
         path: String,
         databaseTokens: Int,
@@ -548,7 +556,7 @@ final class CodexUsageStore: @unchecked Sendable {
             return databaseTokens
         }
 
-        if databaseTokens > 0, signature.size > largeSessionTokenScanLimit {
+        if databaseTokens > 0, signature.size > UsageScanPolicy.largeSessionTokenScanLimit {
             return databaseTokens
         }
 
@@ -570,11 +578,11 @@ final class CodexUsageStore: @unchecked Sendable {
             return databaseTokens
         }
 
-        if databaseTokens > 0, signature.size > largeSessionTokenScanLimit {
+        if databaseTokens > 0, signature.size > UsageScanPolicy.largeSessionTokenScanLimit {
             return databaseTokens
         }
 
-        let changedRecently = now.timeIntervalSince(modifiedAt) < 10 * 60
+        let changedRecently = now.timeIntervalSince(modifiedAt) < UsageScanPolicy.recentSessionScanWindow
         if changedRecently {
             return max(databaseTokens, sessionTokenTotal(from: path) ?? 0)
         }
@@ -583,7 +591,7 @@ final class CodexUsageStore: @unchecked Sendable {
             return databaseTokens
         }
 
-        guard signature.size <= 2 * 1024 * 1024 else {
+        guard signature.size <= UsageScanPolicy.staleSessionTokenScanLimit else {
             return 0
         }
 
@@ -751,19 +759,22 @@ final class CodexUsageStore: @unchecked Sendable {
         }
 
         let rolloutUsage = loadPeriodUsageFromRollouts(now: now, threads: threads)
-        let usage: PeriodUsage
-
-        if rolloutUsage.month > 0 {
-            usage = rolloutUsage
-        } else {
-            usage = try loadPeriodUsageFromLogs(now: now)
-        }
+        let logUsage = (try? loadPeriodUsageFromLogs(now: now)) ?? .zero
+        let usage = maxPeriodUsage(rolloutUsage, logUsage)
 
         if let signature {
             cachePeriodUsage(usage, signature: signature, now: now)
         }
 
         return usage
+    }
+
+    private func maxPeriodUsage(_ lhs: PeriodUsage, _ rhs: PeriodUsage) -> PeriodUsage {
+        PeriodUsage(
+            day: max(lhs.day, rhs.day),
+            week: max(lhs.week, rhs.week),
+            month: max(lhs.month, rhs.month)
+        )
     }
 
     private func cachedPeriodUsage(now: Date, signature: StoreSignature) -> PeriodUsage? {
@@ -773,7 +784,7 @@ final class CodexUsageStore: @unchecked Sendable {
 
         guard let cache,
               cache.signature == signature,
-              now.timeIntervalSince(cache.createdAt) < 120 else {
+              now.timeIntervalSince(cache.createdAt) < UsageScanPolicy.periodUsageCacheTTL else {
             return nil
         }
         return cache.usage
@@ -932,10 +943,10 @@ final class CodexUsageStore: @unchecked Sendable {
             shift 3
             {
               for path in "$@"; do
-                /usr/bin/tail -c "$bytes" "$path"
+                /usr/bin/tail -c "$bytes" -- "$path"
                 printf '\\n'
               done
-            } | "$rg" --fixed-strings --no-heading --color never '"token_count"' > "$out"
+            } | "$rg" --fixed-strings --no-heading --color never -- '"token_count"' > "$out"
             status=$?
             if [ "$status" -eq 1 ]; then
               exit 0
@@ -945,7 +956,7 @@ final class CodexUsageStore: @unchecked Sendable {
             "codex-notch-token-search",
             executable,
             outputURL.path,
-            String(periodUsageTailLineLimit * 1_300)
+            String(UsageScanPolicy.periodUsageTailLineLimit * Int(UsageScanPolicy.estimatedTokenLineBytes))
         ] + paths
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -962,10 +973,10 @@ final class CodexUsageStore: @unchecked Sendable {
             completed.signal()
         }
 
-        if completed.wait(timeout: .now() + .seconds(12)) == .timedOut {
-            process.terminate()
+        if completed.wait(timeout: .now() + UsageScanPolicy.ripgrepTimeout) == .timedOut {
+            Shell.terminateProcessTree(rootPID: process.processIdentifier, signal: SIGTERM)
             if completed.wait(timeout: .now() + .milliseconds(200)) == .timedOut {
-                kill(process.processIdentifier, SIGKILL)
+                Shell.terminateProcessTree(rootPID: process.processIdentifier, signal: SIGKILL)
                 _ = completed.wait(timeout: .now() + .milliseconds(300))
             }
             return nil
@@ -1073,7 +1084,7 @@ final class CodexUsageStore: @unchecked Sendable {
         }
 
         let nowEpoch = Int(now.timeIntervalSince1970)
-        guard nowEpoch - fallbackUpdatedAt < runningActivityWindow else {
+        guard nowEpoch - fallbackUpdatedAt < UsageScanPolicy.runningActivityWindow else {
             return false
         }
 
@@ -1102,7 +1113,7 @@ final class CodexUsageStore: @unchecked Sendable {
         if let latestActivity {
             let done = latestDone ?? .distantPast
             if latestActivity > done,
-               now.timeIntervalSince(latestActivity) < TimeInterval(runningActivityWindow) {
+               now.timeIntervalSince(latestActivity) < TimeInterval(UsageScanPolicy.runningActivityWindow) {
                 return true
             }
             if now.timeIntervalSince(latestActivity) < 12,
@@ -1298,6 +1309,7 @@ final class CodexUsageStore: @unchecked Sendable {
         guard let scan = scanSessionTokenTotal(
             from: path,
             startingAt: scanStart,
+            endingAt: signature.size,
             initialTotal: initialTotal,
             initialPendingLine: initialPendingLine,
             hadTokenEvent: hadTokenEvent
@@ -1308,7 +1320,7 @@ final class CodexUsageStore: @unchecked Sendable {
         cacheLock.lock()
         sessionTokenTotalCache[path] = SessionTokenTotalCache(
             signature: signature,
-            bytesScanned: signature.size,
+            bytesScanned: scan.bytesScanned,
             tokens: scan.tokens,
             pendingLine: scan.pendingLine,
             foundTokenEvent: scan.foundTokenEvent
@@ -1320,6 +1332,7 @@ final class CodexUsageStore: @unchecked Sendable {
     private func scanSessionTokenTotal(
         from path: String,
         startingAt: UInt64 = 0,
+        endingAt: UInt64,
         initialTotal: Int = 0,
         initialPendingLine: String = "",
         hadTokenEvent: Bool = false
@@ -1332,6 +1345,10 @@ final class CodexUsageStore: @unchecked Sendable {
             try? handle.close()
         }
 
+        guard startingAt <= endingAt else {
+            return nil
+        }
+
         do {
             try handle.seek(toOffset: startingAt)
         } catch {
@@ -1341,17 +1358,21 @@ final class CodexUsageStore: @unchecked Sendable {
         var pending = initialPendingLine
         var total = initialTotal
         var foundTokenEvent = hadTokenEvent
+        var bytesScanned = startingAt
 
-        while true {
+        while bytesScanned < endingAt {
             let data: Data
             do {
-                data = try handle.read(upToCount: 1024 * 1024) ?? Data()
+                let remaining = endingAt - bytesScanned
+                let chunkSize = Int(min(UInt64(1024 * 1024), remaining))
+                data = try handle.read(upToCount: chunkSize) ?? Data()
             } catch {
                 return nil
             }
             if data.isEmpty {
                 break
             }
+            bytesScanned += UInt64(data.count)
 
             pending += String(decoding: data, as: UTF8.self)
             let lines = pending.split(separator: "\n", omittingEmptySubsequences: false)
@@ -1377,6 +1398,7 @@ final class CodexUsageStore: @unchecked Sendable {
         }
 
         return SessionTokenScanResult(
+            bytesScanned: bytesScanned,
             tokens: total,
             pendingLine: pending,
             foundTokenEvent: foundTokenEvent
@@ -1692,9 +1714,9 @@ final class CodexUsageStore: @unchecked Sendable {
 
         if let cached {
             switch cached.state {
-            case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < 30:
+            case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerSuccessCacheTTL:
                 return snapshot
-            case .failure where now.timeIntervalSince(cached.createdAt) < 45:
+            case .failure where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerFailureCacheTTL:
                 return nil
             default:
                 break
@@ -1823,7 +1845,7 @@ final class CodexUsageStore: @unchecked Sendable {
             }
 
             let fileSize = try handle.seekToEnd()
-            let bytesPerLine: UInt64 = 1_300
+            let bytesPerLine = UsageScanPolicy.estimatedTokenLineBytes
             let maxBytes = min(fileSize, UInt64(lineLimit) * bytesPerLine)
             try handle.seek(toOffset: fileSize - maxBytes)
             let data = try handle.readToEnd() ?? Data()
@@ -1932,7 +1954,7 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func makeUsageSignature(for rolloutPaths: [String]) -> StoreSignature? {
-        let databasePaths = sqliteFileSet(stateDatabase) + [sessionIndexPath]
+        let databasePaths = sqliteFileSet(stateDatabase) + sqliteFileSet(logsDatabase) + [sessionIndexPath]
         let paths = databasePaths + rolloutPaths.filter { !$0.isEmpty }
         guard !paths.isEmpty else {
             return nil
@@ -2023,9 +2045,18 @@ private struct SessionTokenTotalCache {
 }
 
 private struct SessionTokenScanResult {
+    let bytesScanned: UInt64
     let tokens: Int
     let pendingLine: String
     let foundTokenEvent: Bool
+}
+
+private struct RecentSessionCandidate {
+    let path: String
+    let sessionID: String
+    let modifiedAt: Date
+    let updatedAt: Int
+    let databaseTokens: Int
 }
 
 private struct AppServerRateLimitCache {

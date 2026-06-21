@@ -80,6 +80,22 @@ struct BalanceThresholdConfiguration: Codable, Equatable {
         }
         return .healthy
     }
+
+    var summaryText: String {
+        let thresholds = normalized
+        var parts: [String] = []
+        if let warningThreshold = thresholds.warningThreshold {
+            parts.append("提醒 \(Self.thresholdText(warningThreshold))")
+        }
+        if let alertThreshold = thresholds.alertThreshold {
+            parts.append("告警 \(Self.thresholdText(alertThreshold))")
+        }
+        return parts.isEmpty ? "不提醒" : parts.joined(separator: " · ")
+    }
+
+    private static func thresholdText(_ value: Double) -> String {
+        String(format: "%.2f", value)
+    }
 }
 
 struct BalanceAccountConfiguration: Identifiable, Codable, Equatable {
@@ -166,6 +182,11 @@ struct BalanceAccountConfiguration: Identifiable, Codable, Equatable {
                 warningThreshold: warningThreshold,
                 alertThreshold: alertThreshold
             ).normalized
+    }
+
+    func thresholdSummary(defaults: BalanceThresholdConfiguration) -> String {
+        let prefix = usesDefaultThresholds ? "默认" : "自定义"
+        return "\(prefix)：\(effectiveThresholds(defaults: defaults).summaryText)"
     }
 }
 

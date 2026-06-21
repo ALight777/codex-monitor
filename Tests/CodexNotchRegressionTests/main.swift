@@ -263,6 +263,28 @@ runner.check(defaultThresholds.normalized.alertThreshold == 30, "already ordered
 let swappedThresholds = BalanceThresholdConfiguration(warningThreshold: 25, alertThreshold: 50).normalized
 runner.check(swappedThresholds.warningThreshold == 50, "normalized thresholds should keep warning at the larger value")
 runner.check(swappedThresholds.alertThreshold == 25, "normalized thresholds should keep alert at the smaller value")
+runner.check(BalanceThresholdConfiguration().summaryText == "不提醒", "empty threshold summary should be explicit")
+runner.check(defaultThresholds.summaryText == "提醒 100.00 · 告警 30.00", "threshold summary should show warning and alert values")
+let defaultThresholdAccount = BalanceAccountConfiguration(
+    source: .newAPI,
+    username: "owner",
+    usesDefaultThresholds: true
+)
+runner.check(
+    defaultThresholdAccount.thresholdSummary(defaults: defaultThresholds) == "默认：提醒 100.00 · 告警 30.00",
+    "default threshold account summary should reference default thresholds"
+)
+let customThresholdAccount = BalanceAccountConfiguration(
+    source: .newAPI,
+    username: "owner",
+    usesDefaultThresholds: false,
+    warningThreshold: 20,
+    alertThreshold: 5
+)
+runner.check(
+    customThresholdAccount.thresholdSummary(defaults: defaultThresholds) == "自定义：提醒 20.00 · 告警 5.00",
+    "custom threshold account summary should show account thresholds"
+)
 
 let newAPI2FAResponse = """
 {

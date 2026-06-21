@@ -66,6 +66,27 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
             "启动与外观"
         }
     }
+
+    var iconName: String {
+        switch self {
+        case .codex:
+            "circle.grid.2x2.fill"
+        case .remoteCodex:
+            "network"
+        case .newAPI:
+            "creditcard.fill"
+        case .subAPI:
+            "person.2.fill"
+        case .launch:
+            "gearshape.fill"
+        }
+    }
+}
+
+private struct AccountDeleteCandidate {
+    let source: BalanceMonitorSource
+    let id: String
+    let label: String
 }
 
 private struct SettingsDraft: Equatable {
@@ -172,24 +193,54 @@ struct SettingsView: View {
     @State private var draft = SettingsDraft()
     @State private var selectedPreset: RefreshPreset = .balanced
     @State private var selectedTab: SettingsTab = .codex
+    @State private var showsAccountEditor = false
+    @State private var accountEditorSource: BalanceMonitorSource?
+    @State private var accountEditorID: String?
+    @State private var accountEditorDraft = BalanceAccountConfiguration(source: .newAPI)
+    @State private var deleteCandidate: AccountDeleteCandidate?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            header
+        HStack(spacing: 0) {
+            sidebar
 
-            tabPicker
+            Divider()
 
-            Form {
-                tabContent
+            VStack(alignment: .leading, spacing: 16) {
+                header
+
+                Form {
+                    tabContent
+                }
+                .formStyle(.grouped)
+
+                footer
             }
-            .formStyle(.grouped)
-
-            footer
+            .padding(20)
+            .frame(width: 710)
         }
-        .padding(20)
-        .frame(width: 500)
+        .frame(width: 900)
+        .frame(minHeight: 660)
         .onAppear {
             reloadDraft()
+        }
+        .sheet(isPresented: $showsAccountEditor) {
+            accountEditorSheet
+        }
+        .alert(
+            "删除账号？",
+            isPresented: Binding(
+                get: { deleteCandidate != nil },
+                set: { if !$0 { deleteCandidate = nil } }
+            )
+        ) {
+            Button("删除", role: .destructive) {
+                deletePendingAccount()
+            }
+            Button("取消", role: .cancel) {
+                deleteCandidate = nil
+            }
+        } message: {
+            Text(deleteCandidate.map { "确定删除「\($0.label)」吗？删除后需要重新添加账号和密码。" } ?? "")
         }
     }
 
@@ -226,13 +277,45 @@ struct SettingsView: View {
         }
     }
 
-    private var tabPicker: some View {
-        Picker("设置分组", selection: $selectedTab) {
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("设置")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+
             ForEach(SettingsTab.allCases) { tab in
-                Text(tab.title).tag(tab)
+                Button {
+                    selectedTab = tab
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: tab.iconName)
+                            .font(.system(size: 12, weight: .bold))
+                            .frame(width: 16)
+                        Text(tab.title)
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                    }
+                    .foregroundStyle(selectedTab == tab ? .primary : .secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        selectedTab == tab ? Color.primary.opacity(0.10) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
+
+            Spacer()
         }
-        .pickerStyle(.segmented)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 20)
+        .frame(width: 190)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color.secondary.opacity(0.055))
     }
 
     @ViewBuilder
@@ -517,111 +600,254 @@ struct SettingsView: View {
         }
 
         Section("\(title) 账户") {
-            if accounts.wrappedValue.isEmpty {
-                Text("还没有配置账号。")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            ForEach(accounts.wrappedValue) { rowAccount in
-                balanceAccountEditor(
-                    source: source,
-                    account: Binding(
-                        get: {
-                            accountBindingValue(id: rowAccount.id, fallback: rowAccount, accounts: accounts)
-                        },
-                        set: { newValue in
-                            updateAccount(id: rowAccount.id, newValue: newValue, source: source, accounts: accounts)
-                        }
-                    ),
-                    onDelete: {
-                        accounts.wrappedValue.removeAll { $0.id == rowAccount.id }
-                    }
-                )
-                .disabled(!enabled.wrappedValue)
-            }
-
-            Button {
-                accounts.wrappedValue.append(
-                    BalanceAccountConfiguration(
-                        source: source,
-                        label: "\(title) \(accounts.wrappedValue.count + 1)",
-                        requestTimeout: 6
-                    )
-                )
-            } label: {
-                Label("添加账号", systemImage: "plus.circle.fill")
-            }
-            .disabled(!enabled.wrappedValue)
+            accountList(
+                source: source,
+                accounts: accounts,
+                defaultThresholds: defaultThresholds.wrappedValue,
+                enabled: enabled.wrappedValue
+            )
         }
     }
 
-    private func balanceAccountEditor(
+    private func accountList(
         source: BalanceMonitorSource,
-        account: Binding<BalanceAccountConfiguration>,
-        onDelete: @escaping () -> Void
+        accounts: Binding<[BalanceAccountConfiguration]>,
+        defaultThresholds: BalanceThresholdConfiguration,
+        enabled: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Toggle(isOn: account.enabled) {
-                    HelpLabel(title: account.wrappedValue.displayLabel, help: "关闭后这个账号不会参与刷新、详情页展示或刘海提醒。")
-                }
+                Text("账号列表")
+                    .font(.system(size: 12, weight: .bold))
                 Spacer()
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash.fill")
+                Button {
+                    startAddingAccount(source: source)
+                } label: {
+                    Label("添加账号", systemImage: "plus.circle.fill")
                 }
-                .buttonStyle(.borderless)
-                .help("删除账号")
+                .disabled(!enabled)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
-            labeledTextField(
-                "显示名称",
-                text: account.label,
-                placeholder: "\(source.title) 账号",
-                help: "只用于本机显示，留空时会使用登录用户名。"
-            )
+            Divider()
 
-            labeledTextField(
-                "面板地址",
-                text: account.panelURL,
-                placeholder: "\(source.title) 面板地址",
-                help: "填写这个账号所在面板的地址。会自动归一化到协议、域名和端口。"
-            )
+            accountListHeader
 
-            labeledTextField(
-                balanceUsernameTitle(source: source),
-                text: account.username,
-                placeholder: balanceUsernamePlaceholder(source: source),
-                help: balanceUsernameHelp(source: source)
-            )
-
-            labeledSecureField(
-                balanceCredentialTitle(source: source),
-                text: account.secret,
-                placeholder: balanceCredentialPlaceholder(source: source),
-                help: balanceCredentialHelp(source: source)
-            )
-
-            intervalStepper("请求超时", value: account.requestTimeout, range: 3...30, help: "\(source.title) 这个账号单个接口请求等待的最长秒数。")
-
-            Toggle(isOn: account.allowInsecureTLS) {
-                HelpLabel(title: "允许不安全 TLS", help: "允许连接自签名或证书不完整的测试面板。请只在你控制的面板上使用。")
-            }
-
-            Toggle(isOn: account.usesDefaultThresholds) {
-                HelpLabel(title: "使用默认阈值", help: "开启后使用本页上方的默认提醒/告警阈值；关闭后可按这个账号单独设置。")
-            }
-
-            if !account.wrappedValue.usesDefaultThresholds {
-                thresholdsEditor(
-                    title: "账号阈值",
-                    warning: account.warningThreshold,
-                    alert: account.alertThreshold,
-                    help: "用于覆盖默认阈值。适合消费量差异较大的账号单独设置。"
-                )
+            if accounts.wrappedValue.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("还没有配置账号")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("点击右上角“添加账号”配置面板地址和认证信息。")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 30)
+            } else {
+                ForEach(accounts.wrappedValue) { account in
+                    Divider()
+                    accountListRow(
+                        account: account,
+                        source: source,
+                        defaults: defaultThresholds,
+                        enabled: enabled,
+                        onToggle: {
+                            toggleAccountEnabled(id: account.id, source: source)
+                        },
+                        onEdit: {
+                            startEditingAccount(source: source, account: account)
+                        },
+                        onDelete: {
+                            deleteCandidate = AccountDeleteCandidate(
+                                source: source,
+                                id: account.id,
+                                label: account.displayLabel
+                            )
+                        }
+                    )
+                }
             }
         }
+        .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+        .disabled(!enabled)
+    }
+
+    private var accountListHeader: some View {
+        HStack(spacing: 10) {
+            Text("名称")
+                .frame(width: 92, alignment: .leading)
+            Text("面板")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("账号")
+                .frame(width: 104, alignment: .leading)
+            Text("阈值")
+                .frame(width: 132, alignment: .leading)
+            Text("操作")
+                .frame(width: 118, alignment: .trailing)
+        }
+        .font(.system(size: 10.5, weight: .bold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private func accountListRow(
+        account: BalanceAccountConfiguration,
+        source: BalanceMonitorSource,
+        defaults: BalanceThresholdConfiguration,
+        enabled: Bool,
+        onToggle: @escaping () -> Void,
+        onEdit: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(account.displayLabel)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .lineLimit(1)
+                Text(account.enabled ? "已启用" : "已停用")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(account.enabled ? Color.green : .secondary)
+            }
+            .frame(width: 92, alignment: .leading)
+
+            Text(account.panelURL.isEmpty ? "未填写" : account.panelURL)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(account.panelURL.isEmpty ? .secondary : .primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(account.username.isEmpty ? "未填写" : account.username)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(account.username.isEmpty ? .secondary : .primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 104, alignment: .leading)
+
+            Text(account.thresholdSummary(defaults: defaults))
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .frame(width: 132, alignment: .leading)
+
+            HStack(spacing: 5) {
+                Button(account.enabled ? "停用" : "启用", action: onToggle)
+                Button("修改", action: onEdit)
+                Button("删除", role: .destructive, action: onDelete)
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 10.5, weight: .semibold))
+            .frame(width: 118, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .opacity(enabled ? 1 : 0.55)
+    }
+
+    @ViewBuilder
+    private var accountEditorSheet: some View {
+        if let source = accountEditorSource {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(accountEditorID == nil ? "添加 \(source.title) 账号" : "修改 \(source.title) 账号")
+                            .font(.system(size: 17, weight: .bold))
+                        Text("账号配置只会在点击“保存账号”后写入当前设置草稿。")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                Form {
+                    Section("基础信息") {
+                        Toggle(isOn: $accountEditorDraft.enabled) {
+                            HelpLabel(title: "启用账号", help: "关闭后这个账号不会参与刷新、详情页展示或刘海提醒。")
+                        }
+
+                        labeledTextField(
+                            "显示名称",
+                            text: $accountEditorDraft.label,
+                            placeholder: "\(source.title) 账号",
+                            help: "只用于本机显示，留空时会使用登录用户名。"
+                        )
+
+                        labeledTextField(
+                            "面板地址",
+                            text: $accountEditorDraft.panelURL,
+                            placeholder: "\(source.title) 面板地址",
+                            help: "填写这个账号所在面板的地址。会自动归一化到协议、域名和端口。"
+                        )
+
+                        labeledTextField(
+                            balanceUsernameTitle(source: source),
+                            text: $accountEditorDraft.username,
+                            placeholder: balanceUsernamePlaceholder(source: source),
+                            help: balanceUsernameHelp(source: source)
+                        )
+
+                        labeledSecureField(
+                            balanceCredentialTitle(source: source),
+                            text: $accountEditorDraft.secret,
+                            placeholder: balanceCredentialPlaceholder(source: source),
+                            help: balanceCredentialHelp(source: source)
+                        )
+                    }
+
+                    Section("连接与阈值") {
+                        intervalStepper(
+                            "请求超时",
+                            value: $accountEditorDraft.requestTimeout,
+                            range: 3...30,
+                            help: "\(source.title) 这个账号单个接口请求等待的最长秒数。"
+                        )
+
+                        Toggle(isOn: $accountEditorDraft.allowInsecureTLS) {
+                            HelpLabel(title: "允许不安全 TLS", help: "允许连接自签名或证书不完整的测试面板。请只在你控制的面板上使用。")
+                        }
+
+                        Toggle(isOn: $accountEditorDraft.usesDefaultThresholds) {
+                            HelpLabel(title: "使用默认阈值", help: "开启后使用本页上方的默认提醒/告警阈值；关闭后可按这个账号单独设置。")
+                        }
+
+                        if !accountEditorDraft.usesDefaultThresholds {
+                            thresholdsEditor(
+                                title: "账号阈值",
+                                warning: $accountEditorDraft.warningThreshold,
+                                alert: $accountEditorDraft.alertThreshold,
+                                help: "用于覆盖默认阈值。适合消费量差异较大的账号单独设置。"
+                            )
+                        }
+                    }
+                }
+                .formStyle(.grouped)
+
+                HStack {
+                    Button("取消") {
+                        closeAccountEditor()
+                    }
+                    Spacer()
+                    Button("保存账号") {
+                        saveAccountEditor()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(20)
+            .frame(width: 560)
+            .frame(minHeight: 560)
+        } else {
+            EmptyView()
+        }
     }
 
     private func thresholdsEditor(
@@ -632,20 +858,22 @@ struct SettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HelpLabel(title: title, help: help)
-            HStack(spacing: 10) {
-                optionalDoubleField("提醒阈值", value: warning, help: "余额低于这个值时显示黄灯提醒。")
-                optionalDoubleField("告警阈值", value: alert, help: "余额低于这个值时显示红灯告警。通常应小于提醒阈值。")
-            }
+            thresholdFieldRow("提醒阈值", value: warning, help: "余额低于这个值时显示黄灯提醒。")
+            thresholdFieldRow("告警阈值", value: alert, help: "余额低于这个值时显示红灯告警。通常应小于提醒阈值。")
+            Text("留空表示不启用对应提醒。账号自定义阈值会覆盖默认阈值。")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.secondary)
         }
     }
 
-    private func optionalDoubleField(
+    private func thresholdFieldRow(
         _ title: String,
         value: Binding<Double?>,
         help: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 12) {
             HelpLabel(title: title, help: help)
+            Spacer()
             TextField(
                 "不设置",
                 text: Binding(
@@ -663,7 +891,7 @@ struct SettingsView: View {
             )
             .textFieldStyle(.roundedBorder)
             .lineLimit(1)
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .frame(width: 170, alignment: .trailing)
         }
     }
 
@@ -675,6 +903,77 @@ struct SettingsView: View {
             copy.secretReadFailed = false
         }
         return copy
+    }
+
+    private func accountBinding(for source: BalanceMonitorSource) -> Binding<[BalanceAccountConfiguration]> {
+        switch source {
+        case .newAPI:
+            return $draft.newAPIAccounts
+        case .subAPI:
+            return $draft.subAPIAccounts
+        }
+    }
+
+    private func startAddingAccount(source: BalanceMonitorSource) {
+        let count = accountBinding(for: source).wrappedValue.count
+        accountEditorSource = source
+        accountEditorID = nil
+        accountEditorDraft = BalanceAccountConfiguration(
+            source: source,
+            label: "\(source.title) \(count + 1)",
+            requestTimeout: 6
+        )
+        showsAccountEditor = true
+    }
+
+    private func startEditingAccount(source: BalanceMonitorSource, account: BalanceAccountConfiguration) {
+        accountEditorSource = source
+        accountEditorID = account.id
+        accountEditorDraft = account
+        showsAccountEditor = true
+    }
+
+    private func closeAccountEditor() {
+        showsAccountEditor = false
+        accountEditorSource = nil
+        accountEditorID = nil
+        accountEditorDraft = BalanceAccountConfiguration(source: .newAPI)
+    }
+
+    private func saveAccountEditor() {
+        guard let source = accountEditorSource else {
+            closeAccountEditor()
+            return
+        }
+        let accounts = accountBinding(for: source)
+        if let accountEditorID {
+            updateAccount(
+                id: accountEditorID,
+                newValue: accountEditorDraft,
+                source: source,
+                accounts: accounts
+            )
+        } else {
+            accounts.wrappedValue.append(normalizedAccount(accountEditorDraft, source: source))
+        }
+        closeAccountEditor()
+    }
+
+    private func toggleAccountEnabled(id: String, source: BalanceMonitorSource) {
+        let accounts = accountBinding(for: source)
+        guard let index = accounts.wrappedValue.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        accounts.wrappedValue[index].enabled.toggle()
+    }
+
+    private func deletePendingAccount() {
+        guard let candidate = deleteCandidate else {
+            return
+        }
+        let accounts = accountBinding(for: candidate.source)
+        accounts.wrappedValue.removeAll { $0.id == candidate.id }
+        deleteCandidate = nil
     }
 
     private func accountBindingValue(

@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="codex监测"
+PACKAGE_NAME="codex-monitor"
 APP_VERSION="0.1.0"
 BUNDLE_ID="com.alight.codexnotch"
 BUILD_DIR="$ROOT_DIR/.build/release"
@@ -67,8 +68,8 @@ elif [[ -n "$ARCHS" ]]; then
 else
   DMG_ARCH="$(uname -m)"
 fi
-DMG_PATH="$DIST_DIR/$APP_NAME-$APP_VERSION-$DMG_ARCH.dmg"
-find "$DIST_DIR" -maxdepth 1 -type f \( -name "$APP_NAME.dmg" -o -name "$APP_NAME-*.dmg" \) -delete
+DMG_PATH="$DIST_DIR/$PACKAGE_NAME-$APP_VERSION-$DMG_ARCH.dmg"
+find "$DIST_DIR" -maxdepth 1 -type f \( -name "$APP_NAME.dmg" -o -name "$APP_NAME-*.dmg" -o -name "$PACKAGE_NAME-*.dmg" \) -delete
 
 rm -rf "$DMG_STAGE_DIR"
 mkdir -p "$DMG_STAGE_DIR"

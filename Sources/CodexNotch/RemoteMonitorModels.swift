@@ -445,19 +445,14 @@ struct RemoteQuotaWindow: Identifiable, Equatable {
 
     var isPrimaryDisplayWindow: Bool {
         let label = shortLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        if label == "5h" || label == "7d" {
-            return true
-        }
-        if label.hasSuffix(" 5h") || label.hasSuffix(" 7d") {
-            return true
-        }
-
         let compactLabel = label
             .replacingOccurrences(of: " ", with: "")
             .lowercased()
-        return compactLabel == "5小时"
+        return compactLabel == "5h"
+            || compactLabel == "5小时"
             || compactLabel == "5hr"
             || compactLabel == "5hrs"
+            || compactLabel == "7d"
             || compactLabel == "7天"
             || compactLabel == "1周"
             || compactLabel == "周额度"

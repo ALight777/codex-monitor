@@ -86,10 +86,12 @@ let proQuotaAccount = remoteAccount(
         RemoteQuotaWindow(id: "primary", shortLabel: "5h", remainingPercent: 98, usedPercent: 2, resetText: nil),
         RemoteQuotaWindow(id: "secondary", shortLabel: "7d", remainingPercent: 60, usedPercent: 40, resetText: nil),
         RemoteQuotaWindow(id: "pro-20x", shortLabel: "Pro 20x", remainingPercent: 100, usedPercent: 0, resetText: nil),
-        RemoteQuotaWindow(id: "pro-5x", shortLabel: "Pro 5x", remainingPercent: 80, usedPercent: 20, resetText: nil)
+        RemoteQuotaWindow(id: "pro-5x", shortLabel: "Pro 5x", remainingPercent: 80, usedPercent: 20, resetText: nil),
+        RemoteQuotaWindow(id: "spark-5h", shortLabel: "GPT-5.3-Codex-Spark 5h", remainingPercent: 100, usedPercent: 0, resetText: nil),
+        RemoteQuotaWindow(id: "spark-7d", shortLabel: "GPT-5.3-Codex-Spark 7d", remainingPercent: 100, usedPercent: 0, resetText: nil)
     ]
 )
-runner.check(proQuotaAccount.displayQuotaWindows.map(\.shortLabel) == ["5h", "7d"], "CLIProxyAPI Pro account detail should only display 5h and 7d quota windows")
+runner.check(proQuotaAccount.displayQuotaWindows.map(\.shortLabel) == ["5h", "7d"], "CLIProxyAPI Pro account detail should only display bare 5h and 7d quota windows")
 runner.check(proQuotaAccount.quotaSummaryText == "5h 98%  7d 60%", "CLIProxyAPI Pro account quota summary should hide extra Pro quota windows")
 
 runner.check(RefreshCadence.pendingSnapshotDelay(for: 2) == 1, "coalesced snapshot refresh should wait at least one second")

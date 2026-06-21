@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 final class CodexUsageStore: @unchecked Sendable {
     private struct SessionLineEvent {
@@ -14,9 +15,15 @@ final class CodexUsageStore: @unchecked Sendable {
     private let logsDatabase: String
     private let sessionIndexPath: String
     private let appServerExecutable = "/Applications/Codex.app/Contents/Resources/codex"
+    private let ripgrepCandidates = [
+        "/opt/homebrew/bin/rg",
+        "/usr/local/bin/rg",
+        "/usr/bin/rg"
+    ]
     private let tokenPattern = /tool_token_count=([0-9]+)/
     private let runningActivityWindow = 180
     private let largeSessionTokenScanLimit: UInt64 = 20 * 1024 * 1024
+    private let periodUsageTailLineLimit = 4_000
     private let terminalEventTypes: Set<String> = [
         "task_complete",
         "task_completed",
@@ -34,6 +41,7 @@ final class CodexUsageStore: @unchecked Sendable {
     private var recentPathsCache: RecentPathsCache?
     private var recentTaskPathsCache: RecentPathsCache?
     private var appServerRateLimitCache: AppServerRateLimitCache?
+    private var periodUsageCache: PeriodUsageCache?
     private var sessionTokenTotalCache: [String: SessionTokenTotalCache] = [:]
 
     init(codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")) {
@@ -147,10 +155,9 @@ final class CodexUsageStore: @unchecked Sendable {
 
     func loadUsageTotals(now: Date = Date()) -> PeriodUsage? {
         let periodThreads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
-        let sessionThreads = loadRecentSessionThreads(
+        let sessionThreads = loadSessionUsageThreads(
             range: .month,
             now: now,
-            includeSubagents: true,
             knownTokens: tokenMap(from: periodThreads)
         )
         let usageThreads = mergeThreadRecords(periodThreads + sessionThreads)
@@ -183,10 +190,9 @@ final class CodexUsageStore: @unchecked Sendable {
     private func loadUsageTotals(now: Date, fallbackThreads: [ThreadRecord]?) -> PeriodUsage? {
         let periodThreads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
         let knownTokens = tokenMap(from: periodThreads + (fallbackThreads ?? []))
-        let sessionThreads = loadRecentSessionThreads(
+        let sessionThreads = loadSessionUsageThreads(
             range: .month,
             now: now,
-            includeSubagents: true,
             knownTokens: knownTokens
         )
         let usageThreads = mergeThreadRecords(periodThreads + sessionThreads + (fallbackThreads ?? []))
@@ -325,6 +331,55 @@ final class CodexUsageStore: @unchecked Sendable {
                 tokensUsed: tokensUsed,
                 model: runtime?.model,
                 reasoningEffort: runtime?.reasoningEffort,
+                rolloutPath: path,
+                updatedAt: updatedAt
+            )
+        }
+    }
+
+    private func loadSessionUsageThreads(
+        range: TaskHistoryRange,
+        now: Date,
+        knownTokens: [String: Int] = [:]
+    ) -> [ThreadRecord] {
+        let since = Int(now.timeIntervalSince1970) - range.seconds
+        let paths = recentTaskSessionPaths(limit: max(range.queryLimit * 3, 80))
+        let pathSessionIDs = paths.compactMap { sessionID(from: $0)?.lowercased() }
+        var resolvedKnownTokens = knownTokens
+        let missingTokenIDs = pathSessionIDs.filter { resolvedKnownTokens[$0] == nil }
+        if !missingTokenIDs.isEmpty {
+            resolvedKnownTokens.merge(loadThreadTokenMap(for: missingTokenIDs), uniquingKeysWith: max)
+        }
+
+        return paths.compactMap { path in
+            guard let sessionID = sessionID(from: path),
+                  let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+                  let modifiedAt = attributes[.modificationDate] as? Date else {
+                return nil
+            }
+
+            let updatedAt = Int(modifiedAt.timeIntervalSince1970)
+            guard updatedAt >= since else {
+                return nil
+            }
+
+            let databaseTokens = resolvedKnownTokens[sessionID.lowercased()] ?? 0
+            let tokensUsed = tokenTotalForPeriodUsage(
+                path: path,
+                databaseTokens: databaseTokens,
+                modifiedAt: modifiedAt,
+                now: now
+            )
+            guard tokensUsed > 0 else {
+                return nil
+            }
+
+            return ThreadRecord(
+                id: sessionID,
+                title: "",
+                tokensUsed: tokensUsed,
+                model: nil,
+                reasoningEffort: nil,
                 rolloutPath: path,
                 updatedAt: updatedAt
             )
@@ -500,6 +555,41 @@ final class CodexUsageStore: @unchecked Sendable {
         return max(databaseTokens, sessionTokenTotal(from: path) ?? 0)
     }
 
+    private func tokenTotalForPeriodUsage(
+        path: String,
+        databaseTokens: Int,
+        modifiedAt: Date,
+        now: Date
+    ) -> Int {
+        guard !path.isEmpty else {
+            return databaseTokens
+        }
+
+        let signature = fileSignature(path)
+        guard signature.exists else {
+            return databaseTokens
+        }
+
+        if databaseTokens > 0, signature.size > largeSessionTokenScanLimit {
+            return databaseTokens
+        }
+
+        let changedRecently = now.timeIntervalSince(modifiedAt) < 10 * 60
+        if changedRecently {
+            return max(databaseTokens, sessionTokenTotal(from: path) ?? 0)
+        }
+
+        if databaseTokens > 0 {
+            return databaseTokens
+        }
+
+        guard signature.size <= 2 * 1024 * 1024 else {
+            return 0
+        }
+
+        return sessionTokenTotal(from: path) ?? 0
+    }
+
     private func tokenMap(from threads: [ThreadRecord]) -> [String: Int] {
         Dictionary(
             threads.map { ($0.id.lowercased(), $0.tokensUsed) },
@@ -653,8 +743,49 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func loadPeriodUsage(now: Date, threads: [ThreadRecord]) throws -> PeriodUsage {
-        let rolloutUsage = loadPeriodUsageFromRollouts(now: now, threads: threads)
+        let rolloutPaths = Array(Set(threads.map(\.rolloutPath)).filter { !$0.isEmpty }).sorted()
+        let signature = makeUsageSignature(for: rolloutPaths)
+        if let signature,
+           let cached = cachedPeriodUsage(now: now, signature: signature) {
+            return cached
+        }
 
+        let rolloutUsage = loadPeriodUsageFromRollouts(now: now, threads: threads)
+        let usage: PeriodUsage
+
+        if rolloutUsage.month > 0 {
+            usage = rolloutUsage
+        } else {
+            usage = try loadPeriodUsageFromLogs(now: now)
+        }
+
+        if let signature {
+            cachePeriodUsage(usage, signature: signature, now: now)
+        }
+
+        return usage
+    }
+
+    private func cachedPeriodUsage(now: Date, signature: StoreSignature) -> PeriodUsage? {
+        cacheLock.lock()
+        let cache = periodUsageCache
+        cacheLock.unlock()
+
+        guard let cache,
+              cache.signature == signature,
+              now.timeIntervalSince(cache.createdAt) < 120 else {
+            return nil
+        }
+        return cache.usage
+    }
+
+    private func cachePeriodUsage(_ usage: PeriodUsage, signature: StoreSignature, now: Date) {
+        cacheLock.lock()
+        periodUsageCache = PeriodUsageCache(createdAt: now, signature: signature, usage: usage)
+        cacheLock.unlock()
+    }
+
+    private func loadPeriodUsageFromLogs(now: Date) throws -> PeriodUsage {
         let oldest = Int(now.timeIntervalSince1970) - (30 * 24 * 60 * 60)
         let query = """
         select ts, feedback_log_body
@@ -687,18 +818,17 @@ final class CodexUsageStore: @unchecked Sendable {
             }
         }
 
-        let logUsage = PeriodUsage(day: day, week: week, month: month)
-        guard rolloutUsage.month > 0 else {
-            return logUsage
-        }
-        return PeriodUsage(
-            day: max(rolloutUsage.day, logUsage.day),
-            week: max(rolloutUsage.week, logUsage.week),
-            month: max(rolloutUsage.month, logUsage.month)
-        )
+        return PeriodUsage(day: day, week: week, month: month)
     }
 
     private func loadPeriodUsageFromRollouts(now: Date, threads: [ThreadRecord]) -> PeriodUsage {
+        let paths = Array(Set(threads.map(\.rolloutPath)).filter {
+            !$0.isEmpty && FileManager.default.fileExists(atPath: $0)
+        }).sorted()
+        if let usage = loadPeriodUsageWithRipgrep(now: now, paths: paths) {
+            return usage
+        }
+
         let dayStart = now.addingTimeInterval(-24 * 60 * 60)
         let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
         let monthStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
@@ -707,29 +837,156 @@ final class CodexUsageStore: @unchecked Sendable {
         var week = 0
         var month = 0
 
-        for path in Set(threads.map(\.rolloutPath)) {
-            guard let output = tokenCountLines(from: path, lineLimit: 8000) else {
-                continue
+        func add(tokens: Int, date: Date) {
+            guard tokens > 0, date >= monthStart else {
+                return
             }
 
-            for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
-                guard line.contains("\"token_count\""),
-                      let event = parseTokenCountEvent(String(line)),
-                      event.date >= monthStart else {
-                    continue
-                }
+            month += tokens
+            if date >= weekStart {
+                week += tokens
+            }
+            if date >= dayStart {
+                day += tokens
+            }
+        }
 
-                month += event.tokens
-                if event.date >= weekStart {
-                    week += event.tokens
-                }
-                if event.date >= dayStart {
-                    day += event.tokens
-                }
+        var recordsByPath: [String: ThreadRecord] = [:]
+        for thread in threads where !thread.rolloutPath.isEmpty {
+            if let existing = recordsByPath[thread.rolloutPath] {
+                recordsByPath[thread.rolloutPath] = mergeThreadRecord(existing, with: thread)
+            } else {
+                recordsByPath[thread.rolloutPath] = thread
+            }
+        }
+
+        for thread in recordsByPath.values {
+            if thread.tokensUsed > 0 {
+                add(
+                    tokens: thread.tokensUsed,
+                    date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
+                )
+                continue
             }
         }
 
         return PeriodUsage(day: day, week: week, month: month)
+    }
+
+    private func loadPeriodUsageWithRipgrep(now: Date, paths: [String]) -> PeriodUsage? {
+        guard let executable = ripgrepExecutable(),
+              !paths.isEmpty else {
+            return nil
+        }
+
+        guard let output = runRipgrepTokenSearch(executable: executable, paths: paths) else {
+            return nil
+        }
+
+        let dayStart = now.addingTimeInterval(-24 * 60 * 60)
+        let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let monthStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
+
+        var day = 0
+        var week = 0
+        var month = 0
+
+        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let jsonStart = rawLine.firstIndex(of: "{") else {
+                continue
+            }
+
+            let line = String(rawLine[jsonStart...])
+            guard let event = parseTokenCountEvent(line),
+                  event.date >= monthStart else {
+                continue
+            }
+
+            month += event.tokens
+            if event.date >= weekStart {
+                week += event.tokens
+            }
+            if event.date >= dayStart {
+                day += event.tokens
+            }
+        }
+
+        return PeriodUsage(day: day, week: week, month: month)
+    }
+
+    private func runRipgrepTokenSearch(executable: String, paths: [String]) -> String? {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-notch-token-lines-\(UUID().uuidString).txt")
+        defer {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [
+            "-c",
+            """
+            rg="$1"
+            out="$2"
+            bytes="$3"
+            shift 3
+            {
+              for path in "$@"; do
+                /usr/bin/tail -c "$bytes" "$path"
+                printf '\\n'
+              done
+            } | "$rg" --fixed-strings --no-heading --color never '"token_count"' > "$out"
+            status=$?
+            if [ "$status" -eq 1 ]; then
+              exit 0
+            fi
+            exit "$status"
+            """,
+            "codex-notch-token-search",
+            executable,
+            outputURL.path,
+            String(periodUsageTailLineLimit * 1_300)
+        ] + paths
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        let completed = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            completed.signal()
+        }
+
+        if completed.wait(timeout: .now() + .seconds(12)) == .timedOut {
+            process.terminate()
+            if completed.wait(timeout: .now() + .milliseconds(200)) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = completed.wait(timeout: .now() + .milliseconds(300))
+            }
+            return nil
+        }
+
+        guard let data = try? Data(contentsOf: outputURL) else {
+            return nil
+        }
+
+        if !data.isEmpty {
+            return String(decoding: data, as: UTF8.self)
+        }
+
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func ripgrepExecutable() -> String? {
+        ripgrepCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     private func loadActiveThreadIDs(now: Date) throws -> Set<String> {
@@ -1435,7 +1692,7 @@ final class CodexUsageStore: @unchecked Sendable {
 
         if let cached {
             switch cached.state {
-            case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < 6:
+            case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < 30:
                 return snapshot
             case .failure where now.timeIntervalSince(cached.createdAt) < 45:
                 return nil
@@ -1583,6 +1840,13 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func parseTokenCountEvent(_ line: String) -> (date: Date, tokens: Int)? {
+        if lineContainsTokenCountPayload(line),
+           let timestamp = fastJSONStringValue(for: "timestamp", in: line),
+           let date = parseTimestamp(timestamp),
+           let tokens = fastLastTokenUsageTotal(in: line) {
+            return (date, tokens)
+        }
+
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let timestamp = object["timestamp"] as? String,
@@ -1598,6 +1862,64 @@ final class CodexUsageStore: @unchecked Sendable {
         return (date, tokens)
     }
 
+    private func lineContainsTokenCountPayload(_ line: String) -> Bool {
+        line.contains(#""type":"token_count""#)
+            || line.contains(#""type": "token_count""#)
+            || line.contains(#""type" : "token_count""#)
+    }
+
+    private func fastLastTokenUsageTotal(in line: String) -> Int? {
+        guard let usageRange = line.range(of: #""last_token_usage""#),
+              let tokenRange = line[usageRange.upperBound...].range(of: #""total_tokens""#),
+              let colonRange = line[tokenRange.upperBound...].range(of: ":") else {
+            return nil
+        }
+
+        var index = colonRange.upperBound
+        while index < line.endIndex, line[index].isWhitespace {
+            index = line.index(after: index)
+        }
+
+        let start = index
+        while index < line.endIndex, line[index].isNumber {
+            index = line.index(after: index)
+        }
+
+        guard start < index else {
+            return nil
+        }
+        return Int(line[start..<index])
+    }
+
+    private func fastJSONStringValue(for key: String, in line: String) -> String? {
+        guard let keyRange = line.range(of: #"""# + key + #"""#),
+              let colonRange = line[keyRange.upperBound...].range(of: ":"),
+              let quoteStart = line[colonRange.upperBound...].firstIndex(of: "\"") else {
+            return nil
+        }
+
+        var index = line.index(after: quoteStart)
+        var value = ""
+        var isEscaped = false
+
+        while index < line.endIndex {
+            let character = line[index]
+            if isEscaped {
+                value.append(character)
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == "\"" {
+                return value
+            } else {
+                value.append(character)
+            }
+            index = line.index(after: index)
+        }
+
+        return nil
+    }
+
     private func parseTimestamp(_ value: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -1607,6 +1929,16 @@ final class CodexUsageStore: @unchecked Sendable {
 
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+
+    private func makeUsageSignature(for rolloutPaths: [String]) -> StoreSignature? {
+        let databasePaths = sqliteFileSet(stateDatabase) + [sessionIndexPath]
+        let paths = databasePaths + rolloutPaths.filter { !$0.isEmpty }
+        guard !paths.isEmpty else {
+            return nil
+        }
+
+        return StoreSignature(files: paths.map(fileSignature).sorted { $0.path < $1.path })
     }
 
     private func makeSignature(for rolloutPaths: [String]) -> StoreSignature? {
@@ -1704,6 +2036,12 @@ private struct AppServerRateLimitCache {
         case success(RateLimitSnapshot)
         case failure
     }
+}
+
+private struct PeriodUsageCache {
+    let createdAt: Date
+    let signature: StoreSignature
+    let usage: PeriodUsage
 }
 
 private struct SessionMetaInfo {

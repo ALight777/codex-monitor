@@ -1845,6 +1845,62 @@ let cachedLocalSnapshot = localStore.loadSnapshot(
 runner.check(cachedLocalSnapshot.tasks.contains { $0.id == parentOnlySessionID && $0.status == .running }, "fast snapshot cache should preserve active parent task ids")
 runner.check(cachedLocalSnapshot.tasks.first { $0.id == parentOnlySessionID }?.activeSubagentCount == 1, "fast snapshot cache should preserve active subagent counts")
 runner.check(localStore.loadUsageTotals(now: now)?.day == 120743379, "session rollout token counts should contribute to local usage totals")
+runner.check(localStore.loadUsageTotals(now: now.addingTimeInterval(1))?.day == 120743379, "unchanged local usage totals should remain stable across cached refreshes")
+
+let largeUsageRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+    .appendingPathComponent("CodexNotchLargeUsage-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: largeUsageRoot, withIntermediateDirectories: true)
+defer {
+    try? FileManager.default.removeItem(at: largeUsageRoot)
+}
+let largeUsageStateDatabase = largeUsageRoot.appendingPathComponent("state_5.sqlite").path
+let largeUsageLogsDatabase = largeUsageRoot.appendingPathComponent("logs_2.sqlite").path
+_ = try Shell.run("/usr/bin/sqlite3", [
+    largeUsageStateDatabase,
+    """
+    create table threads(
+      id text,
+      title text,
+      tokens_used integer,
+      model text,
+      reasoning_effort text,
+      rollout_path text,
+      updated_at integer,
+      archived integer default 0
+    );
+    """
+])
+_ = try Shell.run("/usr/bin/sqlite3", [
+    largeUsageLogsDatabase,
+    """
+    create table logs(
+      thread_id text,
+      ts integer,
+      target text,
+      feedback_log_body text
+    );
+    """
+])
+let largeUsageDirectory = largeUsageRoot.appendingPathComponent("sessions/2026/06/14", isDirectory: true)
+try FileManager.default.createDirectory(at: largeUsageDirectory, withIntermediateDirectories: true)
+let largeUsageSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd4"
+let largeUsagePath = largeUsageDirectory.appendingPathComponent("rollout-2026-06-14T02-20-14-\(largeUsageSessionID).jsonl")
+try Data(repeating: UInt8(ascii: " "), count: 21 * 1024 * 1024).write(to: largeUsagePath)
+if let handle = try? FileHandle(forWritingTo: largeUsagePath) {
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data(("\n" + #"{"timestamp":"\#(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":1}}}}"# + "\n").utf8))
+    try handle.close()
+}
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: largeUsagePath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    largeUsageStateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(largeUsageSessionID)', '大文件统计任务', 777777, 'gpt-5.5', 'high', '\(largeUsagePath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+let largeUsageStore = CodexUsageStore(codexDirectory: largeUsageRoot)
+runner.check(largeUsageStore.loadUsageTotals(now: now)?.day == 1, "large rollout usage totals should use exact token events when fast search is available")
 
 let tokenCacheRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchTokenCache-\(UUID().uuidString)")

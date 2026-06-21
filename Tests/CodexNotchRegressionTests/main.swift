@@ -111,6 +111,9 @@ runner.check(RefreshCadence.pendingSnapshotDelay(for: 2) == 1, "coalesced snapsh
 runner.check(RefreshCadence.pendingSnapshotDelay(for: 6) == 3, "coalesced snapshot refresh should cap short follow-up waits")
 runner.check(RefreshCadence.pendingUsageDelay(for: 30) == 8, "coalesced usage refresh should wait instead of immediately restarting")
 runner.check(RefreshCadence.pendingUsageDelay(for: 300) == 15, "coalesced usage refresh should cap long follow-up waits")
+runner.check(BalanceRefreshCadence.refreshInterval(base: 300, consecutiveFailures: 0) == 300, "healthy balance refresh should use the configured interval")
+runner.check(BalanceRefreshCadence.refreshInterval(base: 300, consecutiveFailures: 1) == 30, "failed balance refresh should retry quickly instead of leaving stale timeout state")
+runner.check(BalanceRefreshCadence.refreshInterval(base: 60, consecutiveFailures: 3) == 30, "repeated balance failures should cap retry interval")
 
 let settingsSuiteName = "CodexNotchRegressionTests-\(UUID().uuidString)"
 let settingsDefaults = runner.require(

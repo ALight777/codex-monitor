@@ -257,6 +257,15 @@ enum RefreshCadence {
     }
 }
 
+enum BalanceRefreshCadence {
+    static func refreshInterval(base: TimeInterval, consecutiveFailures: Int) -> TimeInterval {
+        guard consecutiveFailures > 0 else {
+            return base
+        }
+        return min(30, base)
+    }
+}
+
 struct ThreadRecord: Decodable {
     let id: String
     let title: String

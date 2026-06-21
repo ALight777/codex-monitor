@@ -176,7 +176,10 @@ final class BalanceMonitorViewModel: ObservableObject {
         }
 
         let base = settings.balanceRefreshInterval(for: source)
-        let interval = consecutiveFailures == 0 ? base : min(300, base * Double(consecutiveFailures + 1))
+        let interval = BalanceRefreshCadence.refreshInterval(
+            base: base,
+            consecutiveFailures: consecutiveFailures
+        )
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()

@@ -129,6 +129,12 @@ swift build -c release
 ./scripts/build-app.sh
 ```
 
+DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
+
+```text
+dist/codex监测-0.1.0-arm64.dmg
+```
+
 安装到当前用户的 Applications 目录：
 
 ```bash
@@ -180,7 +186,6 @@ Tests/CodexNotchRegressionTests/ 回归测试
 scripts/build-app.sh             构建 .app 和 .dmg
 scripts/install-user-app.sh      安装到 ~/Applications
 scripts/run-regression-tests.sh  运行回归测试
-docs/superpowers/plans/          重要功能的实现计划
 ```
 
 <a id="english"></a>
@@ -307,6 +312,12 @@ Build a double-clickable `.app` and `.dmg`:
 ./scripts/build-app.sh
 ```
 
+The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
+
+```text
+dist/codex监测-0.1.0-arm64.dmg
+```
+
 Install into the current user's Applications folder:
 
 ```bash
@@ -358,5 +369,4 @@ Tests/CodexNotchRegressionTests/ Regression tests
 scripts/build-app.sh             Build .app and .dmg
 scripts/install-user-app.sh      Install to ~/Applications
 scripts/run-regression-tests.sh  Run regression tests
-docs/superpowers/plans/          Implementation plans for major features
 ```

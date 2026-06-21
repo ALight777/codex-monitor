@@ -3,6 +3,10 @@
 dist/
 .superpowers/
 .DS_Store
+.env
+.env.*
+*.sqlite
+*.sqlite3
 *.dSYM/
 *.log
 DerivedData/

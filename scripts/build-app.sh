@@ -3,12 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="codex监测"
+APP_VERSION="0.1.0"
 BUNDLE_ID="com.alight.codexnotch"
 BUILD_DIR="$ROOT_DIR/.build/release"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 DMG_STAGE_DIR="$DIST_DIR/dmg-stage"
-DMG_PATH="$DIST_DIR/$APP_NAME.dmg"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -42,7 +42,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
@@ -56,6 +56,19 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 codesign --force --deep --sign - "$APP_DIR"
+
+ARCHS="$(lipo -archs "$MACOS_DIR/CodexNotch" 2>/dev/null || true)"
+ARCHS="${ARCHS#"${ARCHS%%[![:space:]]*}"}"
+ARCHS="${ARCHS%"${ARCHS##*[![:space:]]}"}"
+if [[ "$ARCHS" == *"arm64"* && "$ARCHS" == *"x86_64"* ]]; then
+  DMG_ARCH="universal"
+elif [[ -n "$ARCHS" ]]; then
+  DMG_ARCH="${ARCHS// /-}"
+else
+  DMG_ARCH="$(uname -m)"
+fi
+DMG_PATH="$DIST_DIR/$APP_NAME-$APP_VERSION-$DMG_ARCH.dmg"
+find "$DIST_DIR" -maxdepth 1 -type f \( -name "$APP_NAME.dmg" -o -name "$APP_NAME-*.dmg" \) -delete
 
 rm -rf "$DMG_STAGE_DIR"
 mkdir -p "$DMG_STAGE_DIR"

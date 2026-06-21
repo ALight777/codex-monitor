@@ -88,7 +88,8 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         defer {
             session.finishTasksAndInvalidate()
         }
-        try await loginToNewAPI(baseURL: baseURL, session: session)
+        let userID = try await loginToNewAPI(baseURL: baseURL, session: session)
+        let managementHeaders = Self.newAPIManagementHeaders(userID: userID)
 
         let selfEndpoint = baseURL
             .appendingPathComponent("api")
@@ -97,7 +98,7 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         let selfData = try await requestData(
             selfEndpoint,
             method: "GET",
-            headers: ["Accept": "application/json"],
+            headers: managementHeaders,
             session: session,
             timeout: configuration.timeout
         )
@@ -110,7 +111,7 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
                 let channelData = try await requestData(
                     channelEndpoint,
                     method: "GET",
-                    headers: ["Accept": "application/json"],
+                    headers: managementHeaders,
                     session: session,
                     timeout: configuration.timeout
                 )
@@ -160,7 +161,7 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         )
     }
 
-    private func loginToNewAPI(baseURL: URL, session: URLSession) async throws {
+    private func loginToNewAPI(baseURL: URL, session: URLSession) async throws -> String {
         let username = configuration.username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !username.isEmpty else {
             throw BalanceAPIError.missingUsername
@@ -183,7 +184,7 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
             session: session,
             timeout: configuration.timeout
         )
-        try Self.validateNewAPILoginResponse(data)
+        return try Self.validateNewAPILoginResponse(data)
     }
 
     private func makeSession() -> URLSession {
@@ -357,11 +358,24 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         ])
     }
 
-    static func validateNewAPILoginResponse(_ data: Data) throws {
+    static func newAPIManagementHeaders(userID: String) -> [String: String] {
+        [
+            "Accept": "application/json",
+            "New-Api-User": userID
+        ]
+    }
+
+    @discardableResult
+    static func validateNewAPILoginResponse(_ data: Data) throws -> String {
         let envelope = try decodePayload(NewAPILoginData.self, from: data)
         if envelope.requireTwoFactor == true {
             throw BalanceAPIError.loginRequiresTwoFactor
         }
+        guard let userID = envelope.id?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !userID.isEmpty else {
+            throw BalanceAPIError.unsupportedResponse("NewAPI 登录响应缺少用户 ID")
+        }
+        return userID
     }
 
     static func decodeSubAPIUserAccounts(_ data: Data) throws -> [BalanceAccount] {
@@ -415,15 +429,20 @@ private struct NewAPIEnvelope<T: Decodable>: Decodable {
 }
 
 private struct NewAPILoginData: Decodable {
+    let id: String?
     let requireTwoFactor: Bool?
 
     enum CodingKeys: String, CodingKey {
+        case id
+        case userID = "user_id"
+        case userIDCamel = "userId"
         case requireTwoFactor = "require_2fa"
         case requireTwoFactorCamel = "require2FA"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.flexibleString(for: [.id, .userID, .userIDCamel])
         requireTwoFactor = container.flexibleBool(for: [.requireTwoFactor, .requireTwoFactorCamel])
     }
 }

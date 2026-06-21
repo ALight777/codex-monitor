@@ -185,7 +185,11 @@ let newAPILoginResponse = """
   }
 }
 """.data(using: .utf8)!
-try BalanceAPIClient.validateNewAPILoginResponse(newAPILoginResponse)
+let newAPIUserID = try BalanceAPIClient.validateNewAPILoginResponse(newAPILoginResponse)
+runner.check(newAPIUserID == "42", "NewAPI login should return the user id required by management endpoints")
+let newAPIManagementHeaders = BalanceAPIClient.newAPIManagementHeaders(userID: newAPIUserID)
+runner.check(newAPIManagementHeaders["New-Api-User"] == "42", "NewAPI management requests should include the logged-in user id")
+runner.check(newAPIManagementHeaders["Accept"] == "application/json", "NewAPI management requests should accept JSON")
 
 let newAPI2FAResponse = """
 {

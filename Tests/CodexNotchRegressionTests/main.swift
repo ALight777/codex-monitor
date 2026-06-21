@@ -224,6 +224,20 @@ let subAPILoginJSON = runner.require(
 )
 runner.check(subAPILoginJSON["email"] == "user@example.com", "Sub2API login should send the login name as email")
 runner.check(subAPILoginJSON["password"] == "subapi-password", "Sub2API login should send password")
+do {
+    _ = try BalanceAPIClient.subAPILoginBody(
+        for: BalanceAPIConfiguration(
+            panelURL: "https://subapi.example.com",
+            username: "test",
+            secret: "subapi-password",
+            timeout: 6,
+            allowInsecureTLS: false
+        )
+    )
+    runner.check(false, "Sub2API login should reject non-email login names before sending a request")
+} catch {
+    runner.check(error.localizedDescription.contains("邮箱"), "Sub2API non-email login names should show a clear email error")
+}
 
 let subAPILoginResponse = """
 {
@@ -248,6 +262,16 @@ let subAPIToken = try BalanceAPIClient.validateSubAPILoginResponse(subAPILoginRe
 runner.check(subAPIToken == "subapi-access-token", "Sub2API login should return an access token")
 let subAPIUserHeaders = BalanceAPIClient.bearerHeaders(token: subAPIToken)
 runner.check(subAPIUserHeaders["Authorization"] == "Bearer subapi-access-token", "Sub2API user requests should use bearer token auth")
+let subAPIHTTP400 = """
+{
+  "code": 400,
+  "message": "Invalid request: Key: 'LoginRequest.Email' Error:Field validation for 'Email' failed on the 'email' tag"
+}
+""".data(using: .utf8)!
+runner.check(
+    BalanceAPIClient.httpFailureMessage(statusCode: 400, data: subAPIHTTP400).contains("邮箱格式不正确"),
+    "Sub2API HTTP 400 validation payload should become an actionable email-format message"
+)
 runner.check(SettingsShortcutFilter.shouldSuppressTextInputKey(
     characters: "⌃⌥⌘V",
     hasCommand: true,

@@ -479,7 +479,7 @@ struct SettingsView: View {
     private func balanceMonitorEnableHelp(title: String, source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "启用后详情页会出现 \(title) tab，通过登录接口读取 NewAPI 当前用户额度和渠道余额。"
+            "启用后详情页会出现 \(title) tab，通过登录接口读取 NewAPI 当前用户额度。"
         case .subAPI:
             "启用后详情页会出现 \(title) tab，通过登录接口读取 Sub2API 当前用户余额和平台配额。"
         }
@@ -490,7 +490,7 @@ struct SettingsView: View {
         case .newAPI:
             "用户名"
         case .subAPI:
-            "用户名/邮箱"
+            "登录邮箱"
         }
     }
 
@@ -508,7 +508,7 @@ struct SettingsView: View {
         case .newAPI:
             "用于调用 NewAPI POST /api/user/login 登录接口。"
         case .subAPI:
-            "用于调用 Sub2API POST /api/v1/auth/login 登录接口。Sub2API 当前登录字段名是 email。"
+            "用于调用 Sub2API POST /api/v1/auth/login 登录接口。Sub2API 当前接口要求填写邮箱格式。"
         }
     }
 

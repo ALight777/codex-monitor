@@ -13,7 +13,7 @@ enum BalanceAPIError: LocalizedError {
     case missingKey
     case missingUsername
     case loginRequiresTwoFactor
-    case httpStatus(Int)
+    case httpStatus(Int, String? = nil)
     case emptyResponse
     case unsupportedResponse(String)
 
@@ -27,8 +27,15 @@ enum BalanceAPIError: LocalizedError {
             "缺少登录用户名"
         case .loginRequiresTwoFactor:
             "账号需要二次验证，暂不支持自动登录"
-        case .httpStatus(let status):
-            status == 401 || status == 403 ? "认证信息无效或无权限" : "面板返回 HTTP \(status)"
+        case .httpStatus(let status, let message):
+            if let message,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                status == 401 || status == 403
+                    ? "认证信息无效或无权限：\(message.redactedForDisplay)"
+                    : message.redactedForDisplay
+            } else {
+                status == 401 || status == 403 ? "认证信息无效或无权限" : "面板返回 HTTP \(status)"
+            }
         case .emptyResponse:
             "面板返回空数据"
         case .unsupportedResponse(let message):
@@ -67,7 +74,6 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         }
         let userID = try await loginToNewAPI(baseURL: baseURL, session: session)
         let managementHeaders = Self.newAPIManagementHeaders(userID: userID)
-
         let selfEndpoint = baseURL
             .appendingPathComponent("api")
             .appendingPathComponent("user")
@@ -79,31 +85,13 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
             session: session,
             timeout: configuration.timeout
         )
-        var accounts = [try Self.decodeUserAccount(selfData, source: source)]
-        var partialMessage: String?
-
-        if let channelEndpoint = Self.channelListURL(baseURL: baseURL),
-           !channelEndpoint.absoluteString.isEmpty {
-            do {
-                let channelData = try await requestData(
-                    channelEndpoint,
-                    method: "GET",
-                    headers: managementHeaders,
-                    session: session,
-                    timeout: configuration.timeout
-                )
-                let channels = try Self.decodeChannelAccounts(channelData, source: source)
-                accounts.append(contentsOf: channels)
-            } catch {
-                partialMessage = "渠道列表读取失败：\(Self.localizedMessage(for: error))"
-            }
-        }
+        let accounts = [try Self.decodeUserAccount(selfData, source: source)]
 
         return BalanceMonitorSnapshot(
             source: source,
-            panelState: Self.panelState(for: accounts, partialMessage: partialMessage),
+            panelState: Self.panelState(for: accounts, partialMessage: nil),
             accounts: accounts,
-            message: partialMessage ?? (accounts.isEmpty ? "没有找到 \(source.title) 账户" : nil),
+            message: accounts.isEmpty ? "没有找到 \(source.title) 账户" : nil,
             lastUpdated: Date()
         )
     }
@@ -246,7 +234,10 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         let (data, response) = try await session.data(for: request)
         if let httpResponse = response as? HTTPURLResponse,
            !(200...299).contains(httpResponse.statusCode) {
-            throw BalanceAPIError.httpStatus(httpResponse.statusCode)
+            throw BalanceAPIError.httpStatus(
+                httpResponse.statusCode,
+                Self.httpFailureMessage(statusCode: httpResponse.statusCode, data: data)
+            )
         }
         guard !data.isEmpty else {
             throw BalanceAPIError.emptyResponse
@@ -311,21 +302,6 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         return components.url
     }
 
-    private static func channelListURL(baseURL: URL) -> URL? {
-        var components = URLComponents(
-            url: baseURL
-                .appendingPathComponent("api")
-                .appendingPathComponent("channel")
-                .appendingPathComponent(""),
-            resolvingAgainstBaseURL: false
-        )
-        components?.queryItems = [
-            URLQueryItem(name: "p", value: "1"),
-            URLQueryItem(name: "page_size", value: "100")
-        ]
-        return components?.url
-    }
-
     private static func isLocalHost(_ host: String) -> Bool {
         let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
         return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
@@ -387,6 +363,9 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         guard !username.isEmpty else {
             throw BalanceAPIError.missingUsername
         }
+        guard isValidEmail(username) else {
+            throw BalanceAPIError.unsupportedResponse("Sub2API 登录邮箱格式不正确")
+        }
         guard !password.isEmpty else {
             throw BalanceAPIError.missingKey
         }
@@ -435,6 +414,19 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         throw BalanceAPIError.unsupportedResponse("Sub2API 平台配额格式不兼容")
     }
 
+    static func httpFailureMessage(statusCode: Int, data: Data) -> String {
+        let decoder = JSONDecoder()
+        let message = (try? decoder.decode(HTTPErrorEnvelope.self, from: data).message)
+            ?? (try? decoder.decode(SubAPIEnvelope<EmptyPayload>.self, from: data).message)
+            ?? (String(data: data, encoding: .utf8) ?? "")
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("LoginRequest.Email"),
+           trimmed.contains("email") {
+            return "Sub2API 登录邮箱格式不正确"
+        }
+        return trimmed.isEmpty ? "面板返回 HTTP \(statusCode)" : trimmed
+    }
+
     private static func decodePayload<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         let decoder = JSONDecoder()
         if let envelope = try? decoder.decode(NewAPIEnvelope<T>.self, from: data) {
@@ -467,7 +459,18 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         }
         return error.localizedDescription.redactedForDisplay
     }
+
+    private static func isValidEmail(_ input: String) -> Bool {
+        let pattern = #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#
+        return input.range(of: pattern, options: .regularExpression) != nil
+    }
 }
+
+private struct HTTPErrorEnvelope: Decodable {
+    let message: String?
+}
+
+private struct EmptyPayload: Decodable {}
 
 private struct NewAPIEnvelope<T: Decodable>: Decodable {
     let success: Bool?

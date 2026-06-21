@@ -279,6 +279,9 @@ final class NotchOverlayController {
                 }
                 return nil
             }
+            if self?.shouldSuppressTextInputShortcut(event) == true {
+                return nil
+            }
             return event
         }) {
             eventMonitors.append(localKeyMonitor)
@@ -358,6 +361,21 @@ final class NotchOverlayController {
     private func showSettings() {
         overlayState.isExpanded = false
         settingsController.show()
+    }
+
+    private func shouldSuppressTextInputShortcut(_ event: NSEvent) -> Bool {
+        guard NSApp.keyWindow?.firstResponder is NSTextView else {
+            return false
+        }
+
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return SettingsShortcutFilter.shouldSuppressTextInputKey(
+            characters: event.characters,
+            hasCommand: flags.contains(.command),
+            hasControl: flags.contains(.control),
+            hasOption: flags.contains(.option),
+            hasShift: flags.contains(.shift)
+        )
     }
 
     private var currentDetailHeight: CGFloat {

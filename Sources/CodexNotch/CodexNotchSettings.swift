@@ -26,7 +26,7 @@ private struct SMAppServiceLaunchAtLoginManager: LaunchAtLoginManaging {
 final class CodexNotchSettings: ObservableObject {
     static let cliproxyKeychainService = "com.alight.codexnotch.cliproxy.management-key"
     static let cliproxyKeychainAccount = "default"
-    static let newAPIKeychainService = "com.alight.codexnotch.newapi.management-key"
+    static let newAPIKeychainService = "com.alight.codexnotch.newapi.password"
     static let subAPIKeychainService = "com.alight.codexnotch.subapi.management-key"
 
     private enum Keys {
@@ -48,6 +48,7 @@ final class CodexNotchSettings: ObservableObject {
         static let cliproxyAllowInsecureTLS = "cliproxyAllowInsecureTLS"
         static let newAPIMonitorEnabled = "newAPIMonitorEnabled"
         static let newAPIPanelURL = "newAPIPanelURL"
+        static let newAPIUsername = "newAPIUsername"
         static let newAPIUserID = "newAPIUserID"
         static let newAPIRefreshInterval = "newAPIRefreshInterval"
         static let newAPIRequestTimeout = "newAPIRequestTimeout"
@@ -205,14 +206,14 @@ final class CodexNotchSettings: ObservableObject {
         }
     }
 
-    @Published var newAPIUserID: String {
+    @Published var newAPIUsername: String {
         didSet {
-            let trimmed = newAPIUserID.trimmingCharacters(in: .whitespacesAndNewlines)
-            if newAPIUserID != trimmed {
-                newAPIUserID = trimmed
+            let trimmed = newAPIUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+            if newAPIUsername != trimmed {
+                newAPIUsername = trimmed
                 return
             }
-            defaults.set(trimmed, forKey: Keys.newAPIUserID)
+            defaults.set(trimmed, forKey: Keys.newAPIUsername)
         }
     }
 
@@ -326,8 +327,13 @@ final class CodexNotchSettings: ObservableObject {
         self.newAPIManagementKey = initialNewAPIKey ?? ((try? KeychainStore.read(
             service: Self.newAPIKeychainService,
             account: Self.cliproxyKeychainAccount
-        )) ?? "")
-        self.newAPIUserID = defaults.string(forKey: Keys.newAPIUserID) ?? ""
+        )) ?? ((try? KeychainStore.read(
+            service: "com.alight.codexnotch.newapi.management-key",
+            account: Self.cliproxyKeychainAccount
+        )) ?? ""))
+        self.newAPIUsername = defaults.string(forKey: Keys.newAPIUsername)
+            ?? defaults.string(forKey: Keys.newAPIUserID)
+            ?? ""
         self.newAPIRefreshInterval = Self.clamped(defaults.object(forKey: Keys.newAPIRefreshInterval) as? TimeInterval ?? 300, min: 60, max: 3_600)
         self.newAPIRequestTimeout = Self.clamped(defaults.object(forKey: Keys.newAPIRequestTimeout) as? TimeInterval ?? 6, min: 3, max: 30)
         self.newAPIAllowInsecureTLS = defaults.object(forKey: Keys.newAPIAllowInsecureTLS) as? Bool ?? false
@@ -460,10 +466,10 @@ final class CodexNotchSettings: ObservableObject {
         }
     }
 
-    func balanceNewAPIUserID(for source: BalanceMonitorSource) -> String {
+    func balanceUsername(for source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            newAPIUserID
+            newAPIUsername
         case .subAPI:
             ""
         }

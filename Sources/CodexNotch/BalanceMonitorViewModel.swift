@@ -53,11 +53,11 @@ final class BalanceMonitorViewModel: ObservableObject {
 
         let panelURL = settings.balancePanelURL(for: source)
         let key = settings.balanceManagementKey(for: source)
-        let newAPIUserID = settings.balanceNewAPIUserID(for: source)
+        let username = settings.balanceUsername(for: source)
         let settingsSnapshot = BalanceMonitorSettingsSnapshot(source: source, settings: settings)
         guard !panelURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              source != .newAPI || !newAPIUserID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              source != .newAPI || !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             invalidateInFlightRefresh()
             loadedSettings = nil
             snapshot = .notConfigured(source: source)
@@ -213,8 +213,8 @@ final class BalanceMonitorViewModel: ObservableObject {
     private func currentConfiguration(panelURL: String, key: String) -> BalanceAPIConfiguration {
         BalanceAPIConfiguration(
             panelURL: panelURL,
-            accessToken: key,
-            newAPIUserID: settings.balanceNewAPIUserID(for: source),
+            username: settings.balanceUsername(for: source),
+            secret: key,
             timeout: settings.balanceRequestTimeout(for: source),
             allowInsecureTLS: settings.balanceAllowInsecureTLS(for: source)
         )
@@ -223,10 +223,10 @@ final class BalanceMonitorViewModel: ObservableObject {
     private func currentConfiguration() -> BalanceAPIConfiguration? {
         let panelURL = settings.balancePanelURL(for: source)
         let key = settings.balanceManagementKey(for: source)
-        let newAPIUserID = settings.balanceNewAPIUserID(for: source)
+        let username = settings.balanceUsername(for: source)
         guard !panelURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              source != .newAPI || !newAPIUserID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              source != .newAPI || !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
         return currentConfiguration(panelURL: panelURL, key: key)
@@ -278,7 +278,7 @@ private struct BalanceMonitorSettingsSnapshot: Equatable {
     let enabled: Bool
     let panelURL: String
     let key: String
-    let newAPIUserID: String
+    let username: String
     let refreshInterval: TimeInterval
     let requestTimeout: TimeInterval
     let allowInsecureTLS: Bool
@@ -288,7 +288,7 @@ private struct BalanceMonitorSettingsSnapshot: Equatable {
         enabled = settings.balanceMonitorEnabled(for: source)
         panelURL = settings.balancePanelURL(for: source)
         key = settings.balanceManagementKey(for: source)
-        newAPIUserID = settings.balanceNewAPIUserID(for: source)
+        username = settings.balanceUsername(for: source)
         refreshInterval = settings.balanceRefreshInterval(for: source)
         requestTimeout = settings.balanceRequestTimeout(for: source)
         allowInsecureTLS = settings.balanceAllowInsecureTLS(for: source)

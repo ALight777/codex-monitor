@@ -1,5 +1,41 @@
 import Foundation
 
+enum SettingsShortcutFilter {
+    static func shouldSuppressTextInputKey(
+        characters: String?,
+        hasCommand: Bool,
+        hasControl: Bool,
+        hasOption: Bool,
+        hasShift: Bool
+    ) -> Bool {
+        guard hasCommand || hasControl else {
+            return false
+        }
+
+        let text = characters ?? ""
+        guard !text.isEmpty else {
+            return false
+        }
+
+        if hasCommand,
+           !hasControl,
+           !hasOption,
+           isAllowedCommandShortcut(text, hasShift: hasShift) {
+            return false
+        }
+
+        return hasCommand || text.contains("⌘") || text.contains("⌃") || text.contains("⌥")
+    }
+
+    private static func isAllowedCommandShortcut(_ characters: String, hasShift: Bool) -> Bool {
+        let key = characters.lowercased()
+        if hasShift {
+            return key == "z"
+        }
+        return ["a", "c", "q", "r", "v", "x", "z"].contains(key)
+    }
+}
+
 struct UsageSnapshot: Equatable {
     var primaryPercent: Int?
     var secondaryPercent: Int?
@@ -182,7 +218,7 @@ enum NotchDisplaySource: String, CaseIterable, Identifiable, Equatable {
         case .codex:
             "Codex"
         case .remoteCodex:
-            "远程 Codex"
+            "CLIProxyAPI"
         case .newAPI:
             "NewAPI"
         case .subAPI:

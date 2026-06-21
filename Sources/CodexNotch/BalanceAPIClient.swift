@@ -2,8 +2,8 @@ import Foundation
 
 struct BalanceAPIConfiguration: Equatable {
     let panelURL: String
-    let accessToken: String
-    let newAPIUserID: String
+    let username: String
+    let secret: String
     let timeout: TimeInterval
     let allowInsecureTLS: Bool
 }
@@ -11,7 +11,8 @@ struct BalanceAPIConfiguration: Equatable {
 enum BalanceAPIError: LocalizedError {
     case invalidURL
     case missingKey
-    case missingNewAPIUserID
+    case missingUsername
+    case loginRequiresTwoFactor
     case httpStatus(Int)
     case emptyResponse
     case unsupportedResponse(String)
@@ -22,8 +23,10 @@ enum BalanceAPIError: LocalizedError {
             "面板地址无效"
         case .missingKey:
             "缺少认证信息"
-        case .missingNewAPIUserID:
-            "缺少 NewAPI 用户 ID"
+        case .missingUsername:
+            "缺少 NewAPI 用户名"
+        case .loginRequiresTwoFactor:
+            "NewAPI 账号需要二次验证，暂不支持自动登录"
         case .httpStatus(let status):
             status == 401 || status == 403 ? "认证信息无效或无权限" : "面板返回 HTTP \(status)"
         case .emptyResponse:
@@ -42,15 +45,15 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
     }
 
     func fetchSnapshot(source: BalanceMonitorSource) async throws -> BalanceMonitorSnapshot {
-        let headers = try Self.authenticationHeaders(for: configuration, source: source)
         guard let baseURL = Self.apiBaseURL(from: configuration.panelURL) else {
             throw BalanceAPIError.invalidURL
         }
 
         switch source {
         case .newAPI:
-            return try await fetchNewAPISnapshot(baseURL: baseURL, headers: headers, source: source)
+            return try await fetchNewAPISnapshot(baseURL: baseURL, source: source)
         case .subAPI:
+            let headers = try Self.authenticationHeaders(for: configuration, source: source)
             return try await fetchSubAPISnapshot(baseURL: baseURL, headers: headers, source: source)
         }
     }
@@ -59,20 +62,14 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         for configuration: BalanceAPIConfiguration,
         source: BalanceMonitorSource
     ) throws -> [String: String] {
-        let token = configuration.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = configuration.secret.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
             throw BalanceAPIError.missingKey
         }
 
         switch source {
         case .newAPI:
-            let userID = configuration.newAPIUserID.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !userID.isEmpty else {
-                throw BalanceAPIError.missingNewAPIUserID
-            }
             return [
-                "Authorization": "Bearer \(token)",
-                "New-Api-User": userID,
                 "Accept": "application/json"
             ]
         case .subAPI:
@@ -85,21 +82,38 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
 
     private func fetchNewAPISnapshot(
         baseURL: URL,
-        headers: [String: String],
         source: BalanceMonitorSource
     ) async throws -> BalanceMonitorSnapshot {
+        let session = makeSession()
+        defer {
+            session.finishTasksAndInvalidate()
+        }
+        try await loginToNewAPI(baseURL: baseURL, session: session)
+
         let selfEndpoint = baseURL
             .appendingPathComponent("api")
             .appendingPathComponent("user")
             .appendingPathComponent("self")
-        let selfData = try await authenticatedGET(selfEndpoint, headers: headers, timeout: configuration.timeout)
+        let selfData = try await requestData(
+            selfEndpoint,
+            method: "GET",
+            headers: ["Accept": "application/json"],
+            session: session,
+            timeout: configuration.timeout
+        )
         var accounts = [try Self.decodeUserAccount(selfData, source: source)]
         var partialMessage: String?
 
         if let channelEndpoint = Self.channelListURL(baseURL: baseURL),
            !channelEndpoint.absoluteString.isEmpty {
             do {
-                let channelData = try await authenticatedGET(channelEndpoint, headers: headers, timeout: configuration.timeout)
+                let channelData = try await requestData(
+                    channelEndpoint,
+                    method: "GET",
+                    headers: ["Accept": "application/json"],
+                    session: session,
+                    timeout: configuration.timeout
+                )
                 let channels = try Self.decodeChannelAccounts(channelData, source: source)
                 accounts.append(contentsOf: channels)
             } catch {
@@ -124,7 +138,17 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         guard let usersEndpoint = Self.subAPIUsersURL(baseURL: baseURL) else {
             throw BalanceAPIError.invalidURL
         }
-        let usersData = try await authenticatedGET(usersEndpoint, headers: headers, timeout: configuration.timeout)
+        let session = makeSession()
+        defer {
+            session.finishTasksAndInvalidate()
+        }
+        let usersData = try await requestData(
+            usersEndpoint,
+            method: "GET",
+            headers: headers,
+            session: session,
+            timeout: configuration.timeout
+        )
         let accounts = try Self.decodeSubAPIUserAccounts(usersData)
 
         return BalanceMonitorSnapshot(
@@ -136,28 +160,59 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         )
     }
 
-    private func authenticatedGET(
-        _ endpoint: URL,
-        headers: [String: String],
-        timeout: TimeInterval
-    ) async throws -> Data {
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "GET"
-        request.timeoutInterval = timeout
-        for (name, value) in headers {
-            request.setValue(value, forHTTPHeaderField: name)
+    private func loginToNewAPI(baseURL: URL, session: URLSession) async throws {
+        let username = configuration.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !username.isEmpty else {
+            throw BalanceAPIError.missingUsername
         }
+        guard !configuration.secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw BalanceAPIError.missingKey
+        }
+        let loginEndpoint = baseURL
+            .appendingPathComponent("api")
+            .appendingPathComponent("user")
+            .appendingPathComponent("login")
+        let data = try await requestData(
+            loginEndpoint,
+            method: "POST",
+            body: try Self.newAPILoginBody(for: configuration),
+            headers: [
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            ],
+            session: session,
+            timeout: configuration.timeout
+        )
+        try Self.validateNewAPILoginResponse(data)
+    }
 
+    private func makeSession() -> URLSession {
         let sessionConfig = URLSessionConfiguration.ephemeral
-        sessionConfig.timeoutIntervalForRequest = timeout
-        sessionConfig.timeoutIntervalForResource = timeout
-        let session = URLSession(
+        sessionConfig.timeoutIntervalForRequest = configuration.timeout
+        sessionConfig.timeoutIntervalForResource = configuration.timeout
+        sessionConfig.httpCookieAcceptPolicy = .always
+        sessionConfig.httpShouldSetCookies = true
+        return URLSession(
             configuration: sessionConfig,
             delegate: configuration.allowInsecureTLS ? self : nil,
             delegateQueue: nil
         )
-        defer {
-            session.finishTasksAndInvalidate()
+    }
+
+    private func requestData(
+        _ endpoint: URL,
+        method: String,
+        body: Data? = nil,
+        headers: [String: String],
+        session: URLSession,
+        timeout: TimeInterval
+    ) async throws -> Data {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        request.httpBody = body
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
         }
 
         let (data, response) = try await session.data(for: request)
@@ -287,6 +342,28 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         throw BalanceAPIError.unsupportedResponse("渠道余额格式不兼容")
     }
 
+    static func newAPILoginBody(for configuration: BalanceAPIConfiguration) throws -> Data {
+        let username = configuration.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = configuration.secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !username.isEmpty else {
+            throw BalanceAPIError.missingUsername
+        }
+        guard !password.isEmpty else {
+            throw BalanceAPIError.missingKey
+        }
+        return try JSONSerialization.data(withJSONObject: [
+            "username": username,
+            "password": password
+        ])
+    }
+
+    static func validateNewAPILoginResponse(_ data: Data) throws {
+        let envelope = try decodePayload(NewAPILoginData.self, from: data)
+        if envelope.requireTwoFactor == true {
+            throw BalanceAPIError.loginRequiresTwoFactor
+        }
+    }
+
     static func decodeSubAPIUserAccounts(_ data: Data) throws -> [BalanceAccount] {
         if let list = try? decodeSubAPIPayload(SubAPIUserListData.self, from: data) {
             return list.items.map { $0.balanceAccount() }
@@ -335,6 +412,20 @@ private struct NewAPIEnvelope<T: Decodable>: Decodable {
     let success: Bool?
     let message: String?
     let data: T?
+}
+
+private struct NewAPILoginData: Decodable {
+    let requireTwoFactor: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case requireTwoFactor = "require_2fa"
+        case requireTwoFactorCamel = "require2FA"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        requireTwoFactor = container.flexibleBool(for: [.requireTwoFactor, .requireTwoFactorCamel])
+    }
 }
 
 private struct SubAPIEnvelope<T: Decodable>: Decodable {
@@ -547,6 +638,27 @@ private extension KeyedDecodingContainer {
             if let value = try? decodeIfPresent(String.self, forKey: key),
                let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 return number
+            }
+        }
+        return nil
+    }
+
+    func flexibleBool(for keys: [Key]) -> Bool? {
+        for key in keys {
+            if let value = try? decodeIfPresent(Bool.self, forKey: key) {
+                return value
+            }
+            if let value = try? decodeIfPresent(Int.self, forKey: key) {
+                return value != 0
+            }
+            if let value = try? decodeIfPresent(String.self, forKey: key) {
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if ["true", "yes", "1"].contains(normalized) {
+                    return true
+                }
+                if ["false", "no", "0"].contains(normalized) {
+                    return false
+                }
             }
         }
         return nil

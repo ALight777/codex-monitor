@@ -113,7 +113,7 @@ settings.remoteCodexDataSource = .cliProxyAPI
 settings.notchDisplaySource = .remoteCodex
 settings.newAPIMonitorEnabled = true
 settings.newAPIPanelURL = "https://newapi.example.com"
-settings.newAPIUserID = "42"
+settings.newAPIUsername = "owner"
 settings.newAPIRefreshInterval = 180
 settings.subAPIMonitorEnabled = true
 settings.subAPIPanelURL = "https://subapi.example.com"
@@ -129,7 +129,7 @@ runner.check(reloadedSettings.remoteCodexDataSource == .cliProxyAPI, "remote Cod
 runner.check(reloadedSettings.notchDisplaySource == .remoteCodex, "collapsed notch display source should persist")
 runner.check(reloadedSettings.newAPIMonitorEnabled, "NewAPI monitor enablement should persist")
 runner.check(reloadedSettings.newAPIPanelURL == "https://newapi.example.com", "NewAPI panel URL should persist")
-runner.check(reloadedSettings.newAPIUserID == "42", "NewAPI user ID should persist")
+runner.check(reloadedSettings.newAPIUsername == "owner", "NewAPI username should persist")
 runner.check(reloadedSettings.subAPIMonitorEnabled, "SubAPI monitor enablement should persist")
 runner.check(reloadedSettings.subAPIPanelURL == "https://subapi.example.com", "SubAPI panel URL should persist")
 settingsDefaults.removePersistentDomain(forName: settingsSuiteName)
@@ -158,24 +158,56 @@ let newAPIBaseURL = runner.require(
 )
 runner.check(newAPIBaseURL.absoluteString == "https://newapi.example.com", "NewAPI-compatible base URL should use the origin")
 
-let newAPIHeaders = try BalanceAPIClient.authenticationHeaders(
+let newAPILoginBody = try BalanceAPIClient.newAPILoginBody(
     for: BalanceAPIConfiguration(
         panelURL: "https://newapi.example.com",
-        accessToken: "newapi-token",
-        newAPIUserID: "42",
+        username: "owner",
+        secret: "newapi-password",
         timeout: 6,
         allowInsecureTLS: false
-    ),
-    source: .newAPI
+    )
 )
-runner.check(newAPIHeaders["Authorization"] == "Bearer newapi-token", "NewAPI should use bearer access token authentication")
-runner.check(newAPIHeaders["New-Api-User"] == "42", "NewAPI should include the required user id header")
+let newAPILoginJSON = runner.require(
+    try? JSONSerialization.jsonObject(with: newAPILoginBody) as? [String: String],
+    "NewAPI login body should be JSON"
+)
+runner.check(newAPILoginJSON["username"] == "owner", "NewAPI login should send username")
+runner.check(newAPILoginJSON["password"] == "newapi-password", "NewAPI login should send password")
+
+let newAPILoginResponse = """
+{
+  "success": true,
+  "message": "",
+  "data": {
+    "id": 42,
+    "username": "owner",
+    "require_2fa": false
+  }
+}
+""".data(using: .utf8)!
+try BalanceAPIClient.validateNewAPILoginResponse(newAPILoginResponse)
+
+let newAPI2FAResponse = """
+{
+  "success": true,
+  "message": "需要二次验证",
+  "data": {
+    "require_2fa": true
+  }
+}
+""".data(using: .utf8)!
+do {
+    try BalanceAPIClient.validateNewAPILoginResponse(newAPI2FAResponse)
+    runner.check(false, "NewAPI login should report unsupported two-factor login")
+} catch {
+    runner.check(error.localizedDescription.contains("二次验证"), "NewAPI 2FA login should show a clear message")
+}
 
 let subAPIHeaders = try BalanceAPIClient.authenticationHeaders(
     for: BalanceAPIConfiguration(
         panelURL: "https://subapi.example.com",
-        accessToken: "admin-token",
-        newAPIUserID: "",
+        username: "",
+        secret: "admin-token",
         timeout: 6,
         allowInsecureTLS: false
     ),
@@ -183,6 +215,27 @@ let subAPIHeaders = try BalanceAPIClient.authenticationHeaders(
 )
 runner.check(subAPIHeaders["x-api-key"] == "admin-token", "SubAPI should use x-api-key admin authentication")
 runner.check(subAPIHeaders["Authorization"] == nil, "SubAPI admin API key should not be sent as bearer authorization")
+runner.check(SettingsShortcutFilter.shouldSuppressTextInputKey(
+    characters: "⌃⌥⌘V",
+    hasCommand: true,
+    hasControl: true,
+    hasOption: true,
+    hasShift: false
+), "non-standard command shortcuts should not be inserted into settings text fields")
+runner.check(!SettingsShortcutFilter.shouldSuppressTextInputKey(
+    characters: "v",
+    hasCommand: true,
+    hasControl: false,
+    hasOption: false,
+    hasShift: false
+), "standard paste shortcut should still reach the text field")
+runner.check(!SettingsShortcutFilter.shouldSuppressTextInputKey(
+    characters: "a",
+    hasCommand: false,
+    hasControl: false,
+    hasOption: false,
+    hasShift: false
+), "plain text input should not be suppressed")
 
 let newAPIUserPayload = """
 {

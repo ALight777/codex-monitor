@@ -559,7 +559,7 @@ struct RemoteMonitorSnapshot: Equatable {
     static let notConfigured = RemoteMonitorSnapshot(
         panelState: .notConfigured,
         accounts: [],
-        message: "请在设置中填写远程 Codex 面板地址和管理密钥",
+        message: "请在设置中填写 CLIProxyAPI 面板地址和管理密钥",
         lastUpdated: nil
     )
 

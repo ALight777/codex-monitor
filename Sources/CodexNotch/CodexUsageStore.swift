@@ -16,6 +16,7 @@ final class CodexUsageStore: @unchecked Sendable {
     private let appServerExecutable = "/Applications/Codex.app/Contents/Resources/codex"
     private let tokenPattern = /tool_token_count=([0-9]+)/
     private let runningActivityWindow = 180
+    private let largeSessionTokenScanLimit: UInt64 = 20 * 1024 * 1024
     private let terminalEventTypes: Set<String> = [
         "task_complete",
         "task_completed",
@@ -388,11 +389,21 @@ final class CodexUsageStore: @unchecked Sendable {
     private func loadSubagentUsage(range: TaskHistoryRange, now: Date) -> [String: (count: Int, tokens: Int)] {
         let since = Int(now.timeIntervalSince1970) - range.seconds
         let paths = recentTaskSessionPaths(limit: max(range.queryLimit * 3, 80))
+        let sessionIDsByPath = Dictionary(
+            uniqueKeysWithValues: paths.compactMap { path -> (String, String)? in
+                guard let id = sessionID(from: path)?.lowercased() else {
+                    return nil
+                }
+                return (path, id)
+            }
+        )
+        let knownTokens = loadThreadTokenMap(for: Array(sessionIDsByPath.values))
         var usage: [String: (count: Int, tokens: Int)] = [:]
 
         for path in paths {
             guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
                   let modifiedAt = attributes[.modificationDate] as? Date,
+                  let sessionID = sessionIDsByPath[path],
                   Int(modifiedAt.timeIntervalSince1970) >= since,
                   let meta = sessionMeta(from: path),
                   meta.isSubagent,
@@ -403,14 +414,16 @@ final class CodexUsageStore: @unchecked Sendable {
 
             let key = parentThreadID.lowercased()
             let current = usage[key] ?? (count: 0, tokens: 0)
-            let activeCountIncrement = sessionLooksActive(
+            let isActive = sessionLooksActive(
                 path: path,
                 fallbackUpdatedAt: Int(modifiedAt.timeIntervalSince1970),
                 now: now
-            ) ? 1 : 0
+            )
+            let knownTokenTotal = knownTokens[sessionID] ?? 0
+            let tokenTotal = tokenTotalForFastSnapshot(path: path, databaseTokens: knownTokenTotal, allowInactiveScan: false)
             usage[key] = (
-                count: current.count + activeCountIncrement,
-                tokens: current.tokens + (sessionTokenTotal(from: path) ?? 0)
+                count: current.count + (isActive ? 1 : 0),
+                tokens: current.tokens + tokenTotal
             )
         }
 
@@ -450,7 +463,7 @@ final class CodexUsageStore: @unchecked Sendable {
         guard !thread.rolloutPath.isEmpty else {
             return thread.tokensUsed
         }
-        return max(thread.tokensUsed, sessionTokenTotal(from: thread.rolloutPath) ?? 0)
+        return tokenTotalForFastSnapshot(path: thread.rolloutPath, databaseTokens: thread.tokensUsed)
     }
 
     private func bestTokenCount(
@@ -459,8 +472,32 @@ final class CodexUsageStore: @unchecked Sendable {
         knownTokens: [String: Int]
     ) -> Int {
         let databaseTokens = knownTokens[sessionID.lowercased()] ?? 0
-        let rolloutTokens = sessionTokenTotal(from: path) ?? 0
-        return max(databaseTokens, rolloutTokens)
+        return tokenTotalForFastSnapshot(path: path, databaseTokens: databaseTokens)
+    }
+
+    private func tokenTotalForFastSnapshot(
+        path: String,
+        databaseTokens: Int,
+        allowInactiveScan: Bool = true
+    ) -> Int {
+        guard !path.isEmpty else {
+            return databaseTokens
+        }
+
+        let signature = fileSignature(path)
+        guard signature.exists else {
+            return databaseTokens
+        }
+
+        guard allowInactiveScan || databaseTokens <= 0 else {
+            return databaseTokens
+        }
+
+        if databaseTokens > 0, signature.size > largeSessionTokenScanLimit {
+            return databaseTokens
+        }
+
+        return max(databaseTokens, sessionTokenTotal(from: path) ?? 0)
     }
 
     private func tokenMap(from threads: [ThreadRecord]) -> [String: Int] {

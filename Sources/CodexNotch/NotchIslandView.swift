@@ -12,9 +12,9 @@ private enum DetailPage: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .codex:
-            "本机"
+            "Codex"
         case .remoteCodex:
-            "远程"
+            "CLIProxyAPI"
         case .newAPI:
             "NewAPI"
         case .subAPI:
@@ -175,7 +175,7 @@ struct NotchIslandView: View {
         case .automatic, .codex:
             "Codex"
         case .remoteCodex:
-            "远程"
+            "CLIProxyAPI"
         case .newAPI:
             "NewAPI"
         case .subAPI:
@@ -386,7 +386,7 @@ struct DetailPanelView: View {
         case .codex:
             snapshot.isRunning ? "正在运行" : "最近活动"
         case .remoteCodex:
-            "远程账号"
+            "CLIProxyAPI 账号"
         case .newAPI:
             "NewAPI 余额"
         case .subAPI:
@@ -472,9 +472,9 @@ struct DetailPanelView: View {
     private var refreshHelp: String {
         switch selectedPage {
         case .codex:
-            "刷新本机"
+            "刷新 Codex"
         case .remoteCodex:
-            "刷新远程 Codex"
+            "刷新 CLIProxyAPI"
         case .newAPI:
             "刷新 NewAPI"
         case .subAPI:

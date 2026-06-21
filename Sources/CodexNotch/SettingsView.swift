@@ -63,7 +63,7 @@ private struct SettingsDraft: Equatable {
     var newAPIMonitorEnabled = false
     var newAPIPanelURL = ""
     var newAPIManagementKey = ""
-    var newAPIUserID = ""
+    var newAPIUsername = ""
     var newAPIRefreshInterval: TimeInterval = 300
     var newAPIRequestTimeout: TimeInterval = 6
     var newAPIAllowInsecureTLS = false
@@ -97,7 +97,7 @@ private struct SettingsDraft: Equatable {
         newAPIMonitorEnabled = settings.newAPIMonitorEnabled
         newAPIPanelURL = settings.newAPIPanelURL
         newAPIManagementKey = settings.newAPIManagementKey
-        newAPIUserID = settings.newAPIUserID
+        newAPIUsername = settings.newAPIUsername
         newAPIRefreshInterval = settings.newAPIRefreshInterval
         newAPIRequestTimeout = settings.newAPIRequestTimeout
         newAPIAllowInsecureTLS = settings.newAPIAllowInsecureTLS
@@ -142,38 +142,38 @@ struct SettingsView: View {
             header
 
             Form {
-                Section("刷新") {
+                Section("Codex 刷新") {
                     HelpLabel(
                         title: "刷新模式",
-                        help: "快速切换本机状态、空闲状态、历史用量和文件监听的刷新频率。自定义数值后会自动变为均衡以外的配置。"
+                        help: "快速切换 Codex 运行状态、空闲状态、历史用量和文件监听的刷新频率。自定义数值后会自动变为均衡以外的配置。"
                     )
                     presetControls
-                    intervalStepper("运行中", value: $draft.activeRefreshInterval, range: 2...30, help: "检测到本机 Codex 正在执行任务时的本地状态刷新间隔。数值越小越实时，功耗也越高。")
-                    intervalStepper("空闲", value: $draft.idleRefreshInterval, range: 4...120, help: "没有运行中任务时的本地状态刷新间隔。")
-                    intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 15...300, help: "统计本机 24小时、7天、30天 token 用量的刷新间隔。")
+                    intervalStepper("运行中", value: $draft.activeRefreshInterval, range: 2...30, help: "检测到 Codex 正在执行任务时的状态刷新间隔。数值越小越实时，功耗也越高。")
+                    intervalStepper("空闲", value: $draft.idleRefreshInterval, range: 4...120, help: "Codex 没有运行中任务时的状态刷新间隔。")
+                    intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 15...300, help: "统计 Codex 24小时、7天、30天 token 用量的刷新间隔。")
                     intervalStepper("文件监听", value: $draft.watcherRefreshInterval, range: 8...120, help: "扫描 Codex 会话文件变化的保底间隔，用于补偿文件事件丢失。")
                     intervalStepper("补刷节流", value: $draft.fileChangeRefreshMinimumGap, range: 1...30, help: "文件变化很多时，连续触发刷新之间的最小间隔。")
                 }
 
-                Section("数据") {
+                Section("Codex 数据") {
                     Picker(selection: $draft.rateLimitSource) {
                         ForEach(RateLimitSourcePreference.allCases) { source in
                             Text(source.label).tag(source)
                         }
                     } label: {
-                        HelpLabel(title: "额度来源", help: "决定本机 5小时和7天剩余额度优先从实时接口读取，还是只使用本地记录。")
+                        HelpLabel(title: "额度来源", help: "决定 Codex 5小时和7天剩余额度优先从实时接口读取，还是只使用本地记录。")
                     }
                     .pickerStyle(.segmented)
 
                     Toggle(isOn: $draft.showPeriodUsage) {
-                        HelpLabel(title: "显示 24小时 / 7天 / 30天", help: "控制详情页底部是否显示本机三个时间窗口的 token 用量。")
+                        HelpLabel(title: "显示 24小时 / 7天 / 30天", help: "控制详情页底部是否显示 Codex 三个时间窗口的 token 用量。")
                     }
                     Picker(selection: $draft.taskHistoryRange) {
                         ForEach(TaskHistoryRange.allCases) { range in
                             Text(range.label).tag(range)
                         }
                     } label: {
-                        HelpLabel(title: "任务范围", help: "决定本机详情页任务列表读取最近多长时间内的 Codex 对话。列表会在详情页中滚动显示。")
+                        HelpLabel(title: "任务范围", help: "决定 Codex 详情页任务列表读取最近多长时间内的对话。列表会在详情页中滚动显示。")
                     }
                     .pickerStyle(.segmented)
                 }
@@ -184,14 +184,14 @@ struct SettingsView: View {
                             Text(source.label).tag(source)
                         }
                     } label: {
-                        HelpLabel(title: "显示来源", help: "选择收起状态下刘海左右区域显示哪一种监控数据。自动模式会优先显示有提醒的外部监控，否则显示本机 Codex。")
+                        HelpLabel(title: "显示来源", help: "选择收起状态下刘海左右区域显示哪一种监控数据。自动模式会优先显示有提醒的外部监控，否则显示 Codex。")
                     }
                     .pickerStyle(.menu)
                 }
 
-                Section("远程 Codex") {
+                Section("CLIProxyAPI 设置") {
                     Toggle(isOn: $draft.remoteMonitorEnabled) {
-                        HelpLabel(title: "启用远程 Codex", help: "启用后详情页会出现远程 tab，用于查看 CLIProxyAPI 或 CPA Manager Plus 中的 Codex 账号状态。")
+                        HelpLabel(title: "启用 CLIProxyAPI", help: "启用后详情页会出现 CLIProxyAPI tab，用于查看 CLIProxyAPI 或 CPA Manager Plus 中的 Codex 账号状态。")
                     }
 
                     Picker(selection: $draft.remoteCodexDataSource) {
@@ -208,7 +208,7 @@ struct SettingsView: View {
                         "面板地址",
                         text: $draft.cliproxyPanelURL,
                         placeholder: draft.remoteCodexDataSource == .cpaManagerPlus ? "CPA Manager Plus 地址" : "CLIProxyAPI 管理面板地址",
-                        help: "填写管理面板地址。支持 https；本机 localhost 可使用 http。"
+                        help: "填写管理面板地址。支持 https；本地 localhost 可使用 http。"
                     )
                     .disabled(!draft.remoteMonitorEnabled)
 
@@ -224,7 +224,7 @@ struct SettingsView: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
 
-                    intervalStepper("账号刷新", value: $draft.cliproxyRefreshInterval, range: 60...3_600, help: "远程 Codex 账号状态的刷新间隔。CPA Manager Plus 的巡检结果由服务端产生，这里只是读取频率。")
+                    intervalStepper("账号刷新", value: $draft.cliproxyRefreshInterval, range: 60...3_600, help: "CLIProxyAPI 账号状态的刷新间隔。CPA Manager Plus 的巡检结果由服务端产生，这里只是读取频率。")
                         .disabled(!draft.remoteMonitorEnabled)
                     intervalStepper("请求超时", value: $draft.cliproxyRequestTimeout, range: 3...30, help: "单个远程管理接口请求等待的最长秒数。")
                         .disabled(!draft.remoteMonitorEnabled)
@@ -249,7 +249,7 @@ struct SettingsView: View {
                     enabled: $draft.newAPIMonitorEnabled,
                     panelURL: $draft.newAPIPanelURL,
                     managementKey: $draft.newAPIManagementKey,
-                    newAPIUserID: $draft.newAPIUserID,
+                    newAPIUsername: $draft.newAPIUsername,
                     refreshInterval: $draft.newAPIRefreshInterval,
                     requestTimeout: $draft.newAPIRequestTimeout,
                     allowInsecureTLS: $draft.newAPIAllowInsecureTLS,
@@ -379,7 +379,10 @@ struct SettingsView: View {
             HelpLabel(title: title, help: help)
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func labeledSecureField(
@@ -392,7 +395,10 @@ struct SettingsView: View {
             HelpLabel(title: title, help: help)
             SecureField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func balanceMonitorSection(
@@ -401,7 +407,7 @@ struct SettingsView: View {
         enabled: Binding<Bool>,
         panelURL: Binding<String>,
         managementKey: Binding<String>,
-        newAPIUserID: Binding<String>? = nil,
+        newAPIUsername: Binding<String>? = nil,
         refreshInterval: Binding<TimeInterval>,
         requestTimeout: Binding<TimeInterval>,
         allowInsecureTLS: Binding<Bool>,
@@ -421,6 +427,16 @@ struct SettingsView: View {
             )
             .disabled(!enabled.wrappedValue)
 
+            if let newAPIUsername {
+                labeledTextField(
+                    "用户名",
+                    text: newAPIUsername,
+                    placeholder: "NewAPI 登录用户名",
+                    help: "用于调用 NewAPI POST /api/user/login 登录接口。"
+                )
+                .disabled(!enabled.wrappedValue)
+            }
+
             labeledSecureField(
                 balanceCredentialTitle(source: source),
                 text: managementKey,
@@ -428,16 +444,6 @@ struct SettingsView: View {
                 help: balanceCredentialHelp(source: source)
             )
             .disabled(!enabled.wrappedValue)
-
-            if let newAPIUserID {
-                labeledTextField(
-                    "用户 ID",
-                    text: newAPIUserID,
-                    placeholder: "New-Api-User",
-                    help: "NewAPI 管理接口要求同时传入 New-Api-User 头，值为生成系统访问令牌的用户 ID。"
-                )
-                .disabled(!enabled.wrappedValue)
-            }
 
             Text("地址、认证信息和刷新配置仅在点击保存后生效。")
                 .font(.system(size: 11, weight: .medium))
@@ -470,7 +476,7 @@ struct SettingsView: View {
     private func balanceMonitorEnableHelp(title: String, source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "启用后详情页会出现 \(title) tab，用于读取 NewAPI 当前用户额度和渠道余额。"
+            "启用后详情页会出现 \(title) tab，通过登录接口读取 NewAPI 当前用户额度和渠道余额。"
         case .subAPI:
             "启用后详情页会出现 \(title) tab，用于读取 Sub2API 管理后台中的用户余额。"
         }
@@ -479,7 +485,7 @@ struct SettingsView: View {
     private func balanceCredentialTitle(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "系统访问令牌"
+            "密码"
         case .subAPI:
             "管理员 API Key"
         }
@@ -488,7 +494,7 @@ struct SettingsView: View {
     private func balanceCredentialPlaceholder(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "个人设置中的系统访问令牌"
+            "NewAPI 登录密码"
         case .subAPI:
             "admin-..."
         }
@@ -497,7 +503,7 @@ struct SettingsView: View {
     private func balanceCredentialHelp(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "用于调用 NewAPI 管理接口，会作为 Authorization: Bearer 发送。令牌只保存到 macOS Keychain。"
+            "用于调用 NewAPI POST /api/user/login。密码只保存到 macOS Keychain。"
         case .subAPI:
             "用于调用 Sub2API 管理接口，会作为 x-api-key 发送。API Key 只保存到 macOS Keychain。"
         }
@@ -538,13 +544,13 @@ struct SettingsView: View {
 
     private var remoteStatusRow: some View {
         HStack {
-            HelpLabel(title: "远程状态", help: "显示当前保存配置下的远程 Codex 读取状态。修改地址、认证信息或数据源后需要先保存再刷新。")
+            HelpLabel(title: "CLIProxyAPI 状态", help: "显示当前保存配置下的 CLIProxyAPI 读取状态。修改地址、认证信息或数据源后需要先保存再刷新。")
             Spacer()
             Text(hasRemoteChanges ? "保存后生效" : remoteStatusText)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(hasRemoteChanges ? .orange : remoteStatusColor)
                 .lineLimit(1)
-            Button("刷新远程") {
+            Button("刷新 CLIProxyAPI") {
                 remoteViewModel.refreshNow()
             }
             .disabled(!settings.remoteMonitorEnabled || hasRemoteChanges)
@@ -558,7 +564,7 @@ struct SettingsView: View {
     ) -> some View {
         let hasChanges = hasBalanceChanges(for: source)
         return HStack {
-            HelpLabel(title: "\(source.title) 状态", help: "显示当前保存配置下的 \(source.title) 余额读取状态。修改地址或密钥后需要先保存再刷新。")
+            HelpLabel(title: "\(source.title) 状态", help: "显示当前保存配置下的 \(source.title) 余额读取状态。修改地址或认证信息后需要先保存再刷新。")
             Spacer()
             Text(hasChanges ? "保存后生效" : balanceStatusText(viewModel.snapshot))
                 .font(.system(size: 11, weight: .semibold))
@@ -578,7 +584,7 @@ struct SettingsView: View {
             return draft.newAPIMonitorEnabled != current.newAPIMonitorEnabled
                 || draft.newAPIPanelURL != current.newAPIPanelURL
                 || draft.newAPIManagementKey != current.newAPIManagementKey
-                || draft.newAPIUserID != current.newAPIUserID
+                || draft.newAPIUsername != current.newAPIUsername
                 || draft.newAPIRefreshInterval != current.newAPIRefreshInterval
                 || draft.newAPIRequestTimeout != current.newAPIRequestTimeout
                 || draft.newAPIAllowInsecureTLS != current.newAPIAllowInsecureTLS
@@ -717,7 +723,7 @@ struct SettingsView: View {
         }
 
         settings.newAPIPanelURL = next.newAPIPanelURL
-        settings.newAPIUserID = next.newAPIMonitorEnabled ? next.newAPIUserID : ""
+        settings.newAPIUsername = next.newAPIMonitorEnabled ? next.newAPIUsername : ""
         settings.newAPIRefreshInterval = next.newAPIRefreshInterval
         settings.newAPIRequestTimeout = next.newAPIRequestTimeout
         settings.newAPIAllowInsecureTLS = next.newAPIAllowInsecureTLS

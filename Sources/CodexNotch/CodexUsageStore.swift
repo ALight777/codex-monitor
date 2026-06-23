@@ -185,7 +185,10 @@ final class CodexUsageStore: @unchecked Sendable {
 
     func rateLimitWatchPaths() -> [String] {
         let threads = (try? loadRecentThreads()) ?? []
-        return candidateRateLimitPaths(from: threads, recentLimit: 10)
+        return uniqueExistingPaths(
+            candidateRateLimitPaths(from: threads, recentLimit: 10)
+                + recentSessionActivityWatchPaths()
+        )
     }
 
     private func errorSnapshot(_ error: Error, now: Date) -> UsageSnapshot {
@@ -1565,6 +1568,27 @@ final class CodexUsageStore: @unchecked Sendable {
         }
 
         return paths
+    }
+
+    private func recentSessionActivityWatchPaths(limit: Int = 80) -> [String] {
+        let paths = recentTaskSessionPaths(limit: limit)
+        let directories = paths.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
+        return paths + directories
+    }
+
+    private func uniqueExistingPaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        return paths.compactMap { path in
+            guard !path.isEmpty else {
+                return nil
+            }
+            let normalizedPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            guard FileManager.default.fileExists(atPath: normalizedPath),
+                  seen.insert(normalizedPath).inserted else {
+                return nil
+            }
+            return normalizedPath
+        }
     }
 
     private func recentTaskSessionPaths(limit: Int) -> [String] {

@@ -1886,6 +1886,11 @@ runner.check(localSnapshot.tasks.first { $0.id == staleDBTokenSessionID }?.token
 runner.check(localSnapshot.tasks.first { $0.id == completedSessionID }?.status == .recent, "fresh completed session rollout should not be treated as running")
 runner.check(localSnapshot.tasks.first { $0.id == completedFinalAnswerSessionID }?.status == .recent, "fresh final_answer/task_complete rollout should not be treated as running")
 runner.check(localSnapshot.tasks.first { $0.id == dbBackedSessionID }?.tokenCount == 777, "recent rollout fallback should reuse database tokens even when the database updated_at is outside the task range")
+let localWatchPaths = Set(localStore.rateLimitWatchPaths())
+let normalizedSessionDirectory = sessionDirectory.resolvingSymlinksInPath().path
+let normalizedRolloutPath = rolloutPath.resolvingSymlinksInPath().path
+runner.check(localWatchPaths.contains(normalizedSessionDirectory), "local file watchers should include recent session directories so new subagents trigger refreshes")
+runner.check(localWatchPaths.contains(normalizedRolloutPath), "local file watchers should keep watching recent session files for active task updates")
 
 let mixedUsageRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchMixedUsage-\(UUID().uuidString)")

@@ -23,8 +23,8 @@ final class TestRunner {
 
 let runner = TestRunner()
 
-runner.check(AppInfo.version == "0.1.1", "app info should expose version 0.1.1")
-runner.check(AppInfo.displayVersion == "0.1.1", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.1.2", "app info should expose version 0.1.2")
+runner.check(AppInfo.displayVersion == "0.1.2", "app info should fall back to source version when bundle version is unavailable")
 
 let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",
@@ -1697,6 +1697,7 @@ let completedSessionID = "019e073a-c032-74e2-966e-b85ede0c9ccd"
 let completedFinalAnswerSessionID = "019e073a-c032-74e2-966e-b85ede0c9ccf"
 let dbBackedSessionID = "019e073a-c032-74e2-966e-b85ede0c9cce"
 let staleDBTokenSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd2"
+let activeToolCallSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd3"
 let sessionDirectory = tempRoot
     .appendingPathComponent("sessions/2026/06/14", isDirectory: true)
 try FileManager.default.createDirectory(at: sessionDirectory, withIntermediateDirectories: true)
@@ -1857,6 +1858,27 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     """
 ])
 
+let activeToolCallPath = sessionDirectory
+    .appendingPathComponent("rollout-2026-06-14T02-20-13-\(activeToolCallSessionID).jsonl")
+let activeToolCallActivity = ISO8601DateFormatter().string(from: now.addingTimeInterval(-240))
+let activeToolCallItemDone = ISO8601DateFormatter().string(from: now.addingTimeInterval(-230))
+let activeToolCallBody = """
+{"timestamp":"\(timestamp)","type":"turn_context","payload":{"model":"gpt-5.5","effort":"xhigh","collaboration_mode":{"settings":{"reasoning_effort":"xhigh"}}}}
+{"timestamp":"\(activeToolCallActivity)","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{}"}}
+{"timestamp":"\(activeToolCallItemDone)","type":"event_msg","payload":{"type":"response.function_call_arguments.done"}}
+{"timestamp":"\(activeToolCallItemDone)","type":"event_msg","payload":{"type":"response.output_item.done"}}
+{"timestamp":"\(activeToolCallItemDone)","type":"event_msg","payload":{"type":"response.completed"}}
+"""
+try activeToolCallBody.write(to: activeToolCallPath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: activeToolCallPath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    stateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(activeToolCallSessionID)', '工具调用仍在运行', 21, 'gpt-5.5', 'xhigh', '\(activeToolCallPath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+
 let localStore = CodexUsageStore(codexDirectory: tempRoot)
 let localSnapshot = localStore.loadSnapshot(
     includePeriodUsage: false,
@@ -1883,6 +1905,7 @@ runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.tokenCount == 185
 runner.check(localSnapshot.tasks.first { $0.id == parentOnlySessionID }?.tokenCount == 80245, "parent running through subagent activity should include subagent token usage")
 runner.check(localSnapshot.tasks.first { $0.id == longMetaParentSessionID }?.tokenCount == 33333, "parent running through long metadata subagent activity should include subagent token usage")
 runner.check(localSnapshot.tasks.first { $0.id == staleDBTokenSessionID }?.tokenCount == 120000000, "recent task token count should prefer fresher rollout totals over stale database tokens")
+runner.check(localSnapshot.tasks.contains { $0.id == activeToolCallSessionID && $0.status == .running }, "quiet tool calls should keep the running indicator on until a task-level completion event arrives")
 runner.check(localSnapshot.tasks.first { $0.id == completedSessionID }?.status == .recent, "fresh completed session rollout should not be treated as running")
 runner.check(localSnapshot.tasks.first { $0.id == completedFinalAnswerSessionID }?.status == .recent, "fresh final_answer/task_complete rollout should not be treated as running")
 runner.check(localSnapshot.tasks.first { $0.id == dbBackedSessionID }?.tokenCount == 777, "recent rollout fallback should reuse database tokens even when the database updated_at is outside the task range")

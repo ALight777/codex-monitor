@@ -7,7 +7,7 @@ private enum UsageScanPolicy {
         "/usr/local/bin/rg",
         "/usr/bin/rg"
     ]
-    static let runningActivityWindow = 180
+    static let runningActivityWindow = 10 * 60
     static let largeSessionTokenScanLimit: UInt64 = 20 * 1024 * 1024
     static let staleSessionTokenScanLimit: UInt64 = 2 * 1024 * 1024
     static let recentSessionScanWindow: TimeInterval = 10 * 60
@@ -1004,7 +1004,7 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func loadActiveThreadIDs(now: Date) throws -> Set<String> {
-        let since = Int(now.timeIntervalSince1970) - 180
+        let since = Int(now.timeIntervalSince1970) - UsageScanPolicy.runningActivityWindow
         let query = """
         select
           thread_id,
@@ -1014,10 +1014,7 @@ final class CodexUsageStore: @unchecked Sendable {
               or feedback_log_body like '%"status":"in_progress"%'
             then ts else 0 end) as latest_activity,
           max(case
-            when feedback_log_body like '%response.completed%'
-              or feedback_log_body like '%response.output_item.done%'
-              or feedback_log_body like '%response.function_call_arguments.done%'
-              or feedback_log_body like '%"phase":"final_answer"%'
+            when feedback_log_body like '%"phase":"final_answer"%'
               or feedback_log_body like '%"phase": "final_answer"%'
               or feedback_log_body like '%"type":"task_complete"%'
               or feedback_log_body like '%"type": "task_complete"%'
@@ -1045,7 +1042,7 @@ final class CodexUsageStore: @unchecked Sendable {
             }
             let activity = record.latestActivity ?? 0
             let done = record.latestDone ?? 0
-            if activity > done && nowEpoch - activity < 180 {
+            if activity > done && nowEpoch - activity < UsageScanPolicy.runningActivityWindow {
                 return threadId
             }
             if activity > 0 && activity >= done && nowEpoch - activity < 20 {
@@ -1153,10 +1150,6 @@ final class CodexUsageStore: @unchecked Sendable {
             return true
         }
 
-        if event.payloadStatus?.lowercased() == "completed" {
-            return true
-        }
-
         guard let payloadType = event.payloadType?.lowercased() else {
             return false
         }
@@ -1165,9 +1158,7 @@ final class CodexUsageStore: @unchecked Sendable {
             return true
         }
 
-        return payloadType == "response.completed"
-            || payloadType == "response.output_item.done"
-            || payloadType == "response.function_call_arguments.done"
+        return false
     }
 
     private func sessionLineMarksActivity(_ event: SessionLineEvent) -> Bool {
@@ -1770,7 +1761,7 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func appServerRateLimitScript() -> String {
-        let initialize = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-notch","version":"0.1.1"},"capabilities":{"experimentalApi":true}}}"#
+        let initialize = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-notch","version":"0.1.2"},"capabilities":{"experimentalApi":true}}}"#
         let initialized = #"{"jsonrpc":"2.0","method":"initialized"}"#
         let readRateLimits = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":null}"#
 

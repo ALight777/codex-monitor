@@ -4,7 +4,10 @@ enum IslandMetrics {
     static let shoulderWidth: CGFloat = 148
     static let notchWidth: CGFloat = 224
     static let collapsedHeight: CGFloat = 38
-    static let collapsedPillWidth: CGFloat = 372
+    static let collapsedPillMinWidth: CGFloat = 240
+    static let collapsedPillMaxWidth: CGFloat = 372
+    static let collapsedPillHorizontalPadding: CGFloat = 10
+    static let collapsedPillExtraPadding: CGFloat = 14
     static let detailHeaderHeight: CGFloat = 22
     static let detailPageSwitcherHeight: CGFloat = 30
     static let detailTopPadding: CGFloat = 44

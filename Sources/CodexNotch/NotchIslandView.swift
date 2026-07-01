@@ -90,6 +90,23 @@ struct NotchIslandView: View {
         viewModel.snapshot
     }
 
+    private var collapsedPillWidth: CGFloat {
+        let statusWidth = Self.collapsedStatusWidth(collapsedStateLabel)
+        let metrics = collapsedMetrics
+        let metricWidths = metrics.map(Self.collapsedMetricWidth).reduce(0, +)
+        let metricGaps = CGFloat(max(0, metrics.count - 1)) * 5
+        let contentWidth = statusWidth
+            + 6
+            + metricWidths
+            + metricGaps
+            + IslandMetrics.collapsedPillHorizontalPadding * 2
+            + IslandMetrics.collapsedPillExtraPadding
+        return min(
+            IslandMetrics.collapsedPillMaxWidth,
+            max(IslandMetrics.collapsedPillMinWidth, ceil(contentWidth))
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             islandBackground
@@ -132,7 +149,7 @@ struct NotchIslandView: View {
                 .stroke(MonitorTheme.panelStroke, lineWidth: 0.7)
         }
             .frame(
-                width: IslandMetrics.collapsedPillWidth,
+                width: collapsedPillWidth,
                 height: IslandMetrics.collapsedHeight - 8,
                 alignment: .top
             )
@@ -142,15 +159,15 @@ struct NotchIslandView: View {
     }
 
     private var collapsedContent: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             statusBlock
 
             rateLimitBlock
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, IslandMetrics.collapsedPillHorizontalPadding)
         .padding(.top, 4)
         .frame(
-            width: IslandMetrics.collapsedPillWidth,
+            width: collapsedPillWidth,
             height: IslandMetrics.collapsedHeight - 8,
             alignment: .center
         )
@@ -174,7 +191,7 @@ struct NotchIslandView: View {
     }
 
     private var rateLimitBlock: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             ForEach(collapsedMetrics) { metric in
                 CollapsedMetricRow(metric: metric)
             }
@@ -316,6 +333,28 @@ struct NotchIslandView: View {
             CollapsedMetric(id: "\(snapshot.source.rawValue)-amount", label: "余", value: snapshot.totalAmountText, color: MonitorTheme.running)
         ]
     }
+
+    private static func collapsedStatusWidth(_ text: String) -> CGFloat {
+        12 + 5 + textWidth(text, size: 10.6, weight: .semibold, monospacedDigit: false)
+    }
+
+    private static func collapsedMetricWidth(_ metric: CollapsedMetric) -> CGFloat {
+        textWidth(metric.label, size: 8.4, weight: .medium, monospacedDigit: false)
+            + 3
+            + textWidth(metric.value, size: 9.5, weight: .semibold, monospacedDigit: true)
+    }
+
+    private static func textWidth(
+        _ text: String,
+        size: CGFloat,
+        weight: NSFont.Weight,
+        monospacedDigit: Bool
+    ) -> CGFloat {
+        let font = monospacedDigit
+            ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight)
+            : NSFont.systemFont(ofSize: size, weight: weight)
+        return ceil((text as NSString).size(withAttributes: [.font: font]).width)
+    }
 }
 
 private struct CollapsedMetricRow: View {
@@ -324,13 +363,13 @@ private struct CollapsedMetricRow: View {
     var body: some View {
         HStack(spacing: 3) {
             Text(metric.label)
-                .font(.system(size: 8.6, weight: .medium))
+                .font(.system(size: 8.4, weight: .medium))
                 .foregroundStyle(MonitorTheme.textTertiary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.70)
 
             Text(metric.value)
-                .font(.system(size: 9.7, weight: .semibold))
+                .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(metric.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.68)

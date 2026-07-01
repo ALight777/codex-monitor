@@ -148,6 +148,238 @@ runner.check(
     "task row subagent badge should stay hidden for zero active subagents"
 )
 
+@MainActor
+func dateFromISO8601(_ value: String, message: String) -> Date {
+    runner.require(CodexRadarDateParser.parse(value), message)
+}
+
+let codexRadarFixture = """
+{
+  "monitored_at": "2026-07-01T06:27:00+08:00",
+  "status": "community_confirmed",
+  "recommended_action": "reset_completed",
+  "window": {
+    "message": "社区反馈已完成重置"
+  },
+  "prediction": {
+    "summary": "官方重置已经完成。"
+  },
+  "api_access": {
+    "requirements": {
+      "attribution_required": true,
+      "attribution_text": "数据来自 Codex 雷达 codexradar.com",
+      "site": "https://codexradar.com"
+    }
+  },
+  "model_iq": {
+    "latest": {
+      "score": 62.5,
+      "status": "red",
+      "passed": 5,
+      "tasks": 12,
+      "wall_time_human": "37分钟",
+      "model": "gpt-5.5",
+      "reasoning_effort": "xhigh",
+      "cost_usd": 46.348455
+    },
+    "comparisons": {
+      "gpt_55_high": {
+        "label": "GPT-5.5 high",
+        "latest": {
+          "score": 75.0,
+          "status": "red",
+          "passed": 6,
+          "tasks": 12,
+          "wall_time_human": "36分钟",
+          "cost_usd": 24.929204
+        }
+      },
+      "gpt_55_medium": {
+        "label": "GPT-5.5 medium",
+        "latest": {
+          "score": 87.5,
+          "status": "yellow",
+          "passed": 7,
+          "tasks": 12,
+          "wall_time_human": "32分钟",
+          "cost_usd": 20.98977
+        }
+      },
+      "gpt_54_xhigh": {
+        "label": "GPT-5.4 xhigh",
+        "latest": {
+          "score": 50.0,
+          "status": "red",
+          "passed": 4,
+          "tasks": 12,
+          "wall_time_human": "35分钟",
+          "cost_usd": 22.651593
+        }
+      },
+      "gpt_54_high": {
+        "label": "GPT-5.4 high",
+        "latest": {
+          "score": 87.5,
+          "status": "yellow",
+          "passed": 7,
+          "tasks": 12,
+          "wall_time_human": "36分钟",
+          "cost_usd": 17.771049
+        }
+      }
+    },
+    "quota_radar": {
+      "updated_at": "2026-06-30T22:27:57Z",
+      "cost_usd": 132.690071,
+      "rows": [
+        {"tier": "20x Pro", "basis": "measured 7d", "five_h": 276.44, "seven_d": 1658.63},
+        {"tier": "5x Pro", "basis": "model /4", "five_h": 69.11, "seven_d": 414.66},
+        {"tier": "Plus", "basis": "model /20", "five_h": 13.82, "seven_d": 82.93}
+      ]
+    }
+  }
+}
+""".data(using: .utf8)!
+let radarFetchedAt = dateFromISO8601("2026-07-01T06:28:00+08:00", message: "Codex Radar fetched timestamp should parse")
+let radarSnapshot = try CodexRadarSnapshot.decodePublicSummary(from: codexRadarFixture, fetchedAt: radarFetchedAt)
+runner.check(radarSnapshot.models.count == 5, "Codex Radar summary should expose five model cards")
+runner.check(radarSnapshot.models.map(\.label) == [
+    "GPT-5.5 xhigh",
+    "GPT-5.5 high",
+    "GPT-5.5 medium",
+    "GPT-5.4 xhigh",
+    "GPT-5.4 high"
+], "Codex Radar model cards should preserve the expected display order")
+runner.check(radarSnapshot.models.first?.score == 62.5, "Codex Radar latest model should decode score")
+runner.check(radarSnapshot.models.first?.passed == 5, "Codex Radar latest model should decode passed tasks")
+runner.check(radarSnapshot.models.first?.tasks == 12, "Codex Radar latest model should decode task count")
+runner.check(radarSnapshot.quotaRows.count == 3, "Codex Radar quota radar should expose three plan rows")
+runner.check(radarSnapshot.quotaRows.first?.tier == "20x Pro", "Codex Radar quota row should preserve tier")
+runner.check(radarSnapshot.quotaRows.first?.fiveH == 276.44, "Codex Radar quota row should decode 5h estimate")
+runner.check(radarSnapshot.quotaRows.first?.sevenD == 1658.63, "Codex Radar quota row should decode 7d estimate")
+runner.check(radarSnapshot.costUSD == 132.690071, "Codex Radar cost should prefer quota_radar cost")
+runner.check(radarSnapshot.attributionRequired, "Codex Radar should preserve required attribution flag")
+runner.check(radarSnapshot.attributionText == "数据来自 Codex 雷达 codexradar.com", "Codex Radar should preserve attribution text")
+runner.check(radarSnapshot.siteURL.absoluteString == "https://codexradar.com", "Codex Radar should preserve source site")
+
+let radarMissingModelIQ = """
+{
+  "monitored_at": "2026-07-01T06:27:00+08:00",
+  "api_access": {
+    "requirements": {
+      "attribution_required": true,
+      "attribution_text": "数据来自 Codex 雷达 codexradar.com",
+      "site": "https://codexradar.com"
+    }
+  }
+}
+""".data(using: .utf8)!
+let missingModelSnapshot = try CodexRadarSnapshot.decodePublicSummary(from: radarMissingModelIQ, fetchedAt: radarFetchedAt)
+runner.check(missingModelSnapshot.models.isEmpty, "Codex Radar should degrade when model_iq is missing")
+runner.check(missingModelSnapshot.quotaRows.isEmpty, "Codex Radar should degrade when quota radar is missing")
+runner.check(missingModelSnapshot.attributionText == CodexRadarSnapshot.defaultAttributionText, "Codex Radar should keep attribution on partial data")
+
+let radarMissingComparisons = """
+{
+  "monitored_at": "2026-07-01T06:27:00+08:00",
+  "model_iq": {
+    "latest": {
+      "score": 62.5,
+      "status": "red",
+      "passed": 5,
+      "tasks": 12
+    },
+    "quota_radar": {
+      "rows": []
+    }
+  }
+}
+""".data(using: .utf8)!
+let missingComparisonsSnapshot = try CodexRadarSnapshot.decodePublicSummary(from: radarMissingComparisons, fetchedAt: radarFetchedAt)
+runner.check(missingComparisonsSnapshot.models.count == 1, "Codex Radar should still show latest model when comparisons are missing")
+runner.check(missingComparisonsSnapshot.quotaRows.isEmpty, "Codex Radar should allow an empty quota radar row list")
+
+runner.check(
+    CodexRadarClient.isAllowedPublicSummaryURL(URL(string: "https://codexradar.com/current.json")!),
+    "Codex Radar client should allow the public summary URL"
+)
+runner.check(
+    !CodexRadarClient.isAllowedPublicSummaryURL(URL(string: "https://codexradar.com/api/v1/current")!),
+    "Codex Radar client should reject the full API URL"
+)
+runner.check(
+    !CodexRadarClient.isAllowedPublicSummaryURL(URL(string: "https://codexradar.com@evil.example.com/current.json")!),
+    "Codex Radar client should reject userinfo spoofing"
+)
+runner.check(
+    !CodexRadarClient.isAllowedPublicSummaryURL(URL(string: "http://codexradar.com/current.json")!),
+    "Codex Radar client should require HTTPS"
+)
+
+let radarCalendar = CodexRadarRefreshPolicy.beijingCalendar
+let beforeMorningSlot = dateFromISO8601("2026-07-01T07:00:00+08:00", message: "before morning slot date should parse")
+let morningSlot = dateFromISO8601("2026-07-01T08:20:00+08:00", message: "morning slot date should parse")
+let afternoonSlot = dateFromISO8601("2026-07-01T14:20:00+08:00", message: "afternoon slot date should parse")
+let afterAfternoonSlot = dateFromISO8601("2026-07-01T14:30:00+08:00", message: "after afternoon slot date should parse")
+runner.check(
+    CodexRadarRefreshPolicy.nextScheduledRefresh(after: beforeMorningSlot, calendar: radarCalendar) == morningSlot,
+    "Codex Radar scheduler should use the Beijing 08:20 refresh point"
+)
+runner.check(
+    CodexRadarRefreshPolicy.nextScheduledRefresh(after: morningSlot, calendar: radarCalendar) == afternoonSlot,
+    "Codex Radar scheduler should use the Beijing 14:20 refresh point"
+)
+runner.check(
+    CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: nil, now: beforeMorningSlot, calendar: radarCalendar),
+    "Codex Radar should refresh on first launch with no cache"
+)
+runner.check(
+    !CodexRadarRefreshPolicy.shouldRefresh(
+        lastFetchAt: dateFromISO8601("2026-07-01T08:21:00+08:00", message: "fresh cache date should parse"),
+        now: dateFromISO8601("2026-07-01T09:00:00+08:00", message: "after morning date should parse"),
+        calendar: radarCalendar
+    ),
+    "Codex Radar should not refresh when cache is fresh for the latest schedule point"
+)
+runner.check(
+    CodexRadarRefreshPolicy.shouldRefresh(
+        lastFetchAt: dateFromISO8601("2026-07-01T08:10:00+08:00", message: "stale morning cache date should parse"),
+        now: dateFromISO8601("2026-07-01T09:00:00+08:00", message: "after morning stale date should parse"),
+        calendar: radarCalendar
+    ),
+    "Codex Radar should refresh after crossing the 08:20 schedule point"
+)
+runner.check(
+    CodexRadarRefreshPolicy.shouldRefresh(
+        lastFetchAt: dateFromISO8601("2026-07-01T08:21:00+08:00", message: "morning cache date should parse"),
+        now: afterAfternoonSlot,
+        calendar: radarCalendar
+    ),
+    "Codex Radar should refresh after crossing the 14:20 schedule point"
+)
+runner.check(
+    !CodexRadarRefreshPolicy.shouldRefresh(
+        lastFetchAt: dateFromISO8601("2026-07-01T14:21:00+08:00", message: "fresh afternoon cache date should parse"),
+        now: afterAfternoonSlot,
+        calendar: radarCalendar
+    ),
+    "Codex Radar should only refresh once per schedule point"
+)
+runner.check(
+    !CodexRadarRefreshPolicy.canManualRefresh(
+        lastManualRefreshAt: beforeMorningSlot,
+        now: beforeMorningSlot.addingTimeInterval(299)
+    ),
+    "Codex Radar manual refresh should enforce a 5 minute gap"
+)
+runner.check(
+    CodexRadarRefreshPolicy.canManualRefresh(
+        lastManualRefreshAt: beforeMorningSlot,
+        now: beforeMorningSlot.addingTimeInterval(300)
+    ),
+    "Codex Radar manual refresh should be allowed after 5 minutes"
+)
+
 final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
     var isEnabled: Bool
 
@@ -284,6 +516,7 @@ runner.check(settings.idleRefreshInterval == 180, "saving unchanged refresh inte
 runner.check(settings.usageRefreshInterval == 300, "saving unchanged refresh intervals should keep the low-power usage default")
 runner.check(settings.watcherRefreshInterval == 180, "saving unchanged refresh intervals should keep the folded low-power watcher default")
 runner.check(settings.fileChangeRefreshMinimumGap == 15, "saving unchanged refresh intervals should keep the folded low-power debounce default")
+runner.check(settings.codexRadarEnabled, "Codex Radar should default to enabled")
 settings.activeRefreshInterval = 2
 settings.idleRefreshInterval = 4
 settings.usageRefreshInterval = 15
@@ -350,6 +583,7 @@ previousLowPowerDefaults.removePersistentDomain(forName: previousLowPowerSuiteNa
 
 runner.check(settings.remoteCodexDataSource == .cpaManagerPlus, "remote Codex monitor should default to CPA Manager Plus data")
 runner.check(settings.notchDisplaySource == .codex, "collapsed notch display should default to local Codex")
+settings.codexRadarEnabled = false
 settings.remoteCodexDataSource = .cliProxyAPI
 settings.notchDisplaySource = .remoteCodex
 settings.newAPIMonitorEnabled = true
@@ -370,6 +604,7 @@ let reloadedSettings = CodexNotchSettings(
 )
 runner.check(reloadedSettings.remoteCodexDataSource == .cliProxyAPI, "remote Codex data source should persist")
 runner.check(reloadedSettings.notchDisplaySource == .remoteCodex, "collapsed notch display source should persist")
+runner.check(!reloadedSettings.codexRadarEnabled, "Codex Radar enablement should persist")
 runner.check(reloadedSettings.newAPIMonitorEnabled, "NewAPI monitor enablement should persist")
 runner.check(reloadedSettings.newAPIPanelURL == "https://newapi.example.com", "NewAPI panel URL should persist")
 runner.check(reloadedSettings.newAPIUsername == "owner", "NewAPI username should persist")

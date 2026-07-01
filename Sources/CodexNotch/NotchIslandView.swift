@@ -3,6 +3,7 @@ import SwiftUI
 
 private enum DetailPage: String, CaseIterable, Identifiable {
     case codex
+    case codexRadar
     case remoteCodex
     case newAPI
     case subAPI
@@ -13,6 +14,8 @@ private enum DetailPage: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "Codex"
+        case .codexRadar:
+            "Codex Radar"
         case .remoteCodex:
             "CLIProxyAPI"
         case .newAPI:
@@ -341,12 +344,14 @@ struct DetailPanelView: View {
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
     @ObservedObject var subAPIViewModel: BalanceMonitorViewModel
+    @ObservedObject var codexRadarViewModel: CodexRadarViewModel
     @ObservedObject var settings: CodexNotchSettings
     let onSettings: () -> Void
     let onLocalRefresh: () -> Void
     let onRemoteRefresh: () -> Void
     let onNewAPIRefresh: () -> Void
     let onSubAPIRefresh: () -> Void
+    let onCodexRadarRefresh: () -> Void
     @State private var detailPage: DetailPage = .codex
 
     private var snapshot: UsageSnapshot {
@@ -373,6 +378,8 @@ struct DetailPanelView: View {
                     switch selectedPage {
                     case .codex:
                         localContent
+                    case .codexRadar:
+                        codexRadarContent
                     case .remoteCodex:
                         remoteContent
                     case .newAPI:
@@ -465,6 +472,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             "Codex Monitor"
+        case .codexRadar:
+            "Codex Radar"
         case .remoteCodex:
             "CLIProxyAPI 账号"
         case .newAPI:
@@ -478,6 +487,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             return snapshot.isRunning ? "Running" : "Idle"
+        case .codexRadar:
+            return codexRadarHeaderStatus
         case .remoteCodex:
             if remoteViewModel.snapshot.usageUnavailableForSource {
                 return "仅账号"
@@ -497,6 +508,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             snapshot.isRunning ? MonitorTheme.running : MonitorTheme.textTertiary
+        case .codexRadar:
+            codexRadarHeaderStatusColor
         case .remoteCodex:
             remoteStatusColor
         case .newAPI:
@@ -540,6 +553,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             viewModel.isRefreshing
+        case .codexRadar:
+            codexRadarViewModel.isRefreshing
         case .remoteCodex:
             remoteViewModel.isRefreshing
         case .newAPI:
@@ -553,6 +568,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             "刷新 Codex"
+        case .codexRadar:
+            "刷新 Codex Radar"
         case .remoteCodex:
             "刷新 CLIProxyAPI"
         case .newAPI:
@@ -584,6 +601,9 @@ struct DetailPanelView: View {
 
     private var availablePages: [DetailPage] {
         var pages: [DetailPage] = [.codex]
+        if settings.codexRadarEnabled {
+            pages.append(.codexRadar)
+        }
         if settings.remoteMonitorEnabled {
             pages.append(.remoteCodex)
         }
@@ -604,6 +624,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             onLocalRefresh()
+        case .codexRadar:
+            onCodexRadarRefresh()
         case .remoteCodex:
             onRemoteRefresh()
         case .newAPI:
@@ -754,6 +776,202 @@ struct DetailPanelView: View {
         }
         return MonitorTheme.healthy
     }
+
+    private var codexRadarHeaderStatus: String {
+        switch codexRadarViewModel.snapshot.panelState {
+        case .disabled:
+            "Off"
+        case .loading:
+            "Loading"
+        case .ready:
+            "Updated"
+        case .stale:
+            "Stale"
+        case .error:
+            "Error"
+        }
+    }
+
+    private var codexRadarHeaderStatusColor: Color {
+        switch codexRadarViewModel.snapshot.panelState {
+        case .disabled, .loading:
+            MonitorTheme.textTertiary
+        case .ready:
+            MonitorTheme.healthy
+        case .stale:
+            MonitorTheme.warning
+        case .error:
+            MonitorTheme.critical
+        }
+    }
+
+    private var codexRadarContent: some View {
+        let radar = codexRadarViewModel.snapshot
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 8) {
+                codexRadarSummary(radar)
+
+                if let message = radar.message, radar.panelState != .ready {
+                    inlineWarningMessage(message)
+                }
+
+                if radar.models.isEmpty {
+                    codexRadarEmptyMessage(radar)
+                } else {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(minimum: 128), spacing: 7),
+                            GridItem(.flexible(minimum: 128), spacing: 7),
+                            GridItem(.flexible(minimum: 128), spacing: 7)
+                        ],
+                        spacing: 7
+                    ) {
+                        ForEach(radar.models) { model in
+                            CodexRadarModelCard(model: model)
+                        }
+                    }
+                }
+
+                codexRadarQuotaTable(radar)
+                codexRadarFooter(radar)
+            }
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func codexRadarSummary(_ radar: CodexRadarSnapshot) -> some View {
+        HStack(spacing: 8) {
+            RadarSummaryCell(
+                label: "Updated",
+                value: radarUpdatedText(radar),
+                color: MonitorTheme.textPrimary
+            )
+            RadarSummaryCell(
+                label: "Status",
+                value: radar.status?.replacingOccurrences(of: "_", with: " ") ?? "--",
+                color: codexRadarStatusColor(radar.status)
+            )
+            RadarSummaryCell(
+                label: "Cost",
+                value: radar.costUSD.map { String(format: "$%.2f", $0) } ?? "--",
+                color: MonitorTheme.running
+            )
+        }
+    }
+
+    private func codexRadarEmptyMessage(_ radar: CodexRadarSnapshot) -> some View {
+        HStack {
+            Text(radar.message ?? "暂无 Codex Radar 模型数据")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textSecondary)
+                .lineLimit(2)
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 50)
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+
+    private func codexRadarQuotaTable(_ radar: CodexRadarSnapshot) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                radarTableHeader("Plan")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                radarTableHeader("5h")
+                    .frame(width: 86, alignment: .trailing)
+                radarTableHeader("7d")
+                    .frame(width: 86, alignment: .trailing)
+                radarTableHeader("Basis")
+                    .frame(width: 96, alignment: .trailing)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 25)
+
+            Rectangle()
+                .fill(MonitorTheme.separator)
+                .frame(height: 0.6)
+
+            if radar.quotaRows.isEmpty {
+                HStack {
+                    Text("暂无 quota radar 摘要")
+                        .font(.system(size: 10.4, weight: .semibold))
+                        .foregroundStyle(MonitorTheme.textSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+            } else {
+                ForEach(radar.quotaRows) { row in
+                    CodexRadarQuotaRowView(row: row)
+                }
+            }
+        }
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+
+    private func codexRadarFooter(_ radar: CodexRadarSnapshot) -> some View {
+        HStack(spacing: 8) {
+            Text(radar.attributionText)
+                .font(.system(size: 9.4, weight: .medium))
+                .foregroundStyle(MonitorTheme.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Spacer()
+            Button {
+                NSWorkspace.shared.open(radar.siteURL)
+            } label: {
+                Image(systemName: "arrow.up.forward.app.fill")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(IconButtonStyle())
+            .help("打开 codexradar.com")
+        }
+        .padding(.horizontal, 2)
+        .padding(.top, 1)
+    }
+
+    private func radarUpdatedText(_ radar: CodexRadarSnapshot) -> String {
+        let date = radar.monitoredAt ?? radar.quotaUpdatedAt ?? radar.lastFetchAt
+        guard let date else {
+            return "--"
+        }
+        return Self.radarDateFormatter.string(from: date)
+    }
+
+    private func codexRadarStatusColor(_ status: String?) -> Color {
+        switch status?.lowercased() {
+        case "green", "open", "normal":
+            MonitorTheme.healthy
+        case "yellow", "warning", "community_confirmed":
+            MonitorTheme.warning
+        case "red", "error", "closed":
+            MonitorTheme.critical
+        default:
+            MonitorTheme.textPrimary
+        }
+    }
+
+    private func radarTableHeader(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9.6, weight: .semibold))
+            .foregroundStyle(MonitorTheme.textSecondary)
+    }
+
+    private static let radarDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M/d HH:mm"
+        return formatter
+    }()
 
     private var remoteContent: some View {
         VStack(spacing: 8) {
@@ -967,6 +1185,8 @@ private struct PageSwitcherButton: View {
 
                 Text(title)
                     .font(.system(size: 10, weight: isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
             .frame(maxWidth: .infinity)
             .frame(height: IslandMetrics.detailPageSwitcherHeight - 6)
@@ -1597,5 +1817,156 @@ private struct PeriodUsageCell: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(MonitorTheme.hairline, lineWidth: 0.6)
         )
+    }
+}
+
+private struct RadarSummaryCell: View {
+    let label: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 9.4, weight: .medium))
+                .foregroundStyle(MonitorTheme.textSecondary)
+            Text(value)
+                .font(.system(size: 10.8, weight: .semibold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.68)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+}
+
+private struct CodexRadarModelCard: View {
+    let model: CodexRadarModelScore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: statusColor.opacity(0.38), radius: 3, x: 0, y: 0)
+
+                Text(model.label)
+                    .font(.system(size: 10.3, weight: .semibold))
+                    .foregroundStyle(MonitorTheme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            Text(scoreText)
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(statusColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .monospacedDigit()
+
+            HStack(spacing: 5) {
+                Text(passText)
+                if let wallTimeHuman = model.wallTimeHuman {
+                    Text(wallTimeHuman)
+                }
+            }
+            .font(.system(size: 8.7, weight: .medium))
+            .foregroundStyle(MonitorTheme.textTertiary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.70)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+        .background(statusColor.opacity(0.075), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(statusColor.opacity(0.18), lineWidth: 0.7)
+        )
+    }
+
+    private var scoreText: String {
+        guard let score = model.score else {
+            return "--"
+        }
+        return String(format: "%.1f", score)
+    }
+
+    private var passText: String {
+        guard let passed = model.passed,
+              let tasks = model.tasks else {
+            return "--/--"
+        }
+        return "\(passed)/\(tasks)"
+    }
+
+    private var statusColor: Color {
+        switch model.status?.lowercased() {
+        case "green":
+            MonitorTheme.healthy
+        case "yellow":
+            MonitorTheme.warning
+        case "red":
+            MonitorTheme.critical
+        default:
+            MonitorTheme.running
+        }
+    }
+}
+
+private struct CodexRadarQuotaRowView: View {
+    let row: CodexRadarQuotaRow
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(row.tier)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textPrimary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(quotaText(row.fiveH))
+                .font(.system(size: 10.4, weight: .semibold))
+                .foregroundStyle(MonitorTheme.running)
+                .lineLimit(1)
+                .monospacedDigit()
+                .frame(width: 86, alignment: .trailing)
+
+            Text(quotaText(row.sevenD))
+                .font(.system(size: 10.4, weight: .semibold))
+                .foregroundStyle(MonitorTheme.healthy)
+                .lineLimit(1)
+                .monospacedDigit()
+                .frame(width: 86, alignment: .trailing)
+
+            Text(row.basis ?? "--")
+                .font(.system(size: 9.2, weight: .medium))
+                .foregroundStyle(MonitorTheme.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+                .frame(width: 96, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 31)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(MonitorTheme.separator)
+                .frame(height: 0.6)
+        }
+    }
+
+    private func quotaText(_ value: Double?) -> String {
+        guard let value else {
+            return "--"
+        }
+        return String(format: "%.1f", value)
     }
 }

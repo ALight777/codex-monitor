@@ -45,6 +45,7 @@ private enum RefreshPreset: String, CaseIterable, Identifiable {
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case codex
+    case codexRadar
     case remoteCodex
     case newAPI
     case subAPI
@@ -57,6 +58,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "Codex"
+        case .codexRadar:
+            "Codex Radar"
         case .remoteCodex:
             "CLIProxyAPI"
         case .newAPI:
@@ -74,6 +77,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "circle.grid.2x2.fill"
+        case .codexRadar:
+            "dot.radiowaves.left.and.right"
         case .remoteCodex:
             "network"
         case .newAPI:
@@ -107,6 +112,7 @@ private struct SettingsDraft: Equatable {
     var fileChangeRefreshMinimumGap: TimeInterval = 15
     var rateLimitSource: RateLimitSourcePreference = .appServerFirst
     var showPeriodUsage = true
+    var codexRadarEnabled = true
     var taskHistoryRange: TaskHistoryRange = .threeDays
     var notchDisplaySource: NotchDisplaySource = .codex
     var remoteMonitorEnabled = false
@@ -147,6 +153,7 @@ private struct SettingsDraft: Equatable {
         fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
         rateLimitSource = settings.rateLimitSource
         showPeriodUsage = settings.showPeriodUsage
+        codexRadarEnabled = settings.codexRadarEnabled
         taskHistoryRange = settings.taskHistoryRange
         notchDisplaySource = settings.notchDisplaySource
         remoteMonitorEnabled = settings.remoteMonitorEnabled
@@ -200,6 +207,7 @@ struct SettingsView: View {
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
     @ObservedObject var subAPIViewModel: BalanceMonitorViewModel
+    @ObservedObject var codexRadarViewModel: CodexRadarViewModel
     let onRefresh: () -> Void
 
     @State private var draft = SettingsDraft()
@@ -347,6 +355,8 @@ struct SettingsView: View {
         switch selectedTab {
         case .codex:
             codexSettingsContent
+        case .codexRadar:
+            codexRadarSettingsContent
         case .remoteCodex:
             remoteCodexSettingsContent
         case .newAPI:
@@ -471,6 +481,39 @@ struct SettingsView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.red.opacity(0.85))
             }
+        }
+    }
+
+    @ViewBuilder
+    private var codexRadarSettingsContent: some View {
+        Section("Codex Radar") {
+            Toggle(isOn: $draft.codexRadarEnabled) {
+                HelpLabel(title: "启用 Codex Radar", help: "启用后详情页会出现 Codex Radar tab，用于展示 codexradar.com 的公开 summary 数据。")
+            }
+
+            Text("数据来自公开 summary，每天最多两次自动刷新：北京时间 08:20 和 14:20。手动刷新会限制为至少间隔 5 分钟。")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                HelpLabel(title: "公开来源", help: "只读取 https://codexradar.com/current.json，不调用需要授权的 full API，也不保存账号、token、cookie 或身份信息。")
+                Spacer()
+                Text(codexRadarStatusText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(codexRadarStatusColor)
+                    .lineLimit(1)
+                Button("刷新 Radar") {
+                    codexRadarViewModel.refreshNow()
+                }
+                .disabled(!settings.codexRadarEnabled || draft.codexRadarEnabled != settings.codexRadarEnabled || codexRadarViewModel.isRefreshing)
+            }
+        }
+
+        Section("归属") {
+            Text(CodexRadarSnapshot.defaultAttributionText)
+                .font(.system(size: 12, weight: .semibold))
+            Link("打开 codexradar.com", destination: CodexRadarSnapshot.siteURL)
         }
     }
 
@@ -1345,6 +1388,36 @@ struct SettingsView: View {
         }
     }
 
+    private var codexRadarStatusText: String {
+        switch codexRadarViewModel.snapshot.panelState {
+        case .disabled:
+            "未启用"
+        case .loading:
+            "读取中"
+        case .ready:
+            codexRadarViewModel.snapshot.models.isEmpty ? "无模型数据" : "已更新"
+        case .stale:
+            "数据可能过期"
+        case .error:
+            codexRadarViewModel.snapshot.message ?? "读取失败"
+        }
+    }
+
+    private var codexRadarStatusColor: Color {
+        switch codexRadarViewModel.snapshot.panelState {
+        case .disabled:
+            .secondary
+        case .loading:
+            .secondary
+        case .ready:
+            .green
+        case .stale:
+            .orange
+        case .error:
+            .red
+        }
+    }
+
     private func thresholdValidationMessage(for draft: SettingsDraft) -> String? {
         if let message = draft.newAPIThresholds.orderValidationMessage {
             return "NewAPI 默认阈值：\(message)"
@@ -1417,6 +1490,7 @@ struct SettingsView: View {
         settings.fileChangeRefreshMinimumGap = next.fileChangeRefreshMinimumGap
         settings.rateLimitSource = next.rateLimitSource
         settings.showPeriodUsage = next.showPeriodUsage
+        settings.codexRadarEnabled = next.codexRadarEnabled
         settings.taskHistoryRange = next.taskHistoryRange
         settings.notchDisplaySource = next.notchDisplaySource
 
@@ -1477,6 +1551,8 @@ struct SettingsView: View {
         switch selectedTab {
         case .codex, .launch, .about:
             onRefresh()
+        case .codexRadar:
+            codexRadarViewModel.refreshNow()
         case .remoteCodex:
             remoteViewModel.refreshNow()
         case .newAPI:

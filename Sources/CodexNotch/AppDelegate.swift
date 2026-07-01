@@ -89,6 +89,7 @@ final class NotchOverlayController {
     private lazy var remoteViewModel = RemoteMonitorViewModel(settings: settings)
     private lazy var newAPIViewModel = BalanceMonitorViewModel(source: .newAPI, settings: settings)
     private lazy var subAPIViewModel = BalanceMonitorViewModel(source: .subAPI, settings: settings)
+    private lazy var codexRadarViewModel = CodexRadarViewModel(settings: settings)
     private let overlayState = OverlayState()
     private let window: NSPanel
     private var detailWindow: NSPanel?
@@ -97,6 +98,7 @@ final class NotchOverlayController {
         remoteViewModel: remoteViewModel,
         newAPIViewModel: newAPIViewModel,
         subAPIViewModel: subAPIViewModel,
+        codexRadarViewModel: codexRadarViewModel,
         onRefresh: { [weak self] in
             self?.viewModel.refreshAll()
         }
@@ -117,6 +119,7 @@ final class NotchOverlayController {
         observeState()
         observeScreenChanges()
         installEventMonitors()
+        _ = codexRadarViewModel
         updateFrames()
     }
 
@@ -187,6 +190,7 @@ final class NotchOverlayController {
             remoteViewModel: remoteViewModel,
             newAPIViewModel: newAPIViewModel,
             subAPIViewModel: subAPIViewModel,
+            codexRadarViewModel: codexRadarViewModel,
             settings: settings,
             onSettings: { [weak self] in
                 self?.showSettings()
@@ -202,6 +206,9 @@ final class NotchOverlayController {
             },
             onSubAPIRefresh: { [weak self] in
                 self?.subAPIViewModel.refreshNow()
+            },
+            onCodexRadarRefresh: { [weak self] in
+                self?.codexRadarViewModel.refreshNow()
             }
         )
         let detailHostingView = NSHostingView(rootView: detailView)
@@ -353,6 +360,9 @@ final class NotchOverlayController {
         if settings.subAPIMonitorEnabled {
             subAPIViewModel.refreshNow()
         }
+        if settings.codexRadarEnabled {
+            codexRadarViewModel.refreshIfNeeded()
+        }
     }
 
     private func restorePanelOrdering() {
@@ -449,6 +459,7 @@ final class SettingsWindowController {
     private let remoteViewModel: RemoteMonitorViewModel
     private let newAPIViewModel: BalanceMonitorViewModel
     private let subAPIViewModel: BalanceMonitorViewModel
+    private let codexRadarViewModel: CodexRadarViewModel
     private let onRefresh: () -> Void
     private var window: NSWindow?
 
@@ -457,12 +468,14 @@ final class SettingsWindowController {
         remoteViewModel: RemoteMonitorViewModel,
         newAPIViewModel: BalanceMonitorViewModel,
         subAPIViewModel: BalanceMonitorViewModel,
+        codexRadarViewModel: CodexRadarViewModel,
         onRefresh: @escaping () -> Void
     ) {
         self.settings = settings
         self.remoteViewModel = remoteViewModel
         self.newAPIViewModel = newAPIViewModel
         self.subAPIViewModel = subAPIViewModel
+        self.codexRadarViewModel = codexRadarViewModel
         self.onRefresh = onRefresh
     }
 
@@ -480,6 +493,7 @@ final class SettingsWindowController {
             remoteViewModel: remoteViewModel,
             newAPIViewModel: newAPIViewModel,
             subAPIViewModel: subAPIViewModel,
+            codexRadarViewModel: codexRadarViewModel,
             onRefresh: onRefresh
         )
         let hostingView = NSHostingView(rootView: view)

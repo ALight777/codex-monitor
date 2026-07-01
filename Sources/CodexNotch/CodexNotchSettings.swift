@@ -37,6 +37,7 @@ final class CodexNotchSettings: ObservableObject {
         static let fileChangeRefreshMinimumGap = "fileChangeRefreshMinimumGap"
         static let rateLimitSource = "rateLimitSource"
         static let showPeriodUsage = "showPeriodUsage"
+        static let codexRadarEnabled = "codexRadarEnabled"
         static let enablePulse = "enablePulse"
         static let taskHistoryRange = "taskHistoryRange"
         static let notchDisplaySource = "notchDisplaySource"
@@ -113,6 +114,12 @@ final class CodexNotchSettings: ObservableObject {
     @Published var showPeriodUsage: Bool {
         didSet {
             defaults.set(showPeriodUsage, forKey: Keys.showPeriodUsage)
+        }
+    }
+
+    @Published var codexRadarEnabled: Bool {
+        didSet {
+            defaults.set(codexRadarEnabled, forKey: Keys.codexRadarEnabled)
         }
     }
 
@@ -386,6 +393,7 @@ final class CodexNotchSettings: ObservableObject {
         self.fileChangeRefreshMinimumGap = Self.clamped(defaults.object(forKey: Keys.fileChangeRefreshMinimumGap) as? TimeInterval ?? 15, min: 1, max: 30)
         self.rateLimitSource = RateLimitSourcePreference(rawValue: defaults.string(forKey: Keys.rateLimitSource) ?? "") ?? .appServerFirst
         self.showPeriodUsage = defaults.object(forKey: Keys.showPeriodUsage) as? Bool ?? true
+        self.codexRadarEnabled = defaults.object(forKey: Keys.codexRadarEnabled) as? Bool ?? true
         self.enablePulse = defaults.object(forKey: Keys.enablePulse) as? Bool ?? true
         self.taskHistoryRange = TaskHistoryRange(rawValue: defaults.string(forKey: Keys.taskHistoryRange) ?? "") ?? .threeDays
         self.notchDisplaySource = NotchDisplaySource(rawValue: defaults.string(forKey: Keys.notchDisplaySource) ?? "") ?? .codex

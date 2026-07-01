@@ -124,12 +124,12 @@ struct NotchIslandView: View {
     }
 
     private var collapsedContent: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             statusBlock
 
             rateLimitBlock
         }
-        .padding(.horizontal, 13)
+        .padding(.horizontal, 12)
         .padding(.top, 4)
         .frame(
             width: IslandMetrics.collapsedPillWidth,
@@ -156,7 +156,7 @@ struct NotchIslandView: View {
     }
 
     private var rateLimitBlock: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             ForEach(collapsedMetrics) { metric in
                 CollapsedMetricRow(metric: metric)
             }
@@ -263,8 +263,8 @@ struct NotchIslandView: View {
                 ),
                 CollapsedMetric(
                     id: "tok",
-                    label: "今日",
-                    value: todayTokens > 0 ? Formatters.compactTokens(todayTokens) : "--",
+                    label: "Today",
+                    value: todayTokens > 0 ? Formatters.compactTokensEnglish(todayTokens) : "--",
                     color: MonitorTheme.textPrimary
                 )
             ]
@@ -272,8 +272,8 @@ struct NotchIslandView: View {
                 metrics.append(
                     CollapsedMetric(
                         id: "delta1h",
-                        label: "近1h",
-                        value: Formatters.signedCompactTokens(delta1h),
+                        label: "1h",
+                        value: Formatters.signedCompactTokensEnglish(delta1h),
                         color: delta1h > 0 ? MonitorTheme.running : MonitorTheme.textSecondary
                     )
                 )

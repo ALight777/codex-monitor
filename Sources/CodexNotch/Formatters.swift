@@ -15,6 +15,20 @@ enum Formatters {
         return "\(value)"
     }
 
+    static func compactTokensEnglish(_ value: Int) -> String {
+        let absolute = abs(value)
+        if absolute >= 1_000_000_000 {
+            return String(format: "%.1fB", Double(value) / 1_000_000_000)
+        }
+        if absolute >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        }
+        if absolute >= 1_000 {
+            return String(format: "%.1fK", Double(value) / 1_000)
+        }
+        return "\(value)"
+    }
+
     static func percent(_ value: Int?) -> String {
         guard let value else {
             return "--"
@@ -37,6 +51,16 @@ enum Formatters {
             return "0"
         }
         return "+\(compactTokens(value))"
+    }
+
+    static func signedCompactTokensEnglish(_ value: Int?) -> String {
+        guard let value else {
+            return "--"
+        }
+        guard value > 0 else {
+            return "0"
+        }
+        return "+\(compactTokensEnglish(value))"
     }
 
     static func compactTokenRatio(_ numerator: Int?, _ denominator: Int?) -> String {

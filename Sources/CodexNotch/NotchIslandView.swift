@@ -276,16 +276,15 @@ struct NotchIslandView: View {
                     color: MonitorTheme.textPrimary
                 )
             ]
-            if let delta1h = snapshot.tasks.first?.delta1hTokens {
-                metrics.append(
-                    CollapsedMetric(
-                        id: "delta1h",
-                        label: "1h",
-                        value: Formatters.signedCompactTokensEnglish(delta1h),
-                        color: delta1h > 0 ? MonitorTheme.running : MonitorTheme.textSecondary
-                    )
+            let usage1h = snapshot.usage1h
+            metrics.append(
+                CollapsedMetric(
+                    id: "usage1h",
+                    label: "1h",
+                    value: Formatters.signedCompactTokensEnglish(usage1h),
+                    color: (usage1h ?? 0) > 0 ? MonitorTheme.running : MonitorTheme.textSecondary
                 )
-            }
+            )
             return metrics
         case .remoteCodex:
             let remote = remoteViewModel.snapshot

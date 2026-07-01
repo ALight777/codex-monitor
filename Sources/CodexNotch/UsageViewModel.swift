@@ -95,6 +95,9 @@ final class UsageViewModel: ObservableObject {
             await MainActor.run {
                 let wasRunning = self.snapshot.isRunning
                 var mergedSnapshot = self.stabilizedSnapshot(nextSnapshot)
+                if mergedSnapshot.usage1h == nil {
+                    mergedSnapshot.usage1h = self.snapshot.usage1h
+                }
                 mergedSnapshot.usage24h = self.snapshot.usage24h
                 mergedSnapshot.usage7d = self.snapshot.usage7d
                 mergedSnapshot.usage30d = self.snapshot.usage30d
@@ -448,10 +451,12 @@ final class UsageViewModel: ObservableObject {
         }
 
         if snapshot.errorMessage != nil,
+           snapshot.usage1h == nil,
            snapshot.usage24h == 0,
            snapshot.usage7d == 0,
            snapshot.usage30d == 0,
            previous.usage30d > 0 {
+            snapshot.usage1h = previous.usage1h
             snapshot.usage24h = previous.usage24h
             snapshot.usage7d = previous.usage7d
             snapshot.usage30d = previous.usage30d

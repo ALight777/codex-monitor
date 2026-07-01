@@ -44,6 +44,7 @@ let snapshotFormatterTask = CodexTask(
 let snapshotFormatterSnapshot = UsageSnapshot(
     primaryPercent: 88,
     secondaryPercent: 66,
+    usage1h: 444,
     usage24h: 111,
     usage7d: 222,
     usage30d: 333,
@@ -63,6 +64,10 @@ let snapshotFormatterSnapshot = UsageSnapshot(
 )
 let humanSnapshotLines = SnapshotOutputFormatter.humanLines(for: snapshotFormatterSnapshot)
 runner.check(
+    humanSnapshotLines.contains("usage1h=444 usage24h=111 usage7d=222 usage30d=333"),
+    "human snapshot output should expose aggregate 1 hour usage"
+)
+runner.check(
     humanSnapshotLines.contains("monitor snapshot_ms=42 usage_ms=84 delta_ms=5 rate=local-jsonl watched=7 context_scans=2 model_tokens=0"),
     "human snapshot output should expose monitor self cost"
 )
@@ -78,6 +83,10 @@ let jsonSnapshot = try JSONSerialization.jsonObject(
     with: SnapshotOutputFormatter.jsonData(for: snapshotFormatterSnapshot)
 ) as? [String: Any]
 let jsonMonitor = jsonSnapshot?["monitor"] as? [String: Any]
+runner.check(
+    jsonSnapshot?["usage_1h"] as? Int == 444,
+    "JSON snapshot output should expose aggregate 1 hour usage"
+)
 runner.check(
     jsonMonitor?["last_snapshot_duration_ms"] as? Int == 42,
     "JSON snapshot output should expose snapshot duration"
@@ -2257,6 +2266,47 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     """
 ])
 
+let deltaDirectory = tempRoot.appendingPathComponent("context-guard", isDirectory: true)
+try FileManager.default.createDirectory(at: deltaDirectory, withIntermediateDirectories: true)
+let deltaDatabase = deltaDirectory.appendingPathComponent("usage-deltas.sqlite").path
+let observedNowMs = Int64((now.timeIntervalSince1970 * 1_000).rounded())
+let oneHourBaselineMs = observedNowMs - Int64(61 * 60 * 1_000)
+let staleCurrentMs = observedNowMs - Int64(2 * 60 * 60 * 1_000)
+let staleBaselineMs = observedNowMs - Int64(3 * 60 * 60 * 1_000)
+let staleDeltaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd8"
+let missingBaselineDeltaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd9"
+_ = try Shell.run("/usr/bin/sqlite3", [
+    deltaDatabase,
+    """
+    create table token_snapshots (
+      thread_id text primary key,
+      tokens_used integer not null,
+      updated_at_ms integer not null,
+      observed_at_ms integer not null
+    );
+    create table token_snapshot_history (
+      thread_id text not null,
+      tokens_used integer not null,
+      updated_at_ms integer not null,
+      observed_at_ms integer not null,
+      primary key(thread_id, observed_at_ms)
+    );
+    create index idx_token_snapshot_history_lookup
+      on token_snapshot_history(thread_id, observed_at_ms desc);
+    insert into token_snapshots(thread_id, tokens_used, updated_at_ms, observed_at_ms)
+    values
+      ('\(sessionID)', 185801, \(observedNowMs), \(observedNowMs)),
+      ('\(parentOnlySessionID)', 80245, \(observedNowMs), \(observedNowMs)),
+      ('\(staleDeltaSessionID)', 10000, \(staleCurrentMs), \(staleCurrentMs)),
+      ('\(missingBaselineDeltaSessionID)', 500, \(observedNowMs), \(observedNowMs));
+    insert into token_snapshot_history(thread_id, tokens_used, updated_at_ms, observed_at_ms)
+    values
+      ('\(sessionID)', 180000, \(oneHourBaselineMs), \(oneHourBaselineMs)),
+      ('\(parentOnlySessionID)', 80000, \(oneHourBaselineMs), \(oneHourBaselineMs)),
+      ('\(staleDeltaSessionID)', 1000, \(staleBaselineMs), \(staleBaselineMs));
+    """
+])
+
 let localStore = CodexUsageStore(codexDirectory: tempRoot)
 let localSnapshot = localStore.loadSnapshot(
     includePeriodUsage: false,
@@ -2266,6 +2316,8 @@ let localSnapshot = localStore.loadSnapshot(
     now: now
 )
 runner.check(localSnapshot.isRunning, "recent session rollout should mark local Codex as running")
+runner.check(localSnapshot.usage1h == 6046, "aggregate 1 hour usage should sum all recent delta snapshots")
+runner.check(localSnapshot.tasks.first?.delta1hTokens != localSnapshot.usage1h, "aggregate 1 hour usage should not reuse the first visible task delta")
 runner.check(localSnapshot.tasks.contains { $0.id == sessionID && $0.status == .running }, "recent session rollout should appear in running task list")
 runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.title == "正在运行的 Codex 任务", "session rollout should use the user message as task title")
 runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.detail.contains("gpt-5.5 · 超高推理") == true, "session rollout should use turn context model and effort")

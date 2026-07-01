@@ -10,7 +10,7 @@ enum SnapshotOutputFormatter {
     static func humanLines(for snapshot: UsageSnapshot, taskLimit: Int = 4) -> [String] {
         var lines = [
             "primary=\(Formatters.percent(snapshot.primaryPercent)) secondary=\(Formatters.percent(snapshot.secondaryPercent)) running=\(snapshot.isRunning)",
-            "usage24h=\(snapshot.usage24h) usage7d=\(snapshot.usage7d) usage30d=\(snapshot.usage30d)",
+            "usage1h=\(optionalInt(snapshot.usage1h)) usage24h=\(snapshot.usage24h) usage7d=\(snapshot.usage7d) usage30d=\(snapshot.usage30d)",
             "monitor snapshot_ms=\(optionalInt(snapshot.monitorStats.lastSnapshotDurationMs)) usage_ms=\(optionalInt(snapshot.monitorStats.lastUsageDurationMs)) delta_ms=\(optionalInt(snapshot.monitorStats.lastDeltaDurationMs)) rate=\(snapshot.monitorStats.lastRateLimitSource) watched=\(snapshot.monitorStats.watchedPathCount) context_scans=\(snapshot.monitorStats.jsonlContextScans) model_tokens=\(snapshot.monitorStats.monitorModelTokens)"
         ]
 
@@ -35,6 +35,7 @@ enum SnapshotOutputFormatter {
             primaryPercent: snapshot.primaryPercent,
             secondaryPercent: snapshot.secondaryPercent,
             running: snapshot.isRunning,
+            usage1h: snapshot.usage1h,
             usage24h: snapshot.usage24h,
             usage7d: snapshot.usage7d,
             usage30d: snapshot.usage30d,
@@ -58,6 +59,7 @@ private struct SnapshotJSON: Encodable {
     let primaryPercent: Int?
     let secondaryPercent: Int?
     let running: Bool
+    let usage1h: Int?
     let usage24h: Int
     let usage7d: Int
     let usage30d: Int
@@ -70,6 +72,7 @@ private struct SnapshotJSON: Encodable {
         case primaryPercent = "primary_percent"
         case secondaryPercent = "secondary_percent"
         case running
+        case usage1h = "usage_1h"
         case usage24h = "usage_24h"
         case usage7d = "usage_7d"
         case usage30d = "usage_30d"

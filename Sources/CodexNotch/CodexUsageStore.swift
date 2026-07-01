@@ -167,6 +167,7 @@ final class CodexUsageStore: @unchecked Sendable {
             let rateLimitResult = loadRateLimits(from: rateLimitPaths, source: rateLimitSource, now: now)
             let deltaStartedAt = Date()
             let deltas = loadTokenDeltas(for: threads, now: now)
+            let aggregateDeltas = loadAggregateTokenDeltas(now: now)
             let deltaDurationMs = elapsedMilliseconds(since: deltaStartedAt)
             let taskResult = buildTasks(
                 from: threads,
@@ -189,6 +190,7 @@ final class CodexUsageStore: @unchecked Sendable {
             return UsageSnapshot(
                 primaryPercent: rateLimitResult.snapshot.primaryDisplayPercent(now: now),
                 secondaryPercent: rateLimitResult.snapshot.secondaryDisplayPercent(now: now),
+                usage1h: aggregateDeltas.delta1hTokens,
                 usage24h: usage.day,
                 usage7d: usage.week,
                 usage30d: usage.month,
@@ -244,6 +246,7 @@ final class CodexUsageStore: @unchecked Sendable {
         UsageSnapshot(
             primaryPercent: nil,
             secondaryPercent: nil,
+            usage1h: nil,
             usage24h: 0,
             usage7d: 0,
             usage30d: 0,
@@ -301,6 +304,7 @@ final class CodexUsageStore: @unchecked Sendable {
         let snapshotStartedAt = Date()
         let deltaStartedAt = Date()
         let deltas = loadTokenDeltas(for: cache.threads, now: now)
+        let aggregateDeltas = loadAggregateTokenDeltas(now: now)
         let deltaDurationMs = elapsedMilliseconds(since: deltaStartedAt)
         let taskResult = buildTasks(
             from: cache.threads,
@@ -313,6 +317,7 @@ final class CodexUsageStore: @unchecked Sendable {
         return UsageSnapshot(
             primaryPercent: cache.rateLimits.primaryDisplayPercent(now: now),
             secondaryPercent: cache.rateLimits.secondaryDisplayPercent(now: now),
+            usage1h: aggregateDeltas.delta1hTokens,
             usage24h: usage.day,
             usage7d: usage.week,
             usage30d: usage.month,
@@ -1276,6 +1281,95 @@ final class CodexUsageStore: @unchecked Sendable {
                 )
             },
             uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    private func loadAggregateTokenDeltas(now: Date) -> TokenDeltaWindow {
+        guard FileManager.default.fileExists(atPath: deltaDatabase) else {
+            return TokenDeltaWindow(delta10mTokens: nil, delta1hTokens: nil)
+        }
+
+        let nowMs = Int64((now.timeIntervalSince1970 * 1_000).rounded())
+        let tenMinutesAgo = nowMs - Int64(10 * 60 * 1_000)
+        let oneHourAgo = nowMs - Int64(60 * 60 * 1_000)
+        let query = """
+        WITH current_rows AS (
+          SELECT
+            lower(thread_id) AS thread_id,
+            CASE WHEN tokens_used > 0 THEN tokens_used ELSE 0 END AS tokens_used,
+            observed_at_ms
+          FROM token_snapshots
+          WHERE observed_at_ms > \(oneHourAgo)
+        ),
+        rows_with_baselines AS (
+          SELECT
+            current_rows.thread_id,
+            current_rows.tokens_used,
+            current_rows.observed_at_ms,
+            (
+              SELECT baseline.tokens_used
+              FROM (
+                SELECT h.tokens_used, h.observed_at_ms
+                FROM token_snapshot_history AS h
+                WHERE h.thread_id = current_rows.thread_id
+                  AND h.observed_at_ms <= \(tenMinutesAgo)
+                UNION ALL
+                SELECT s.tokens_used, s.observed_at_ms
+                FROM token_snapshots AS s
+                WHERE s.thread_id = current_rows.thread_id
+                  AND s.observed_at_ms <= \(tenMinutesAgo)
+              ) AS baseline
+              ORDER BY baseline.observed_at_ms DESC
+              LIMIT 1
+            ) AS baseline_10m,
+            (
+              SELECT baseline.tokens_used
+              FROM (
+                SELECT h.tokens_used, h.observed_at_ms
+                FROM token_snapshot_history AS h
+                WHERE h.thread_id = current_rows.thread_id
+                  AND h.observed_at_ms <= \(oneHourAgo)
+                UNION ALL
+                SELECT s.tokens_used, s.observed_at_ms
+                FROM token_snapshots AS s
+                WHERE s.thread_id = current_rows.thread_id
+                  AND s.observed_at_ms <= \(oneHourAgo)
+              ) AS baseline
+              ORDER BY baseline.observed_at_ms DESC
+              LIMIT 1
+            ) AS baseline_1h
+          FROM current_rows
+        )
+        SELECT
+          COALESCE(SUM(
+            CASE
+              WHEN observed_at_ms <= \(tenMinutesAgo) OR baseline_10m IS NULL THEN 0
+              WHEN tokens_used >= baseline_10m THEN tokens_used - baseline_10m
+              ELSE 0
+            END
+          ), 0) AS delta_10m_tokens,
+          COALESCE(SUM(
+            CASE
+              WHEN baseline_1h IS NULL THEN 0
+              WHEN tokens_used >= baseline_1h THEN tokens_used - baseline_1h
+              ELSE 0
+            END
+          ), 0) AS delta_1h_tokens
+        FROM rows_with_baselines;
+        """
+
+        guard let record = try? Shell.sqliteJSON(
+            database: deltaDatabase,
+            query: query,
+            as: [TokenDeltaAggregateRecord].self,
+            readOnly: true
+        ).first else {
+            return TokenDeltaWindow(delta10mTokens: nil, delta1hTokens: nil)
+        }
+
+        return TokenDeltaWindow(
+            delta10mTokens: record.delta10mTokens,
+            delta1hTokens: record.delta1hTokens
         )
     }
 
@@ -2410,6 +2504,16 @@ private struct TokenDeltaRecord: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case threadId = "thread_id"
+        case delta10mTokens = "delta_10m_tokens"
+        case delta1hTokens = "delta_1h_tokens"
+    }
+}
+
+private struct TokenDeltaAggregateRecord: Decodable {
+    let delta10mTokens: Int?
+    let delta1hTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
         case delta10mTokens = "delta_10m_tokens"
         case delta1hTokens = "delta_1h_tokens"
     }

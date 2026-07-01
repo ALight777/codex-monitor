@@ -47,6 +47,8 @@ let snapshotFormatterTask = CodexTask(
 let snapshotFormatterSnapshot = UsageSnapshot(
     primaryPercent: 88,
     secondaryPercent: 66,
+    primaryResetsAt: 1_783_000_000,
+    secondaryResetsAt: 1_783_400_000,
     usage1h: 444,
     usage24h: 111,
     usage7d: 222,
@@ -104,6 +106,14 @@ runner.check(
     jsonSnapshot?["usage_1h"] as? Int == 444,
     "JSON snapshot output should expose aggregate 1 hour usage"
 )
+runner.check(
+    jsonSnapshot?["primary_reset_at"] as? Int == 1_783_000_000,
+    "JSON snapshot output should expose primary quota reset time"
+)
+runner.check(
+    jsonSnapshot?["secondary_reset_at"] as? Int == 1_783_400_000,
+    "JSON snapshot output should expose secondary quota reset time"
+)
 let jsonSparkWindows = jsonSnapshot?["spark_quota_windows"] as? [[String: Any]]
 runner.check(
     jsonSparkWindows?.first?["label"] as? String == "5h",
@@ -112,6 +122,22 @@ runner.check(
 runner.check(
     jsonSparkWindows?.first?["remaining_percent"] as? Int == 12,
     "JSON snapshot output should expose Spark quota remaining percent"
+)
+runner.check(
+    Formatters.quotaResetText(
+        1_783_000_000,
+        now: Date(timeIntervalSince1970: 1_782_999_000),
+        timeZone: TimeZone(secondsFromGMT: 0)!
+    ) == "13:46 恢复",
+    "quota reset formatter should display future reset time"
+)
+runner.check(
+    Formatters.quotaResetText(
+        1_783_000_000,
+        now: Date(timeIntervalSince1970: 1_783_000_000),
+        timeZone: TimeZone(secondsFromGMT: 0)!
+    ) == nil,
+    "quota reset formatter should hide expired reset time"
 )
 runner.check(
     jsonMonitor?["last_snapshot_duration_ms"] as? Int == 42,
@@ -195,6 +221,8 @@ let appServerSnapshot = runner.require(
 )
 runner.check(appServerSnapshot.primaryPercent == 80, "app-server codex primary quota should remain the main 5h quota")
 runner.check(appServerSnapshot.secondaryPercent == 70, "app-server codex secondary quota should remain the main 7d quota")
+runner.check(appServerSnapshot.primaryResetsAt == 1783000000, "app-server codex primary reset time should decode")
+runner.check(appServerSnapshot.secondaryResetsAt == 1783400000, "app-server codex secondary reset time should decode")
 runner.check(appServerSnapshot.sparkQuotaWindows.map(\.label) == ["5h", "7d"], "app-server Spark quota windows should decode")
 runner.check(appServerSnapshot.sparkQuotaWindows.first?.remainingPercent == 0, "app-server Spark 5h remaining percent should decode")
 runner.check(appServerSnapshot.sparkQuotaWindows.last?.remainingPercent == 75, "app-server Spark 7d remaining percent should decode")
@@ -2199,6 +2227,7 @@ let completedFinalAnswerSessionID = "019e073a-c032-74e2-966e-b85ede0c9ccf"
 let dbBackedSessionID = "019e073a-c032-74e2-966e-b85ede0c9cce"
 let staleDBTokenSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd2"
 let activeToolCallSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd3"
+let codexQuotaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cdb"
 let sparkQuotaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cda"
 let sessionDirectory = tempRoot
     .appendingPathComponent("sessions/2026/06/14", isDirectory: true)
@@ -2381,6 +2410,22 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     """
 ])
 
+let codexQuotaPath = sessionDirectory
+    .appendingPathComponent("rollout-2026-06-14T02-20-18-\(codexQuotaSessionID).jsonl")
+let codexQuotaBody = """
+{"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Codex 额度恢复时间测试"}]}}
+{"timestamp":"\(timestamp)","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":0}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":33,"resets_at":1783000000},"secondary":{"used_percent":55,"resets_at":1783400000}}}}
+"""
+try codexQuotaBody.write(to: codexQuotaPath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: codexQuotaPath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    stateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(codexQuotaSessionID)', 'Codex 额度恢复时间测试', 0, 'gpt-5.5', 'high', '\(codexQuotaPath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+
 let sparkQuotaPath = sessionDirectory
     .appendingPathComponent("rollout-2026-06-14T02-20-17-\(sparkQuotaSessionID).jsonl")
 let sparkQuotaBody = """
@@ -2449,8 +2494,10 @@ let localSnapshot = localStore.loadSnapshot(
 runner.check(localSnapshot.isRunning, "recent session rollout should mark local Codex as running")
 runner.check(localSnapshot.usage1h == 6046, "aggregate 1 hour usage should sum all recent delta snapshots")
 runner.check(localSnapshot.tasks.first?.delta1hTokens != localSnapshot.usage1h, "aggregate 1 hour usage should not reuse the first visible task delta")
-runner.check(localSnapshot.primaryPercent == nil, "local Spark-only JSONL quota should not replace the main 5h quota")
-runner.check(localSnapshot.secondaryPercent == nil, "local Spark-only JSONL quota should not replace the main 7d quota")
+runner.check(localSnapshot.primaryPercent == 67, "local JSONL Codex quota should expose main 5h quota")
+runner.check(localSnapshot.secondaryPercent == 45, "local JSONL Codex quota should expose main 7d quota")
+runner.check(localSnapshot.primaryResetsAt == 1783000000, "local JSONL Codex quota should expose primary reset time")
+runner.check(localSnapshot.secondaryResetsAt == 1783400000, "local JSONL Codex quota should expose secondary reset time")
 runner.check(localSnapshot.sparkQuotaWindows.map(\.remainingPercent) == [60, 90], "local JSONL Spark quota windows should decode")
 runner.check(localSnapshot.tasks.contains { $0.id == sessionID && $0.status == .running }, "recent session rollout should appear in running task list")
 runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.title == "正在运行的 Codex 任务", "session rollout should use the user message as task title")

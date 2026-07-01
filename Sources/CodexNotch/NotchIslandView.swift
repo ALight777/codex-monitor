@@ -649,12 +649,14 @@ struct DetailPanelView: View {
                 label: "5h Quota",
                 value: Formatters.percent(snapshot.primaryPercent),
                 percent: snapshot.primaryPercent,
+                resetText: quotaResetText(for: snapshot.primaryResetsAt, percent: snapshot.primaryPercent),
                 color: quotaColor(for: snapshot.primaryPercent)
             )
             QuotaBarCell(
                 label: "7d Quota",
                 value: Formatters.percent(snapshot.secondaryPercent),
                 percent: snapshot.secondaryPercent,
+                resetText: quotaResetText(for: snapshot.secondaryResetsAt, percent: snapshot.secondaryPercent),
                 color: quotaColor(for: snapshot.secondaryPercent)
             )
             CompactStatusCell(
@@ -797,6 +799,13 @@ struct DetailPanelView: View {
             return MonitorTheme.warning
         }
         return MonitorTheme.healthy
+    }
+
+    private func quotaResetText(for resetAt: Int?, percent: Int?) -> String? {
+        guard percent != nil else {
+            return nil
+        }
+        return Formatters.quotaResetText(resetAt)
     }
 
     private var codexRadarHeaderStatus: String {
@@ -1332,6 +1341,7 @@ private struct QuotaBarCell: View {
     let label: String
     let value: String
     let percent: Int?
+    let resetText: String?
     let color: Color
 
     var body: some View {
@@ -1345,6 +1355,13 @@ private struct QuotaBarCell: View {
                     .font(.system(size: 10.4, weight: .semibold))
                     .foregroundStyle(color)
                     .monospacedDigit()
+                if let resetText {
+                    Text(resetText)
+                        .font(.system(size: 8.2, weight: .medium))
+                        .foregroundStyle(MonitorTheme.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
             }
 
             CapsuleQuotaBar(value: percent, color: color)
@@ -1383,6 +1400,8 @@ private struct SparkQuotaChip: View {
     private var helpText: String {
         var parts = ["GPT-5.3-Codex-Spark \(window.label)"]
         if let resetText = window.resetText {
+            parts.append(resetText)
+        } else if let resetText = Formatters.quotaResetText(window.resetAt) {
             parts.append(resetText)
         }
         return parts.joined(separator: " · ")

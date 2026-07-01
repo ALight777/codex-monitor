@@ -190,6 +190,8 @@ final class CodexUsageStore: @unchecked Sendable {
             return UsageSnapshot(
                 primaryPercent: rateLimitResult.snapshot.primaryDisplayPercent(now: now),
                 secondaryPercent: rateLimitResult.snapshot.secondaryDisplayPercent(now: now),
+                primaryResetsAt: rateLimitResult.snapshot.primaryResetsAt,
+                secondaryResetsAt: rateLimitResult.snapshot.secondaryResetsAt,
                 usage1h: aggregateDeltas.delta1hTokens,
                 usage24h: usage.day,
                 usage7d: usage.week,
@@ -247,6 +249,8 @@ final class CodexUsageStore: @unchecked Sendable {
         UsageSnapshot(
             primaryPercent: nil,
             secondaryPercent: nil,
+            primaryResetsAt: nil,
+            secondaryResetsAt: nil,
             usage1h: nil,
             usage24h: 0,
             usage7d: 0,
@@ -319,6 +323,8 @@ final class CodexUsageStore: @unchecked Sendable {
         return UsageSnapshot(
             primaryPercent: cache.rateLimits.primaryDisplayPercent(now: now),
             secondaryPercent: cache.rateLimits.secondaryDisplayPercent(now: now),
+            primaryResetsAt: cache.rateLimits.primaryResetsAt,
+            secondaryResetsAt: cache.rateLimits.secondaryResetsAt,
             usage1h: aggregateDeltas.delta1hTokens,
             usage24h: usage.day,
             usage7d: usage.week,

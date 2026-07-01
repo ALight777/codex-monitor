@@ -35,6 +35,8 @@ enum SnapshotOutputFormatter {
         let payload = SnapshotJSON(
             primaryPercent: snapshot.primaryPercent,
             secondaryPercent: snapshot.secondaryPercent,
+            primaryResetsAt: snapshot.primaryResetsAt,
+            secondaryResetsAt: snapshot.secondaryResetsAt,
             running: snapshot.isRunning,
             usage1h: snapshot.usage1h,
             usage24h: snapshot.usage24h,
@@ -60,6 +62,8 @@ enum SnapshotOutputFormatter {
 private struct SnapshotJSON: Encodable {
     let primaryPercent: Int?
     let secondaryPercent: Int?
+    let primaryResetsAt: Int?
+    let secondaryResetsAt: Int?
     let running: Bool
     let usage1h: Int?
     let usage24h: Int
@@ -74,6 +78,8 @@ private struct SnapshotJSON: Encodable {
     enum CodingKeys: String, CodingKey {
         case primaryPercent = "primary_percent"
         case secondaryPercent = "secondary_percent"
+        case primaryResetsAt = "primary_reset_at"
+        case secondaryResetsAt = "secondary_reset_at"
         case running
         case usage1h = "usage_1h"
         case usage24h = "usage_24h"

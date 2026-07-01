@@ -39,6 +39,8 @@ enum SettingsShortcutFilter {
 struct UsageSnapshot: Equatable {
     var primaryPercent: Int?
     var secondaryPercent: Int?
+    var primaryResetsAt: Int?
+    var secondaryResetsAt: Int?
     var usage1h: Int?
     var usage24h: Int
     var usage7d: Int
@@ -53,6 +55,8 @@ struct UsageSnapshot: Equatable {
     static let empty = UsageSnapshot(
         primaryPercent: nil,
         secondaryPercent: nil,
+        primaryResetsAt: nil,
+        secondaryResetsAt: nil,
         usage1h: nil,
         usage24h: 0,
         usage7d: 0,

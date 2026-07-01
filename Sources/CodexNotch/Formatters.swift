@@ -43,6 +43,22 @@ enum Formatters {
         return String(format: "%.1f%%", value)
     }
 
+    static func quotaResetText(
+        _ resetAt: Int?,
+        now: Date = Date(),
+        timeZone: TimeZone = .current
+    ) -> String? {
+        guard let resetAt, resetAt > Int(now.timeIntervalSince1970) else {
+            return nil
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "HH:mm"
+        return "\(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(resetAt)))) 恢复"
+    }
+
     static func signedCompactTokens(_ value: Int?) -> String {
         guard let value else {
             return "--"

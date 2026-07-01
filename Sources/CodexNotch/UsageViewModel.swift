@@ -445,9 +445,11 @@ final class UsageViewModel: ObservableObject {
 
         if snapshot.primaryPercent == nil {
             snapshot.primaryPercent = previous.primaryPercent
+            snapshot.primaryResetsAt = previous.primaryResetsAt
         }
         if snapshot.secondaryPercent == nil {
             snapshot.secondaryPercent = previous.secondaryPercent
+            snapshot.secondaryResetsAt = previous.secondaryResetsAt
         }
 
         if snapshot.errorMessage != nil,

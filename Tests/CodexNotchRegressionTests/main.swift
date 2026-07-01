@@ -2291,6 +2291,7 @@ let staleDBTokenSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd2"
 let activeToolCallSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd3"
 let codexQuotaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cdb"
 let sparkQuotaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cda"
+let archivedUsageSessionID = "019e073a-c032-74e2-966e-b85ede0c9cdc"
 let sessionDirectory = tempRoot
     .appendingPathComponent("sessions/2026/06/14", isDirectory: true)
 try FileManager.default.createDirectory(at: sessionDirectory, withIntermediateDirectories: true)
@@ -2503,6 +2504,21 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     """
     insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
     values('\(sparkQuotaSessionID)', 'Spark 额度测试', 0, 'gpt-5.5', 'high', '\(sparkQuotaPath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+
+let archivedUsagePath = sessionDirectory
+    .appendingPathComponent("rollout-2026-06-14T02-20-19-\(archivedUsageSessionID).jsonl")
+let archivedUsageBody = """
+{"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":999999}}}}
+"""
+try archivedUsageBody.write(to: archivedUsagePath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: archivedUsagePath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    stateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(archivedUsageSessionID)', 'Archived usage should be excluded', 999999, 'gpt-5.5', 'high', '\(archivedUsagePath.path)', \(Int(now.timeIntervalSince1970)), 1);
     """
 ])
 
@@ -2739,6 +2755,14 @@ runner.check(cachedLocalSnapshot.tasks.contains { $0.id == parentOnlySessionID &
 runner.check(cachedLocalSnapshot.tasks.first { $0.id == parentOnlySessionID }?.activeSubagentCount == 1, "fast snapshot cache should preserve active subagent counts")
 runner.check(localStore.loadUsageTotals(now: now)?.day == 120743379, "session rollout token counts should contribute to local usage totals")
 runner.check(localStore.loadUsageTotals(now: now.addingTimeInterval(1))?.day == 120743379, "unchanged local usage totals should remain stable across cached refreshes")
+let localExportSnapshot = localStore.loadSnapshot(
+    includePeriodUsage: true,
+    bypassFastCache: true,
+    rateLimitSource: .localFilesOnly,
+    taskHistoryRange: .day,
+    now: now
+)
+runner.check(localExportSnapshot.usage24h == 120743379, "export snapshots should include active period usage totals")
 
 let largeUsageRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchLargeUsage-\(UUID().uuidString)")
@@ -2801,7 +2825,7 @@ _ = try Shell.run("/usr/bin/sqlite3", [
 let largeUsageStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [fakeRipgrepPath])
 runner.check(largeUsageStore.loadUsageTotals(now: now)?.day == 1, "large rollout usage totals should use exact token events when fast search is available")
 let largeUsageFallbackStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [])
-runner.check(largeUsageFallbackStore.loadUsageTotals(now: now)?.day == 777777, "large rollout usage totals should fall back to database tokens when fast search is unavailable")
+runner.check(largeUsageFallbackStore.loadUsageTotals(now: now)?.day == 0, "large rollout usage totals should not count whole database tokens when fast search is unavailable")
 
 let tokenCacheRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchTokenCache-\(UUID().uuidString)")

@@ -604,6 +604,10 @@ struct ThreadTokenRecord: Decodable {
     }
 }
 
+struct ThreadIDRecord: Decodable {
+    let id: String
+}
+
 struct RateLimitSnapshot: Equatable {
     let primaryPercent: Int?
     let secondaryPercent: Int?

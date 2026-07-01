@@ -9,8 +9,7 @@ struct CodexNotchApp {
         let shouldPrintHumanSnapshot = arguments.contains("--print-snapshot") || arguments.contains("--print-fast-snapshot")
         let shouldPrintJSONSnapshot = arguments.contains("--print-snapshot-json") || arguments.contains("--print-fast-snapshot-json")
         if shouldPrintHumanSnapshot || shouldPrintJSONSnapshot {
-            let includePeriodUsage = !(arguments.contains("--print-fast-snapshot") || arguments.contains("--print-fast-snapshot-json"))
-            let snapshot = CodexUsageStore().loadSnapshot(includePeriodUsage: includePeriodUsage)
+            let snapshot = CodexUsageStore().loadSnapshot(includePeriodUsage: true)
             if shouldPrintJSONSnapshot {
                 FileHandle.standardOutput.write(SnapshotOutputFormatter.jsonData(for: snapshot))
                 FileHandle.standardOutput.write(Data("\n".utf8))

@@ -3,6 +3,7 @@ import Darwin
 
 private enum UsageScanPolicy {
     static let ripgrepCandidates = [
+        "/Applications/Codex.app/Contents/Resources/rg",
         "/opt/homebrew/bin/rg",
         "/usr/local/bin/rg",
         "/usr/bin/rg"
@@ -219,10 +220,12 @@ final class CodexUsageStore: @unchecked Sendable {
 
     func loadUsageTotals(now: Date = Date()) -> PeriodUsage? {
         let periodThreads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
+        let archivedThreadIDs = loadArchivedThreadIDs()
         let sessionThreads = loadSessionUsageThreads(
             range: .month,
             now: now,
-            knownTokens: tokenMap(from: periodThreads)
+            knownTokens: tokenMap(from: periodThreads),
+            excludedThreadIDs: archivedThreadIDs
         )
         let usageThreads = mergeThreadRecords(periodThreads + sessionThreads)
         guard !usageThreads.isEmpty,
@@ -275,13 +278,18 @@ final class CodexUsageStore: @unchecked Sendable {
 
     private func loadUsageTotals(now: Date, fallbackThreads: [ThreadRecord]?) -> PeriodUsage? {
         let periodThreads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
-        let knownTokens = tokenMap(from: periodThreads + (fallbackThreads ?? []))
+        let archivedThreadIDs = loadArchivedThreadIDs()
+        let activeFallbackThreads = (fallbackThreads ?? []).filter {
+            !archivedThreadIDs.contains($0.id.lowercased())
+        }
+        let knownTokens = tokenMap(from: periodThreads + activeFallbackThreads)
         let sessionThreads = loadSessionUsageThreads(
             range: .month,
             now: now,
-            knownTokens: knownTokens
+            knownTokens: knownTokens,
+            excludedThreadIDs: archivedThreadIDs
         )
-        let usageThreads = mergeThreadRecords(periodThreads + sessionThreads + (fallbackThreads ?? []))
+        let usageThreads = mergeThreadRecords(periodThreads + sessionThreads + activeFallbackThreads)
         guard !usageThreads.isEmpty else {
             return nil
         }
@@ -438,13 +446,17 @@ final class CodexUsageStore: @unchecked Sendable {
     private func loadSessionUsageThreads(
         range: TaskHistoryRange,
         now: Date,
-        knownTokens: [String: Int] = [:]
+        knownTokens: [String: Int] = [:],
+        excludedThreadIDs: Set<String> = []
     ) -> [ThreadRecord] {
         loadRecentSessionCandidates(
             range: range,
             now: now,
             knownTokens: knownTokens
         ).compactMap { candidate in
+            guard !excludedThreadIDs.contains(candidate.sessionID.lowercased()) else {
+                return nil
+            }
             let tokensUsed = tokenTotalForPeriodUsage(
                 path: candidate.path,
                 databaseTokens: candidate.databaseTokens,
@@ -794,11 +806,28 @@ final class CodexUsageStore: @unchecked Sendable {
           coalesce(updated_at, 0) as updated_at
         from threads
         where updated_at >= \(monthStart)
+          and archived = 0
         order by updated_at desc;
         """
         return withSessionIndexNames(
             try Shell.sqliteJSON(database: stateDatabase, query: query, as: [ThreadRecord].self)
         )
+    }
+
+    private func loadArchivedThreadIDs() -> Set<String> {
+        let query = """
+        select id
+        from threads
+        where archived = 1;
+        """
+        guard let records = try? Shell.sqliteJSON(
+            database: stateDatabase,
+            query: query,
+            as: [ThreadIDRecord].self
+        ) else {
+            return []
+        }
+        return Set(records.map { $0.id.lowercased() })
     }
 
     private func withSessionIndexNames(_ threads: [ThreadRecord]) -> [ThreadRecord] {
@@ -981,6 +1010,10 @@ final class CodexUsageStore: @unchecked Sendable {
                     week += scanned.usage.week
                     month += scanned.usage.month
                 }
+                continue
+            }
+
+            guard !signature.exists else {
                 continue
             }
 

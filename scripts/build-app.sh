@@ -13,6 +13,7 @@ PACKAGE_STAGE_DIR="$DIST_DIR/package-stage"
 
 cd "$ROOT_DIR"
 swift "$ROOT_DIR/scripts/generate-app-icon.swift"
+mkdir -p "$DIST_DIR"
 find "$DIST_DIR" -maxdepth 1 -type f \( -name "$APP_NAME.dmg" -o -name "$APP_NAME-*.dmg" -o -name "$PACKAGE_NAME-*.dmg" \) -delete
 rm -rf "$DMG_STAGE_DIR" "$PACKAGE_STAGE_DIR"
 

@@ -257,7 +257,7 @@ struct NotchIslandView: View {
                 ),
                 CollapsedMetric(
                     id: "tok",
-                    label: "Tok",
+                    label: "今日使用",
                     value: todayTokens > 0 ? Formatters.compactTokens(todayTokens) : "--",
                     color: MonitorTheme.textPrimary
                 )
@@ -301,6 +301,8 @@ private struct CollapsedMetricRow: View {
         HStack(spacing: 3) {
             Text(metric.label)
                 .foregroundStyle(MonitorTheme.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
 
             Text(metric.value)
                 .foregroundStyle(metric.color)

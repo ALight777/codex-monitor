@@ -301,6 +301,15 @@ enum TaskStatus: String, Equatable {
             "空闲"
         }
     }
+
+    var hudLabel: String {
+        switch self {
+        case .running:
+            "RUNNING"
+        case .recent, .idle:
+            "IDLE"
+        }
+    }
 }
 
 enum RateLimitSourcePreference: String, CaseIterable, Identifiable {

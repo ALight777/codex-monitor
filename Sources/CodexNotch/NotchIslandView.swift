@@ -498,7 +498,7 @@ struct DetailPanelView: View {
     private var headerStatusColor: Color {
         switch selectedPage {
         case .codex:
-            snapshot.isRunning ? MonitorTheme.running : MonitorTheme.textTertiary
+            snapshot.isRunning ? MonitorTheme.healthy : MonitorTheme.textTertiary
         case .codexRadar:
             codexRadarHeaderStatusColor
         case .remoteCodex:
@@ -1565,11 +1565,9 @@ private struct TaskTableRow: View {
     private var statusColor: Color {
         switch task.status {
         case .running:
-            MonitorTheme.running
-        case .recent:
             MonitorTheme.healthy
-        case .idle:
-            MonitorTheme.textTertiary
+        case .recent, .idle:
+            MonitorTheme.neutral
         }
     }
 
@@ -1585,7 +1583,7 @@ private struct StatusPill: View {
     let status: TaskStatus
 
     var body: some View {
-        Text(status.label)
+        Text(status.hudLabel)
             .font(.system(size: 9.2, weight: .semibold, design: .rounded))
             .foregroundStyle(color)
             .lineLimit(1)
@@ -1598,10 +1596,8 @@ private struct StatusPill: View {
     private var color: Color {
         switch status {
         case .running:
-            MonitorTheme.running
-        case .recent:
             MonitorTheme.healthy
-        case .idle:
+        case .recent, .idle:
             MonitorTheme.textTertiary
         }
     }
@@ -1621,7 +1617,7 @@ private struct TaskRow: View {
 
                 Spacer(minLength: 4)
 
-                Text(task.status.label)
+                Text(task.status.hudLabel)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(statusColor)
             }
@@ -1668,9 +1664,7 @@ private struct TaskRow: View {
         switch task.status {
         case .running:
             MonitorTheme.healthy
-        case .recent:
-            MonitorTheme.running
-        case .idle:
+        case .recent, .idle:
             MonitorTheme.textTertiary
         }
     }

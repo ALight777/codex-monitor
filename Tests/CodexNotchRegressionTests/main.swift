@@ -25,6 +25,9 @@ let runner = TestRunner()
 
 runner.check(AppInfo.version == "0.1.2", "app info should expose version 0.1.2")
 runner.check(AppInfo.displayVersion == "0.1.2", "app info should fall back to source version when bundle version is unavailable")
+runner.check(TaskStatus.running.hudLabel == "RUNNING", "HUD running status should display RUNNING")
+runner.check(TaskStatus.recent.hudLabel == "IDLE", "HUD recent status should display as IDLE")
+runner.check(TaskStatus.idle.hudLabel == "IDLE", "HUD idle status should display as IDLE")
 
 let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",

@@ -447,6 +447,41 @@ final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
     }
 }
 
+enum CountingSecretStoreError: Error {
+    case load
+    case save
+}
+
+final class CountingSecretStore: SecretStore {
+    private var vault: SecretVault
+    private let failOnLoad: Bool
+    private let failOnSave: Bool
+    private(set) var loadCount = 0
+    private(set) var saveCount = 0
+
+    init(vault: SecretVault = SecretVault(), failOnLoad: Bool = false, failOnSave: Bool = false) {
+        self.vault = vault
+        self.failOnLoad = failOnLoad
+        self.failOnSave = failOnSave
+    }
+
+    func loadVault() throws -> SecretVault {
+        loadCount += 1
+        if failOnLoad {
+            throw CountingSecretStoreError.load
+        }
+        return vault
+    }
+
+    func saveVault(_ vault: SecretVault) throws {
+        saveCount += 1
+        if failOnSave {
+            throw CountingSecretStoreError.save
+        }
+        self.vault = vault
+    }
+}
+
 func remoteAccount(
     id: String,
     state: RemoteAccountState,
@@ -551,6 +586,28 @@ try databaseSecretStore.saveVault(secretVault)
 let loadedDatabaseVault = try databaseSecretStore.loadVault()
 runner.check(loadedDatabaseVault == secretVault, "database secret store should persist one vault")
 try? FileManager.default.removeItem(at: secretDatabaseURL.deletingLastPathComponent())
+
+var lazyStartupVault = SecretVault()
+lazyStartupVault.set("lazy-clip-secret", for: .cliproxyManagement)
+let lazyStartupKeychainStore = CountingSecretStore(vault: lazyStartupVault)
+let lazyStartupSuiteName = "CodexNotchLazySecrets-\(UUID().uuidString)"
+let lazyStartupDefaults = runner.require(
+    UserDefaults(suiteName: lazyStartupSuiteName),
+    "lazy secret defaults should be available"
+)
+lazyStartupDefaults.removePersistentDomain(forName: lazyStartupSuiteName)
+let lazyStartupSettings = CodexNotchSettings(
+    defaults: lazyStartupDefaults,
+    secretStores: SecretStoreFactory(keychain: lazyStartupKeychainStore, database: MemorySecretStore()),
+    launchAtLoginManager: FakeLaunchAtLoginManager()
+)
+runner.check(lazyStartupKeychainStore.loadCount == 0, "settings startup should not read Keychain when remote monitors are disabled")
+runner.check(lazyStartupSettings.cliproxyManagementKey.isEmpty, "lazy settings should leave CLIProxyAPI key unloaded at startup")
+runner.check(lazyStartupSettings.loadSecretsIfNeeded(), "explicit secret load should succeed")
+runner.check(lazyStartupKeychainStore.loadCount == 1, "explicit secret load should read Keychain once")
+runner.check(lazyStartupSettings.cliproxyManagementKey == "lazy-clip-secret", "explicit secret load should populate CLIProxyAPI key")
+lazyStartupDefaults.removePersistentDomain(forName: lazyStartupSuiteName)
+
 let settings = CodexNotchSettings(
     defaults: settingsDefaults,
     initialManagementKey: "",
@@ -725,6 +782,7 @@ let reloadedDatabaseModeSettings = CodexNotchSettings(
     launchAtLoginManager: FakeLaunchAtLoginManager()
 )
 runner.check(reloadedDatabaseModeSettings.secretStorageMode == .database, "secret storage mode should persist")
+runner.check(reloadedDatabaseModeSettings.loadSecretsIfNeeded(), "database mode should load secrets on demand")
 runner.check(reloadedDatabaseModeSettings.cliproxyManagementKey == "clip-secret", "database mode should reload CLIProxyAPI key")
 runner.check(reloadedDatabaseModeSettings.newAPIManagementKey == "newapi-secret", "database mode should reload NewAPI key")
 runner.check(reloadedDatabaseModeSettings.subAPIManagementKey == "subapi-secret", "database mode should reload Sub2API key")

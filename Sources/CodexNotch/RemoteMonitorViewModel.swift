@@ -46,6 +46,22 @@ final class RemoteMonitorViewModel: ObservableObject {
             snapshot = .disabled
             return
         }
+        guard settings.loadSecretsIfNeeded() else {
+            invalidateInFlightRefresh()
+            loadedSettings = nil
+            snapshot = RemoteMonitorSnapshot(
+                panelState: .error,
+                accounts: [],
+                message: settings.cliproxyKeychainError ?? settings.secretStorageError ?? "密钥读取失败",
+                lastUpdated: Date(),
+                usage24h: 0,
+                usage7d: 0,
+                usage30d: 0,
+                usageMessage: nil,
+                usageUnavailableForSource: false
+            )
+            return
+        }
 
         let panelURL = settings.cliproxyPanelURL
         let key = settings.cliproxyManagementKey

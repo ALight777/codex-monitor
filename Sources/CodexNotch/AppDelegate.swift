@@ -482,6 +482,7 @@ final class SettingsWindowController {
     }
 
     func show() {
+        settings.loadSecretsIfNeeded()
         let window = window ?? makeWindow()
         self.window = window
         window.center()

@@ -360,6 +360,10 @@ final class CodexNotchSettings: ObservableObject {
     @Published private(set) var secretStorageMode: SecretStorageMode
     @Published private(set) var secretStorageError: String?
 
+    var secretsAreLoaded: Bool {
+        secretsLoaded
+    }
+
     init(
         defaults: UserDefaults = .standard,
         initialManagementKey: String? = nil,

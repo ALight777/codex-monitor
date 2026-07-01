@@ -244,6 +244,15 @@ struct SettingsView: View {
         .onAppear {
             reloadDraft()
         }
+        .onChange(of: draft.remoteMonitorEnabled) { _, enabled in
+            loadRemoteCodexSecretsIfEnabling(enabled)
+        }
+        .onChange(of: draft.newAPIMonitorEnabled) { _, enabled in
+            loadBalanceSecretsIfEnabling(enabled, source: .newAPI)
+        }
+        .onChange(of: draft.subAPIMonitorEnabled) { _, enabled in
+            loadBalanceSecretsIfEnabling(enabled, source: .subAPI)
+        }
         .sheet(item: $accountEditorContext, onDismiss: resetAccountEditorState) { context in
             accountEditorSheet(source: context.source)
         }
@@ -481,7 +490,7 @@ struct SettingsView: View {
 
             remoteStatusRow
 
-            if let error = settings.cliproxyKeychainError {
+            if draft.remoteMonitorEnabled, let error = settings.cliproxyKeychainError {
                 Text("管理密钥保存失败：\(error)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.red.opacity(0.85))
@@ -731,7 +740,7 @@ struct SettingsView: View {
                 enabled: enabled.wrappedValue
             )
 
-            if let keychainError {
+            if enabled.wrappedValue, let keychainError {
                 Text("认证信息保存失败：\(keychainError)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.red.opacity(0.85))
@@ -1447,11 +1456,81 @@ struct SettingsView: View {
         selectedPreset = .matching(nextDraft)
     }
 
+    private func loadRemoteCodexSecretsIfEnabling(_ enabled: Bool) {
+        guard enabled else {
+            return
+        }
+        guard settings.loadSecretsIfNeeded() else {
+            draft.remoteMonitorEnabled = false
+            return
+        }
+        draft.cliproxyManagementKey = settings.cliproxyManagementKey
+    }
+
+    private func loadBalanceSecretsIfEnabling(_ enabled: Bool, source: BalanceMonitorSource) {
+        guard enabled else {
+            return
+        }
+        guard settings.loadSecretsIfNeeded() else {
+            switch source {
+            case .newAPI:
+                draft.newAPIMonitorEnabled = false
+            case .subAPI:
+                draft.subAPIMonitorEnabled = false
+            }
+            return
+        }
+        switch source {
+        case .newAPI:
+            draft.newAPIManagementKey = settings.newAPIManagementKey
+            draft.newAPIAccounts = settings.balanceAccounts(for: .newAPI)
+        case .subAPI:
+            draft.subAPIManagementKey = settings.subAPIManagementKey
+            draft.subAPIAccounts = settings.balanceAccounts(for: .subAPI)
+        }
+    }
+
+    private func remoteCodexSettingsChanged(from current: SettingsDraft, to next: SettingsDraft) -> Bool {
+        next.remoteMonitorEnabled != current.remoteMonitorEnabled
+            || next.remoteCodexDataSource != current.remoteCodexDataSource
+            || next.cliproxyPanelURL != current.cliproxyPanelURL
+            || next.cliproxyManagementKey != current.cliproxyManagementKey
+            || next.cliproxyRefreshInterval != current.cliproxyRefreshInterval
+            || next.cliproxyRequestTimeout != current.cliproxyRequestTimeout
+            || next.cliproxyAllowInsecureTLS != current.cliproxyAllowInsecureTLS
+    }
+
+    private func balanceSettingsChanged(
+        source: BalanceMonitorSource,
+        from current: SettingsDraft,
+        to next: SettingsDraft
+    ) -> Bool {
+        switch source {
+        case .newAPI:
+            next.newAPIMonitorEnabled != current.newAPIMonitorEnabled
+                || next.newAPIRefreshInterval != current.newAPIRefreshInterval
+                || next.newAPIAccounts != current.newAPIAccounts
+                || next.newAPIThresholds != current.newAPIThresholds
+        case .subAPI:
+            next.subAPIMonitorEnabled != current.subAPIMonitorEnabled
+                || next.subAPIRefreshInterval != current.subAPIRefreshInterval
+                || next.subAPIAccounts != current.subAPIAccounts
+                || next.subAPIThresholds != current.subAPIThresholds
+        }
+    }
+
     private func saveDraft() {
         guard thresholdValidationMessage == nil else {
             return
         }
         let next = draft
+        let requiresSecretLoad = next.secretStorageMode != settings.secretStorageMode
+            || next.remoteMonitorEnabled
+            || next.newAPIMonitorEnabled
+            || next.subAPIMonitorEnabled
+        if requiresSecretLoad, !settings.loadSecretsIfNeeded() {
+            return
+        }
         let current = currentDraft
         let managementKeyForSave = CodexNotchSettings.managementKeyForSave(
             draftKey: next.cliproxyManagementKey,
@@ -1500,44 +1579,66 @@ struct SettingsView: View {
         settings.taskHistoryRange = next.taskHistoryRange
         settings.notchDisplaySource = next.notchDisplaySource
 
-        settings.remoteCodexDataSource = next.remoteCodexDataSource
-        settings.cliproxyPanelURL = next.cliproxyPanelURL
-        settings.cliproxyRefreshInterval = next.cliproxyRefreshInterval
-        settings.cliproxyRequestTimeout = next.cliproxyRequestTimeout
-        settings.cliproxyAllowInsecureTLS = next.cliproxyAllowInsecureTLS
-        settings.cliproxyManagementKey = managementKeyForSave
-        if next.remoteMonitorEnabled {
-            settings.remoteMonitorEnabled = true
+        if remoteCodexSettingsChanged(from: current, to: next)
+            || current.remoteMonitorEnabled
+            || next.remoteMonitorEnabled {
+            settings.remoteCodexDataSource = next.remoteCodexDataSource
+            settings.cliproxyPanelURL = next.cliproxyPanelURL
+            settings.cliproxyRefreshInterval = next.cliproxyRefreshInterval
+            settings.cliproxyRequestTimeout = next.cliproxyRequestTimeout
+            settings.cliproxyAllowInsecureTLS = next.cliproxyAllowInsecureTLS
+            if settings.secretsAreLoaded {
+                settings.cliproxyManagementKey = managementKeyForSave
+            }
+            if next.remoteMonitorEnabled {
+                settings.remoteMonitorEnabled = true
+            }
         }
 
-        settings.setBalanceDefaultThresholds(next.newAPIThresholds, for: .newAPI)
-        settings.setBalanceAccounts(newAPIAccounts, for: .newAPI)
-        settings.newAPIPanelURL = newAPIAccounts.first?.panelURL ?? ""
-        settings.newAPIUsername = next.newAPIMonitorEnabled ? (newAPIAccounts.first?.username ?? "") : ""
-        settings.newAPIRefreshInterval = next.newAPIRefreshInterval
-        settings.newAPIRequestTimeout = newAPIAccounts.first?.requestTimeout ?? next.newAPIRequestTimeout
-        settings.newAPIAllowInsecureTLS = newAPIAccounts.first?.allowInsecureTLS ?? next.newAPIAllowInsecureTLS
-        settings.newAPIManagementKey = legacyKeyForFirstAccount(
-            newAPIAccounts.first,
-            currentKey: current.newAPIManagementKey
-        )
-        if next.newAPIMonitorEnabled {
-            settings.newAPIMonitorEnabled = true
+        if balanceSettingsChanged(source: .newAPI, from: current, to: next)
+            || current.newAPIMonitorEnabled
+            || next.newAPIMonitorEnabled {
+            settings.setBalanceDefaultThresholds(next.newAPIThresholds, for: .newAPI)
+            if settings.secretsAreLoaded {
+                settings.setBalanceAccounts(newAPIAccounts, for: .newAPI)
+            }
+            settings.newAPIPanelURL = newAPIAccounts.first?.panelURL ?? ""
+            settings.newAPIUsername = next.newAPIMonitorEnabled ? (newAPIAccounts.first?.username ?? "") : ""
+            settings.newAPIRefreshInterval = next.newAPIRefreshInterval
+            settings.newAPIRequestTimeout = newAPIAccounts.first?.requestTimeout ?? next.newAPIRequestTimeout
+            settings.newAPIAllowInsecureTLS = newAPIAccounts.first?.allowInsecureTLS ?? next.newAPIAllowInsecureTLS
+            if settings.secretsAreLoaded {
+                settings.newAPIManagementKey = legacyKeyForFirstAccount(
+                    newAPIAccounts.first,
+                    currentKey: current.newAPIManagementKey
+                )
+            }
+            if next.newAPIMonitorEnabled {
+                settings.newAPIMonitorEnabled = true
+            }
         }
 
-        settings.setBalanceDefaultThresholds(next.subAPIThresholds, for: .subAPI)
-        settings.setBalanceAccounts(subAPIAccounts, for: .subAPI)
-        settings.subAPIPanelURL = subAPIAccounts.first?.panelURL ?? ""
-        settings.subAPIUsername = next.subAPIMonitorEnabled ? (subAPIAccounts.first?.username ?? "") : ""
-        settings.subAPIRefreshInterval = next.subAPIRefreshInterval
-        settings.subAPIRequestTimeout = subAPIAccounts.first?.requestTimeout ?? next.subAPIRequestTimeout
-        settings.subAPIAllowInsecureTLS = subAPIAccounts.first?.allowInsecureTLS ?? next.subAPIAllowInsecureTLS
-        settings.subAPIManagementKey = legacyKeyForFirstAccount(
-            subAPIAccounts.first,
-            currentKey: current.subAPIManagementKey
-        )
-        if next.subAPIMonitorEnabled {
-            settings.subAPIMonitorEnabled = true
+        if balanceSettingsChanged(source: .subAPI, from: current, to: next)
+            || current.subAPIMonitorEnabled
+            || next.subAPIMonitorEnabled {
+            settings.setBalanceDefaultThresholds(next.subAPIThresholds, for: .subAPI)
+            if settings.secretsAreLoaded {
+                settings.setBalanceAccounts(subAPIAccounts, for: .subAPI)
+            }
+            settings.subAPIPanelURL = subAPIAccounts.first?.panelURL ?? ""
+            settings.subAPIUsername = next.subAPIMonitorEnabled ? (subAPIAccounts.first?.username ?? "") : ""
+            settings.subAPIRefreshInterval = next.subAPIRefreshInterval
+            settings.subAPIRequestTimeout = subAPIAccounts.first?.requestTimeout ?? next.subAPIRequestTimeout
+            settings.subAPIAllowInsecureTLS = subAPIAccounts.first?.allowInsecureTLS ?? next.subAPIAllowInsecureTLS
+            if settings.secretsAreLoaded {
+                settings.subAPIManagementKey = legacyKeyForFirstAccount(
+                    subAPIAccounts.first,
+                    currentKey: current.subAPIManagementKey
+                )
+            }
+            if next.subAPIMonitorEnabled {
+                settings.subAPIMonitorEnabled = true
+            }
         }
 
         if next.launchAtLoginEnabled != settings.launchAtLoginEnabled {

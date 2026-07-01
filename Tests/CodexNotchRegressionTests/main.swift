@@ -603,9 +603,16 @@ let lazyStartupSettings = CodexNotchSettings(
 )
 runner.check(lazyStartupKeychainStore.loadCount == 0, "settings startup should not read Keychain when remote monitors are disabled")
 runner.check(lazyStartupSettings.cliproxyManagementKey.isEmpty, "lazy settings should leave CLIProxyAPI key unloaded at startup")
+runner.check(!lazyStartupSettings.secretsAreLoaded, "settings should expose unloaded secret state before remote features need credentials")
+lazyStartupSettings.codexRadarEnabled = false
+lazyStartupSettings.showSparkQuota = true
+lazyStartupSettings.resetRefreshDefaults()
+runner.check(lazyStartupKeychainStore.loadCount == 0, "local settings changes should not read Keychain")
+runner.check(lazyStartupKeychainStore.saveCount == 0, "local settings changes should not write secret storage")
 runner.check(lazyStartupSettings.loadSecretsIfNeeded(), "explicit secret load should succeed")
 runner.check(lazyStartupKeychainStore.loadCount == 1, "explicit secret load should read Keychain once")
 runner.check(lazyStartupSettings.cliproxyManagementKey == "lazy-clip-secret", "explicit secret load should populate CLIProxyAPI key")
+runner.check(lazyStartupSettings.secretsAreLoaded, "explicit secret load should mark settings secrets as loaded")
 lazyStartupDefaults.removePersistentDomain(forName: lazyStartupSuiteName)
 
 let settings = CodexNotchSettings(

@@ -962,7 +962,7 @@ struct DetailPanelView: View {
     }
 
     private func radarUpdatedText(_ radar: CodexRadarSnapshot) -> String {
-        let date = radar.monitoredAt ?? radar.quotaUpdatedAt ?? radar.lastFetchAt
+        let date = radar.displayUpdatedAt
         guard let date else {
             return "--"
         }

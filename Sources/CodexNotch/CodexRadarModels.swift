@@ -88,6 +88,11 @@ struct CodexRadarSnapshot: Equatable, Sendable {
         !models.isEmpty || !quotaRows.isEmpty
     }
 
+    var displayUpdatedAt: Date? {
+        let sourceDates = [monitoredAt, quotaUpdatedAt].compactMap { $0 }
+        return sourceDates.max() ?? lastFetchAt
+    }
+
     func withState(_ state: CodexRadarPanelState, message: String? = nil) -> CodexRadarSnapshot {
         var copy = self
         copy.panelState = state

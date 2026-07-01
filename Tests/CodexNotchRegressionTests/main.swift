@@ -309,6 +309,10 @@ runner.check(radarSnapshot.quotaRows.first?.tier == "20x Pro", "Codex Radar quot
 runner.check(radarSnapshot.quotaRows.first?.fiveH == 276.44, "Codex Radar quota row should decode 5h estimate")
 runner.check(radarSnapshot.quotaRows.first?.sevenD == 1658.63, "Codex Radar quota row should decode 7d estimate")
 runner.check(radarSnapshot.costUSD == 132.690071, "Codex Radar cost should prefer quota_radar cost")
+runner.check(
+    radarSnapshot.displayUpdatedAt == dateFromISO8601("2026-06-30T22:27:57Z", message: "Codex Radar display timestamp should parse"),
+    "Codex Radar display timestamp should prefer the freshest source data timestamp"
+)
 runner.check(radarSnapshot.attributionRequired, "Codex Radar should preserve required attribution flag")
 runner.check(radarSnapshot.attributionText == "数据来自 Codex 雷达 codexradar.com", "Codex Radar should preserve attribution text")
 runner.check(radarSnapshot.siteURL.absoluteString == "https://codexradar.com", "Codex Radar should preserve source site")

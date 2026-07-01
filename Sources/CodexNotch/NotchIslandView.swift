@@ -3,6 +3,7 @@ import SwiftUI
 
 private enum DetailPage: String, CaseIterable, Identifiable {
     case codex
+    case codexRadar
     case remoteCodex
     case newAPI
     case subAPI
@@ -13,6 +14,8 @@ private enum DetailPage: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "Codex"
+        case .codexRadar:
+            "Codex Radar"
         case .remoteCodex:
             "CLIProxyAPI"
         case .newAPI:
@@ -28,6 +31,49 @@ private struct CollapsedMetric: Identifiable {
     let label: String
     let value: String
     let color: Color
+}
+
+private enum MonitorTheme {
+    static let pillTint = Color.black.opacity(0.48)
+    static let detailTint = Color.black.opacity(0.52)
+    static let panelStroke = Color.white.opacity(0.16)
+    static let hairline = Color.white.opacity(0.075)
+    static let sectionFill = Color.white.opacity(0.055)
+    static let rowFill = Color.white.opacity(0.038)
+    static let rowSelectedFill = Color.white.opacity(0.092)
+    static let controlFill = Color.white.opacity(0.052)
+    static let controlSelectedFill = Color.white.opacity(0.115)
+    static let separator = Color.white.opacity(0.070)
+    static let progressTrack = Color.white.opacity(0.115)
+    static let textPrimary = Color.white.opacity(0.92)
+    static let textSecondary = Color.white.opacity(0.62)
+    static let textTertiary = Color.white.opacity(0.44)
+    static let healthy = Color(red: 0.45, green: 0.78, blue: 0.53)
+    static let running = Color(red: 0.47, green: 0.72, blue: 0.82)
+    static let warning = Color(red: 0.92, green: 0.68, blue: 0.42)
+    static let critical = Color(red: 0.88, green: 0.45, blue: 0.45)
+    static let neutral = Color.white.opacity(0.34)
+}
+
+private struct HUDVisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+    var state: NSVisualEffectView.State = .active
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = state
+        view.isEmphasized = false
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = state
+    }
 }
 
 struct NotchIslandView: View {
@@ -46,7 +92,6 @@ struct NotchIslandView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            islandBackground
             collapsedContent
         }
         .frame(
@@ -77,38 +122,30 @@ struct NotchIslandView: View {
         }
     }
 
-    private var islandBackground: some View {
-        BottomRoundedRectangle(radius: 21)
-            .fill(Color.black.opacity(0.985))
-            .frame(
-                width: IslandMetrics.width,
-                height: IslandMetrics.collapsedHeight,
-                alignment: .top
-            )
-            .overlay(alignment: .top) {
-                centerNotchMask
-            }
-    }
-
-    private var centerNotchMask: some View {
-        BottomRoundedRectangle(radius: 20)
-            .fill(Color.black)
-            .frame(width: IslandMetrics.notchWidth, height: IslandMetrics.collapsedHeight)
-            .offset(x: 0, y: 0)
-    }
-
     private var collapsedContent: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             statusBlock
-                .frame(width: IslandMetrics.shoulderWidth, height: IslandMetrics.collapsedHeight - 4)
-
-            Color.clear
-                .frame(width: IslandMetrics.notchWidth, height: IslandMetrics.collapsedHeight)
 
             rateLimitBlock
-                .frame(width: IslandMetrics.shoulderWidth, height: IslandMetrics.collapsedHeight - 4)
         }
+        .padding(.horizontal, IslandMetrics.collapsedPillHorizontalPadding)
+        .padding(.top, 4)
+        .frame(height: IslandMetrics.collapsedHeight - 8, alignment: .center)
+        .fixedSize(horizontal: true, vertical: false)
+        .background(collapsedBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 9, x: 0, y: 4)
         .frame(width: IslandMetrics.width, height: IslandMetrics.collapsedHeight, alignment: .top)
+    }
+
+    private var collapsedBackground: some View {
+        ZStack {
+            HUDVisualEffectView(material: .hudWindow)
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(MonitorTheme.pillTint)
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(MonitorTheme.panelStroke, lineWidth: 0.7)
+        }
     }
 
     private var statusBlock: some View {
@@ -118,24 +155,22 @@ struct NotchIslandView: View {
             } else {
                 SeverityDot(severity: collapsedSeverity, pulse: pulse, enablePulse: settings.enablePulse)
             }
-            Text(collapsedTitle)
-                .font(.system(size: 10.2, weight: .bold))
+            Text(collapsedStateLabel)
+                .font(.system(size: 10.6, weight: .semibold))
                 .foregroundStyle(collapsedTitleColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.trailing, 4)
+        .layoutPriority(1)
     }
 
     private var rateLimitBlock: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 5) {
             ForEach(collapsedMetrics) { metric in
                 CollapsedMetricRow(metric: metric)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 4)
+        .layoutPriority(2)
     }
 
     private var effectiveDisplaySource: NotchDisplaySource {
@@ -183,6 +218,13 @@ struct NotchIslandView: View {
         }
     }
 
+    private var collapsedStateLabel: String {
+        guard effectiveDisplaySource == .codex else {
+            return collapsedTitle
+        }
+        return snapshot.isRunning ? "RUN" : "IDLE"
+    }
+
     private var collapsedTitleColor: Color {
         if effectiveDisplaySource == .codex {
             return snapshot.isRunning ? .white.opacity(0.94) : .white.opacity(0.74)
@@ -191,9 +233,9 @@ struct NotchIslandView: View {
         case .none:
             return .white.opacity(0.80)
         case .warning:
-            return Color(red: 1.0, green: 0.75, blue: 0.42)
+            return MonitorTheme.warning
         case .error:
-            return Color(red: 1.0, green: 0.48, blue: 0.50)
+            return MonitorTheme.critical
         }
     }
 
@@ -213,25 +255,42 @@ struct NotchIslandView: View {
     private var collapsedMetrics: [CollapsedMetric] {
         switch effectiveDisplaySource {
         case .automatic, .codex:
-            return [
+            let todayTokens = snapshot.usage24h
+            var metrics = [
                 CollapsedMetric(
                     id: "5h",
                     label: "5h",
                     value: Formatters.percent(snapshot.primaryPercent),
-                    color: Color(red: 0.61, green: 0.95, blue: 0.68)
+                    color: MonitorTheme.healthy
                 ),
                 CollapsedMetric(
                     id: "7d",
                     label: "7d",
                     value: Formatters.percent(snapshot.secondaryPercent),
-                    color: Color(red: 0.50, green: 0.78, blue: 1.00)
+                    color: MonitorTheme.running
+                ),
+                CollapsedMetric(
+                    id: "tok",
+                    label: "Today",
+                    value: todayTokens > 0 ? Formatters.compactTokensEnglish(todayTokens) : "--",
+                    color: MonitorTheme.textPrimary
                 )
             ]
+            let usage1h = snapshot.usage1h
+            metrics.append(
+                CollapsedMetric(
+                    id: "usage1h",
+                    label: "1h",
+                    value: Formatters.signedCompactTokensEnglish(usage1h),
+                    color: (usage1h ?? 0) > 0 ? MonitorTheme.running : MonitorTheme.textSecondary
+                )
+            )
+            return metrics
         case .remoteCodex:
             let remote = remoteViewModel.snapshot
             return [
-                CollapsedMetric(id: "ok", label: "正", value: "\(remote.healthyCount)", color: Color(red: 0.61, green: 0.95, blue: 0.68)),
-                CollapsedMetric(id: "bad", label: "异", value: "\(remote.quotaCount + remote.abnormalCount)", color: collapsedSeverity == .error ? Color(red: 1.0, green: 0.28, blue: 0.30) : Color(red: 1.0, green: 0.55, blue: 0.25))
+                CollapsedMetric(id: "ok", label: "正", value: "\(remote.healthyCount)", color: MonitorTheme.healthy),
+                CollapsedMetric(id: "bad", label: "异", value: "\(remote.quotaCount + remote.abnormalCount)", color: collapsedSeverity == .error ? MonitorTheme.critical : MonitorTheme.warning)
             ]
         case .newAPI:
             return balanceCollapsedMetrics(newAPIViewModel.snapshot)
@@ -242,33 +301,31 @@ struct NotchIslandView: View {
 
     private func balanceCollapsedMetrics(_ snapshot: BalanceMonitorSnapshot) -> [CollapsedMetric] {
         [
-            CollapsedMetric(id: "\(snapshot.source.rawValue)-accounts", label: "账", value: "\(snapshot.accounts.count)", color: Color(red: 0.61, green: 0.95, blue: 0.68)),
-            CollapsedMetric(id: "\(snapshot.source.rawValue)-amount", label: "余", value: snapshot.totalAmountText, color: Color(red: 0.50, green: 0.78, blue: 1.00))
+            CollapsedMetric(id: "\(snapshot.source.rawValue)-accounts", label: "账", value: "\(snapshot.accounts.count)", color: MonitorTheme.healthy),
+            CollapsedMetric(id: "\(snapshot.source.rawValue)-amount", label: "余", value: snapshot.totalAmountText, color: MonitorTheme.running)
         ]
     }
+
 }
 
 private struct CollapsedMetricRow: View {
     let metric: CollapsedMetric
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 3) {
             Text(metric.label)
-                .frame(width: 16, alignment: .leading)
-                .foregroundStyle(.white.opacity(0.60))
-
-            Color.clear
-                .frame(width: 3)
+                .font(.system(size: 8.4, weight: .medium))
+                .foregroundStyle(MonitorTheme.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
 
             Text(metric.value)
-                .frame(width: 35, alignment: .trailing)
+                .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(metric.color)
                 .lineLimit(1)
-                .minimumScaleFactor(0.66)
+                .minimumScaleFactor(0.68)
+                .monospacedDigit()
         }
-        .font(.system(size: 9.0, weight: .bold, design: .rounded))
-        .monospacedDigit()
-        .frame(width: 54, alignment: .leading)
     }
 }
 
@@ -277,12 +334,14 @@ struct DetailPanelView: View {
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
     @ObservedObject var subAPIViewModel: BalanceMonitorViewModel
+    @ObservedObject var codexRadarViewModel: CodexRadarViewModel
     @ObservedObject var settings: CodexNotchSettings
     let onSettings: () -> Void
     let onLocalRefresh: () -> Void
     let onRemoteRefresh: () -> Void
     let onNewAPIRefresh: () -> Void
     let onSubAPIRefresh: () -> Void
+    let onCodexRadarRefresh: () -> Void
     @State private var detailPage: DetailPage = .codex
 
     private var snapshot: UsageSnapshot {
@@ -291,8 +350,15 @@ struct DetailPanelView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            BottomRoundedRectangle(radius: 24)
-                .fill(Color.black.opacity(0.985))
+            HUDVisualEffectView(material: .hudWindow)
+                .clipShape(BottomRoundedRectangle(radius: 22))
+
+            BottomRoundedRectangle(radius: 22)
+                .fill(MonitorTheme.detailTint)
+
+            BottomRoundedRectangle(radius: 22)
+                .stroke(MonitorTheme.panelStroke, lineWidth: 0.8)
+                .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 10)
 
             VStack(spacing: 10) {
                 header
@@ -302,6 +368,8 @@ struct DetailPanelView: View {
                     switch selectedPage {
                     case .codex:
                         localContent
+                    case .codexRadar:
+                        codexRadarContent
                     case .remoteCodex:
                         remoteContent
                     case .newAPI:
@@ -318,7 +386,7 @@ struct DetailPanelView: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(width: IslandMetrics.width, height: detailHeight)
-        .clipShape(BottomRoundedRectangle(radius: 24))
+        .clipShape(BottomRoundedRectangle(radius: 22))
     }
 
     private var displayedTasks: [CodexTask] {
@@ -328,7 +396,8 @@ struct DetailPanelView: View {
     private var detailHeight: CGFloat {
         let localHeight = IslandMetrics.detailHeight(
             taskRows: IslandMetrics.visibleTaskRows,
-            showsPeriodUsage: settings.showPeriodUsage
+            showsPeriodUsage: settings.showPeriodUsage,
+            showsSparkQuota: settings.showSparkQuota
         )
         guard settings.remoteMonitorEnabled else {
             let balanceRows = [
@@ -357,17 +426,20 @@ struct DetailPanelView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 6) {
             Text(headerTitle)
-                .font(.system(size: 11, weight: .heavy))
-                .foregroundStyle(.white.opacity(0.82))
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textPrimary)
                 .lineLimit(1)
                 .frame(height: IslandMetrics.detailHeaderHeight, alignment: .center)
 
             Spacer()
 
             Text(headerStatus)
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(headerStatusColor)
                 .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(headerStatusColor.opacity(0.13), in: Capsule())
                 .frame(height: IslandMetrics.detailHeaderHeight, alignment: .center)
 
             Button(action: refreshCurrentPage) {
@@ -390,7 +462,9 @@ struct DetailPanelView: View {
     private var headerTitle: String {
         switch selectedPage {
         case .codex:
-            snapshot.isRunning ? "正在运行" : "最近活动"
+            "Codex Monitor"
+        case .codexRadar:
+            "Codex Radar"
         case .remoteCodex:
             "CLIProxyAPI 账号"
         case .newAPI:
@@ -403,7 +477,9 @@ struct DetailPanelView: View {
     private var headerStatus: String {
         switch selectedPage {
         case .codex:
-            return snapshot.isRunning ? "\(snapshot.tasks.filter { $0.status == .running }.count) 个任务" : "空闲"
+            return snapshot.isRunning ? "Running" : "Idle"
+        case .codexRadar:
+            return codexRadarHeaderStatus
         case .remoteCodex:
             if remoteViewModel.snapshot.usageUnavailableForSource {
                 return "仅账号"
@@ -422,7 +498,9 @@ struct DetailPanelView: View {
     private var headerStatusColor: Color {
         switch selectedPage {
         case .codex:
-            snapshot.isRunning ? Color(red: 0.61, green: 0.95, blue: 0.68) : .white.opacity(0.48)
+            snapshot.isRunning ? MonitorTheme.healthy : MonitorTheme.textTertiary
+        case .codexRadar:
+            codexRadarHeaderStatusColor
         case .remoteCodex:
             remoteStatusColor
         case .newAPI:
@@ -453,12 +531,12 @@ struct DetailPanelView: View {
         switch remoteViewModel.snapshot.panelSeverity {
         case .none:
             return remoteViewModel.snapshot.usageMessage == nil
-                ? Color(red: 0.61, green: 0.95, blue: 0.68)
-                : Color(red: 1.0, green: 0.55, blue: 0.25)
+                ? MonitorTheme.healthy
+                : MonitorTheme.warning
         case .warning:
-            return Color(red: 1.0, green: 0.55, blue: 0.25)
+            return MonitorTheme.warning
         case .error:
-            return Color(red: 1.0, green: 0.28, blue: 0.30)
+            return MonitorTheme.critical
         }
     }
 
@@ -466,6 +544,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             viewModel.isRefreshing
+        case .codexRadar:
+            codexRadarViewModel.isRefreshing
         case .remoteCodex:
             remoteViewModel.isRefreshing
         case .newAPI:
@@ -479,6 +559,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             "刷新 Codex"
+        case .codexRadar:
+            "刷新 Codex Radar"
         case .remoteCodex:
             "刷新 CLIProxyAPI"
         case .newAPI:
@@ -489,31 +571,30 @@ struct DetailPanelView: View {
     }
 
     private var pageSwitcher: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 2) {
             ForEach(availablePages) { page in
-                Button {
+                PageSwitcherButton(
+                    title: page.title,
+                    isSelected: selectedPage == page
+                ) {
                     detailPage = page
-                } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(selectedPage == page ? Color.white.opacity(0.12) : Color.white.opacity(0.035))
-
-                        Text(page.title)
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .frame(maxWidth: .infinity, minHeight: IslandMetrics.detailPageSwitcherHeight)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-                .foregroundStyle(selectedPage == page ? .white.opacity(0.92) : .white.opacity(0.48))
             }
         }
+        .padding(3)
         .frame(height: IslandMetrics.detailPageSwitcherHeight)
+        .background(MonitorTheme.controlFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
     }
 
     private var availablePages: [DetailPage] {
         var pages: [DetailPage] = [.codex]
+        if settings.codexRadarEnabled {
+            pages.append(.codexRadar)
+        }
         if settings.remoteMonitorEnabled {
             pages.append(.remoteCodex)
         }
@@ -534,6 +615,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             onLocalRefresh()
+        case .codexRadar:
+            onCodexRadarRefresh()
         case .remoteCodex:
             onRemoteRefresh()
         case .newAPI:
@@ -544,19 +627,14 @@ struct DetailPanelView: View {
     }
 
     private var localContent: some View {
-        VStack(spacing: 10) {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 7) {
-                    ForEach(displayedTasks) { task in
-                        TaskRow(task: task)
-                    }
-
-                    if displayedTasks.isEmpty {
-                        emptyState
-                    }
-                }
+        VStack(spacing: 8) {
+            localQuotaStrip
+            if settings.showSparkQuota {
+                sparkQuotaStrip
             }
-            .frame(maxHeight: .infinity, alignment: .top)
+            localMetricStrip
+            localTaskTable
+                .frame(maxHeight: .infinity, alignment: .top)
 
             if settings.showPeriodUsage {
                 periodUsage
@@ -564,6 +642,379 @@ struct DetailPanelView: View {
         }
         .frame(maxHeight: .infinity, alignment: .bottom)
     }
+
+    private var localQuotaStrip: some View {
+        HStack(spacing: 14) {
+            QuotaBarCell(
+                label: "5h Quota",
+                value: Formatters.percent(snapshot.primaryPercent),
+                percent: snapshot.primaryPercent,
+                resetText: quotaResetText(
+                    for: snapshot.primaryResetsAt,
+                    percent: snapshot.primaryPercent,
+                    style: .time
+                ),
+                color: quotaColor(for: snapshot.primaryPercent)
+            )
+            QuotaBarCell(
+                label: "7d Quota",
+                value: Formatters.percent(snapshot.secondaryPercent),
+                percent: snapshot.secondaryPercent,
+                resetText: quotaResetText(
+                    for: snapshot.secondaryResetsAt,
+                    percent: snapshot.secondaryPercent,
+                    style: .date
+                ),
+                color: quotaColor(for: snapshot.secondaryPercent)
+            )
+            CompactStatusCell(
+                label: "Running",
+                value: "\(runningTaskCount)",
+                detail: "\(displayedTasks.count) sessions"
+            )
+            .frame(width: 96)
+            CompactStatusCell(
+                label: "Ctx",
+                value: currentContextPercentText,
+                detail: currentContextTokenRatioText
+            )
+            .frame(width: 116)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(MonitorTheme.sectionFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+
+    private var sparkQuotaStrip: some View {
+        HStack(spacing: 8) {
+            Text("Spark")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textPrimary)
+                .lineLimit(1)
+
+            if snapshot.sparkQuotaWindows.isEmpty {
+                Text("--")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(MonitorTheme.textTertiary)
+            } else {
+                ForEach(snapshot.sparkQuotaWindows) { window in
+                    SparkQuotaChip(window: window)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+
+    private var localMetricStrip: some View {
+        HStack(spacing: 0) {
+            MetricReadout(label: "Active Sessions", value: "\(displayedTasks.count)")
+            verticalSeparator
+            MetricReadout(label: "Subagents", value: "\(activeSubagentTotal)")
+            verticalSeparator
+            MetricReadout(label: "Usage 24h", value: Formatters.compactTokens(snapshot.usage24h))
+            verticalSeparator
+            MetricReadout(label: "Current", value: Formatters.compactTokens(currentTaskTokens))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+
+    private var localTaskTable: some View {
+        VStack(spacing: 0) {
+            TaskTableHeader()
+            Rectangle()
+                .fill(MonitorTheme.separator)
+                .frame(height: 0.6)
+
+            if displayedTasks.isEmpty {
+                emptyState
+                    .padding(.top, 8)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(displayedTasks.enumerated()), id: \.element.id) { index, task in
+                            TaskTableRow(task: task, isSelected: index == 0)
+                        }
+                    }
+                }
+            }
+        }
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+
+    private var runningTaskCount: Int {
+        displayedTasks.filter { $0.status == .running }.count
+    }
+
+    private var activeSubagentTotal: Int {
+        displayedTasks.reduce(0) { $0 + $1.activeSubagentCount }
+    }
+
+    private var currentTaskTokens: Int {
+        displayedTasks.first?.tokenCount ?? 0
+    }
+
+    private var currentContextTask: CodexTask? {
+        displayedTasks.first { $0.contextInputTokens != nil && $0.contextWindowTokens != nil }
+    }
+
+    private var currentContextPercentText: String {
+        Formatters.percent(currentContextTask?.contextPercent)
+    }
+
+    private var currentContextTokenRatioText: String {
+        Formatters.compactTokenRatio(
+            currentContextTask?.contextInputTokens,
+            currentContextTask?.contextWindowTokens
+        )
+    }
+
+    private var verticalSeparator: some View {
+        Rectangle()
+            .fill(MonitorTheme.separator)
+            .frame(width: 0.6, height: 32)
+    }
+
+    private func quotaColor(for percent: Int?) -> Color {
+        guard let percent else {
+            return MonitorTheme.textTertiary
+        }
+        if percent <= 5 {
+            return MonitorTheme.critical
+        }
+        if percent <= 20 {
+            return MonitorTheme.warning
+        }
+        return MonitorTheme.healthy
+    }
+
+    private func quotaResetText(
+        for resetAt: Int?,
+        percent: Int?,
+        style: Formatters.QuotaResetDisplayStyle
+    ) -> String? {
+        guard percent != nil else {
+            return nil
+        }
+        return Formatters.quotaResetText(resetAt, style: style)
+    }
+
+    private var codexRadarHeaderStatus: String {
+        switch codexRadarViewModel.snapshot.panelState {
+        case .disabled:
+            "Off"
+        case .loading:
+            "Loading"
+        case .ready:
+            "Updated"
+        case .stale:
+            "Stale"
+        case .error:
+            "Error"
+        }
+    }
+
+    private var codexRadarHeaderStatusColor: Color {
+        switch codexRadarViewModel.snapshot.panelState {
+        case .disabled, .loading:
+            MonitorTheme.textTertiary
+        case .ready:
+            MonitorTheme.healthy
+        case .stale:
+            MonitorTheme.warning
+        case .error:
+            MonitorTheme.critical
+        }
+    }
+
+    private var codexRadarContent: some View {
+        let radar = codexRadarViewModel.snapshot
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 8) {
+                codexRadarSummary(radar)
+
+                if let message = radar.message, radar.panelState != .ready {
+                    inlineWarningMessage(message)
+                }
+
+                if radar.models.isEmpty {
+                    codexRadarEmptyMessage(radar)
+                } else {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(minimum: 128), spacing: 7),
+                            GridItem(.flexible(minimum: 128), spacing: 7),
+                            GridItem(.flexible(minimum: 128), spacing: 7)
+                        ],
+                        spacing: 7
+                    ) {
+                        ForEach(radar.models) { model in
+                            CodexRadarModelCard(model: model)
+                        }
+                    }
+                }
+
+                codexRadarQuotaTable(radar)
+                codexRadarFooter(radar)
+            }
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func codexRadarSummary(_ radar: CodexRadarSnapshot) -> some View {
+        HStack(spacing: 8) {
+            RadarSummaryCell(
+                label: "Updated",
+                value: radarUpdatedText(radar),
+                color: MonitorTheme.textPrimary
+            )
+            RadarSummaryCell(
+                label: "Status",
+                value: radar.status?.replacingOccurrences(of: "_", with: " ") ?? "--",
+                color: codexRadarStatusColor(radar.status)
+            )
+            RadarSummaryCell(
+                label: "Cost",
+                value: radar.costUSD.map { String(format: "$%.2f", $0) } ?? "--",
+                color: MonitorTheme.running
+            )
+        }
+    }
+
+    private func codexRadarEmptyMessage(_ radar: CodexRadarSnapshot) -> some View {
+        HStack {
+            Text(radar.message ?? "暂无 Codex Radar 模型数据")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textSecondary)
+                .lineLimit(2)
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 50)
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+
+    private func codexRadarQuotaTable(_ radar: CodexRadarSnapshot) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                radarTableHeader("Plan")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                radarTableHeader("5h")
+                    .frame(width: 86, alignment: .trailing)
+                radarTableHeader("7d")
+                    .frame(width: 86, alignment: .trailing)
+                radarTableHeader("Basis")
+                    .frame(width: 96, alignment: .trailing)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 25)
+
+            Rectangle()
+                .fill(MonitorTheme.separator)
+                .frame(height: 0.6)
+
+            if radar.quotaRows.isEmpty {
+                HStack {
+                    Text("暂无 quota radar 摘要")
+                        .font(.system(size: 10.4, weight: .semibold))
+                        .foregroundStyle(MonitorTheme.textSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+            } else {
+                ForEach(radar.quotaRows) { row in
+                    CodexRadarQuotaRowView(row: row)
+                }
+            }
+        }
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+
+    private func codexRadarFooter(_ radar: CodexRadarSnapshot) -> some View {
+        HStack(spacing: 8) {
+            Text("\(radar.attributionText) · \(radar.dataSource.displayLabel)")
+                .font(.system(size: 9.4, weight: .medium))
+                .foregroundStyle(MonitorTheme.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Spacer()
+            Button {
+                NSWorkspace.shared.open(radar.siteURL)
+            } label: {
+                Image(systemName: "arrow.up.forward.app.fill")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(IconButtonStyle())
+            .help("打开 codexradar.com")
+        }
+        .padding(.horizontal, 2)
+        .padding(.top, 1)
+    }
+
+    private func radarUpdatedText(_ radar: CodexRadarSnapshot) -> String {
+        let date = radar.displayUpdatedAt
+        guard let date else {
+            return "--"
+        }
+        return Self.radarDateFormatter.string(from: date)
+    }
+
+    private func codexRadarStatusColor(_ status: String?) -> Color {
+        switch status?.lowercased() {
+        case "green", "open", "normal":
+            MonitorTheme.healthy
+        case "yellow", "warning", "community_confirmed":
+            MonitorTheme.warning
+        case "red", "error", "closed":
+            MonitorTheme.critical
+        default:
+            MonitorTheme.textPrimary
+        }
+    }
+
+    private func radarTableHeader(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9.6, weight: .semibold))
+            .foregroundStyle(MonitorTheme.textSecondary)
+    }
+
+    private static let radarDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M/d HH:mm"
+        return formatter
+    }()
 
     private var remoteContent: some View {
         VStack(spacing: 8) {
@@ -628,16 +1079,16 @@ struct DetailPanelView: View {
         HStack {
             Text(remoteViewModel.snapshot.message ?? "暂无远程账号")
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.58))
+                .foregroundStyle(MonitorTheme.textSecondary)
                 .lineLimit(2)
             Spacer()
         }
         .padding(.horizontal, 10)
         .frame(minHeight: 50)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
         )
     }
 
@@ -678,16 +1129,16 @@ struct DetailPanelView: View {
         HStack {
             Text(snapshot.message ?? "暂无账户")
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.58))
+                .foregroundStyle(MonitorTheme.textSecondary)
                 .lineLimit(2)
             Spacer()
         }
         .padding(.horizontal, 10)
         .frame(minHeight: 50)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
         )
     }
 
@@ -695,16 +1146,16 @@ struct DetailPanelView: View {
         HStack {
             Text(message)
                 .font(.system(size: 9.6, weight: .semibold))
-                .foregroundStyle(Color(red: 1.0, green: 0.70, blue: 0.38))
+                .foregroundStyle(MonitorTheme.warning)
                 .lineLimit(2)
             Spacer()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(Color(red: 1.0, green: 0.55, blue: 0.25).opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color(red: 1.0, green: 0.55, blue: 0.25).opacity(0.16), lineWidth: 1)
+                .stroke(MonitorTheme.warning.opacity(0.16), lineWidth: 0.6)
         )
     }
 
@@ -728,11 +1179,11 @@ struct DetailPanelView: View {
     private func balanceStatusColor(_ snapshot: BalanceMonitorSnapshot) -> Color {
         switch snapshot.panelSeverity {
         case .none:
-            Color(red: 0.61, green: 0.95, blue: 0.68)
+            MonitorTheme.healthy
         case .warning:
-            Color(red: 1.0, green: 0.55, blue: 0.25)
+            MonitorTheme.warning
         case .error:
-            Color(red: 1.0, green: 0.28, blue: 0.30)
+            MonitorTheme.critical
         }
     }
 
@@ -740,16 +1191,16 @@ struct DetailPanelView: View {
         HStack {
             Text(snapshot.errorMessage ?? "暂无 Codex 活动")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.58))
+                .foregroundStyle(MonitorTheme.textSecondary)
                 .lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, 10)
         .frame(height: 36)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
         )
     }
 
@@ -759,7 +1210,34 @@ struct DetailPanelView: View {
             PeriodUsageCell(label: "7天", value: Formatters.compactTokens(snapshot.usage7d))
             PeriodUsageCell(label: "30天", value: Formatters.compactTokens(snapshot.usage30d))
         }
+        .padding(.horizontal, 2)
         .padding(.top, 1)
+    }
+}
+
+private struct PageSwitcherButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isSelected ? MonitorTheme.controlSelectedFill : Color.clear)
+
+                Text(title)
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: IslandMetrics.detailPageSwitcherHeight - 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .foregroundStyle(isSelected ? MonitorTheme.textPrimary : MonitorTheme.textSecondary)
     }
 }
 
@@ -772,19 +1250,19 @@ private struct StatusDot: View {
         ZStack {
             if isRunning && enablePulse {
                 Circle()
-                    .stroke(Color(red: 0.20, green: 0.94, blue: 0.43).opacity(0.28), lineWidth: 4)
+                    .stroke(MonitorTheme.healthy.opacity(0.18), lineWidth: 3)
                     .frame(width: 8, height: 8)
-                    .scaleEffect(pulse ? 1.45 : 0.95)
-                    .opacity(pulse ? 0.16 : 0.44)
+                    .scaleEffect(pulse ? 1.34 : 0.95)
+                    .opacity(pulse ? 0.12 : 0.34)
                     .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
             }
 
             Circle()
-                .fill(isRunning ? Color(red: 0.20, green: 0.94, blue: 0.43) : Color(red: 0.31, green: 0.33, blue: 0.37))
+                .fill(isRunning ? MonitorTheme.healthy : MonitorTheme.neutral)
                 .frame(width: 8, height: 8)
                 .shadow(
-                    color: isRunning ? Color(red: 0.20, green: 0.94, blue: 0.43).opacity(0.9) : .white.opacity(0.08),
-                    radius: isRunning ? 8 : 1,
+                    color: isRunning ? MonitorTheme.healthy.opacity(0.34) : .white.opacity(0.06),
+                    radius: isRunning ? 4 : 1,
                     x: 0,
                     y: 0
                 )
@@ -802,17 +1280,17 @@ private struct SeverityDot: View {
         ZStack {
             if severity != .none && enablePulse {
                 Circle()
-                    .stroke(color.opacity(0.25), lineWidth: 4)
+                    .stroke(color.opacity(0.20), lineWidth: 3)
                     .frame(width: 8, height: 8)
-                    .scaleEffect(pulse ? 1.45 : 0.95)
-                    .opacity(pulse ? 0.18 : 0.42)
+                    .scaleEffect(pulse ? 1.34 : 0.95)
+                    .opacity(pulse ? 0.14 : 0.34)
                     .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
             }
 
             Circle()
                 .fill(color)
                 .frame(width: 8, height: 8)
-                .shadow(color: color.opacity(severity == .none ? 0.10 : 0.80), radius: severity == .none ? 1 : 7, x: 0, y: 0)
+                .shadow(color: color.opacity(severity == .none ? 0.08 : 0.42), radius: severity == .none ? 1 : 4, x: 0, y: 0)
         }
         .frame(width: 12, height: 12)
     }
@@ -820,11 +1298,11 @@ private struct SeverityDot: View {
     private var color: Color {
         switch severity {
         case .none:
-            Color(red: 0.31, green: 0.33, blue: 0.37)
+            MonitorTheme.neutral
         case .warning:
-            Color(red: 1.0, green: 0.55, blue: 0.25)
+            MonitorTheme.warning
         case .error:
-            Color(red: 1.0, green: 0.28, blue: 0.30)
+            MonitorTheme.critical
         }
     }
 }
@@ -832,9 +1310,13 @@ private struct SeverityDot: View {
 private struct IconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.68 : 0.58))
-            .frame(width: 18, height: 18)
-            .background(Color.white.opacity(configuration.isPressed ? 0.08 : 0.035), in: Circle())
+            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.76 : 0.60))
+            .frame(width: 20, height: 20)
+            .background(Color.white.opacity(configuration.isPressed ? 0.095 : 0.045), in: Circle())
+            .overlay(
+                Circle()
+                    .stroke(MonitorTheme.hairline, lineWidth: 0.5)
+            )
     }
 }
 
@@ -847,7 +1329,7 @@ private struct RefreshIcon: View {
                 TimelineView(.animation) { context in
                     icon
                         .rotationEffect(.degrees(rotationAngle(at: context.date)))
-                        .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))
+                        .foregroundStyle(MonitorTheme.healthy)
                 }
             } else {
                 icon
@@ -867,6 +1349,298 @@ private struct RefreshIcon: View {
     }
 }
 
+private struct QuotaBarCell: View {
+    let label: String
+    let value: String
+    let percent: Int?
+    let resetText: String?
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label)
+                    .font(.system(size: 10.4, weight: .semibold))
+                    .foregroundStyle(MonitorTheme.textPrimary)
+                Spacer(minLength: 8)
+                Text(value)
+                    .font(.system(size: 10.4, weight: .semibold))
+                    .foregroundStyle(color)
+                    .monospacedDigit()
+                if let resetText {
+                    Text(resetText)
+                        .font(.system(size: 9.2, weight: .medium))
+                        .foregroundStyle(MonitorTheme.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+            }
+
+            CapsuleQuotaBar(value: percent, color: color)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct SparkQuotaChip: View {
+    let window: SparkQuotaWindow
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(window.label)
+                .font(.system(size: 9.2, weight: .medium))
+                .foregroundStyle(MonitorTheme.textTertiary)
+                .lineLimit(1)
+
+            Text(window.remainingText)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(MonitorTheme.running)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(MonitorTheme.controlFill, in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        var parts = ["GPT-5.3-Codex-Spark \(window.label)"]
+        if let resetText = window.resetText {
+            parts.append(resetText)
+        } else if let resetText = Formatters.quotaResetText(window.resetAt) {
+            parts.append(resetText)
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private struct CapsuleQuotaBar: View {
+    let value: Int?
+    let color: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(MonitorTheme.progressTrack)
+                Capsule(style: .continuous)
+                    .fill(color.opacity(0.92))
+                    .frame(width: proxy.size.width * progress)
+            }
+        }
+        .frame(height: 5)
+    }
+
+    private var progress: CGFloat {
+        guard let value else {
+            return 0
+        }
+        return CGFloat(max(0, min(100, value))) / 100
+    }
+}
+
+private struct CompactStatusCell: View {
+    let label: String
+    let value: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 10.4, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textPrimary)
+            Text(value)
+                .font(.system(size: 17.2, weight: .semibold, design: .rounded))
+                .foregroundStyle(MonitorTheme.textPrimary)
+                .monospacedDigit()
+            Text(detail)
+                .font(.system(size: 9.2, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.74)
+        }
+    }
+}
+
+private struct MetricReadout: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 9.7, weight: .medium))
+                .foregroundStyle(MonitorTheme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(value)
+                .font(.system(size: 15.6, weight: .semibold, design: .rounded))
+                .foregroundStyle(MonitorTheme.textPrimary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+    }
+}
+
+private struct TaskTableHeader: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            tableHeaderText("Session")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            tableHeaderText("Status")
+                .frame(width: 58, alignment: .leading)
+            tableHeaderText("+10m")
+                .frame(width: 56, alignment: .trailing)
+            tableHeaderText("Today")
+                .frame(width: 78, alignment: .trailing)
+            tableHeaderText("Ctx")
+                .frame(width: 66, alignment: .trailing)
+            tableHeaderText("Total")
+                .frame(width: 72, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 26)
+    }
+
+    private func tableHeaderText(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9.8, weight: .semibold))
+            .foregroundStyle(MonitorTheme.textSecondary)
+    }
+}
+
+private struct TaskTableRow: View {
+    let task: CodexTask
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: statusColor.opacity(task.status == .running ? 0.55 : 0.18), radius: 4, x: 0, y: 0)
+
+                Text(task.title)
+                    .font(.system(size: 11.2, weight: .medium))
+                    .foregroundStyle(MonitorTheme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if let badgeText = TaskBadgeFormatter.subagentBadgeText(for: task.activeSubagentCount) {
+                    Text(badgeText)
+                        .font(.system(size: 8.4, weight: .semibold))
+                        .foregroundStyle(MonitorTheme.running)
+                        .lineLimit(1)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(MonitorTheme.running.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            StatusPill(status: task.status)
+                .frame(width: 58, alignment: .leading)
+
+            Text(Formatters.signedCompactTokens(task.delta10mTokens))
+                .font(.system(size: 10.2, weight: .semibold))
+                .foregroundStyle(deltaColor(task.delta10mTokens))
+                .frame(width: 56, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+                .monospacedDigit()
+
+            Text(Formatters.compactTokensWithShare(tokens: task.todayTokens, sharePercent: task.todaySharePercent))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(todayColor)
+                .frame(width: 78, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.56)
+                .monospacedDigit()
+
+            Text(Formatters.percent(task.contextPercent))
+                .font(.system(size: 10.2, weight: .semibold))
+                .foregroundStyle(task.contextPercent == nil ? MonitorTheme.textTertiary : MonitorTheme.running)
+                .frame(width: 66, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+                .monospacedDigit()
+
+            Text(Formatters.compactTokens(task.tokenCount))
+                .font(.system(size: 10.3, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textPrimary)
+                .frame(width: 72, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(isSelected ? MonitorTheme.rowSelectedFill : Color.clear)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(MonitorTheme.separator)
+                .frame(height: 0.6)
+        }
+    }
+
+    private var statusColor: Color {
+        switch task.status {
+        case .running:
+            MonitorTheme.healthy
+        case .recent, .idle:
+            MonitorTheme.neutral
+        }
+    }
+
+    private var todayColor: Color {
+        guard let tokens = task.todayTokens else {
+            return MonitorTheme.textTertiary
+        }
+        return tokens > 0 ? MonitorTheme.running : MonitorTheme.textSecondary
+    }
+
+    private func deltaColor(_ value: Int?) -> Color {
+        guard let value else {
+            return MonitorTheme.textTertiary
+        }
+        return value > 0 ? MonitorTheme.running : MonitorTheme.textSecondary
+    }
+}
+
+private struct StatusPill: View {
+    let status: TaskStatus
+
+    var body: some View {
+        Text(status.hudLabel)
+            .font(.system(size: 9.2, weight: .semibold, design: .rounded))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.13), in: Capsule())
+    }
+
+    private var color: Color {
+        switch status {
+        case .running:
+            MonitorTheme.healthy
+        case .recent, .idle:
+            MonitorTheme.textTertiary
+        }
+    }
+}
+
 private struct TaskRow: View {
     let task: CodexTask
 
@@ -881,57 +1655,55 @@ private struct TaskRow: View {
 
                 Spacer(minLength: 4)
 
-                Text(task.status.label)
-                    .font(.system(size: 10, weight: .bold))
+                Text(task.status.hudLabel)
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(statusColor)
             }
 
             HStack(spacing: 6) {
                 Text(task.detail)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.56))
+                    .foregroundStyle(MonitorTheme.textSecondary)
                     .lineLimit(1)
 
                 Spacer(minLength: 8)
 
                 if let badgeText = TaskBadgeFormatter.subagentBadgeText(for: task.activeSubagentCount) {
                     Text(badgeText)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(MonitorTheme.healthy)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .layoutPriority(2)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
                         .background(
-                            Color(red: 0.61, green: 0.95, blue: 0.68).opacity(0.11),
+                            MonitorTheme.healthy.opacity(0.11),
                             in: RoundedRectangle(cornerRadius: 4, style: .continuous)
                         )
                 }
 
                 Text(Formatters.compactTokens(task.tokenCount))
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.66))
+                    .foregroundStyle(MonitorTheme.textSecondary)
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
         )
     }
 
     private var statusColor: Color {
         switch task.status {
         case .running:
-            Color(red: 0.61, green: 0.95, blue: 0.68)
-        case .recent:
-            Color(red: 0.50, green: 0.78, blue: 1.00)
-        case .idle:
-            .white.opacity(0.48)
+            MonitorTheme.healthy
+        case .recent, .idle:
+            MonitorTheme.textTertiary
         }
     }
 }
@@ -948,15 +1720,15 @@ private struct RemoteAccountRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(account.displayName)
-                    .font(.system(size: 10.5, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.90))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(MonitorTheme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 HStack(spacing: 5) {
                     if let planLabel = account.planLabel {
                         Text(planLabel)
-                            .font(.system(size: 8.5, weight: .heavy, design: .rounded))
+                            .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.black.opacity(0.84))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
@@ -965,7 +1737,7 @@ private struct RemoteAccountRow: View {
 
                     Text(account.detailText)
                         .font(.system(size: 9.3, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .foregroundStyle(MonitorTheme.textTertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -975,7 +1747,7 @@ private struct RemoteAccountRow: View {
 
             VStack(alignment: .trailing, spacing: 4) {
                 Text(account.stateReasonText)
-                    .font(.system(size: 10, weight: .heavy))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(account.state.color)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -987,10 +1759,10 @@ private struct RemoteAccountRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(minHeight: quotaWindows.count > 2 ? 74 : 62)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
         )
     }
 
@@ -1019,7 +1791,7 @@ private struct RemoteAccountRow: View {
                     Text("\(window.shortLabel) \(window.remainingText)")
                         .font(.system(size: 8.4, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(window.reachesThreshold ? Color(red: 1.0, green: 0.55, blue: 0.25) : .white.opacity(0.62))
+                        .foregroundStyle(window.reachesThreshold ? MonitorTheme.warning : MonitorTheme.textSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.64)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1030,12 +1802,12 @@ private struct RemoteAccountRow: View {
 
     private var quotaColor: Color {
         if account.quotaError != nil {
-            return Color(red: 1.0, green: 0.55, blue: 0.25)
+            return MonitorTheme.warning
         }
         if account.displayQuotaWindows.contains(where: \.reachesThreshold) {
-            return Color(red: 1.0, green: 0.55, blue: 0.25)
+            return MonitorTheme.warning
         }
-        return .white.opacity(0.62)
+        return MonitorTheme.textSecondary
     }
 }
 
@@ -1051,14 +1823,14 @@ private struct BalanceAccountRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(account.displayName)
-                    .font(.system(size: 10.5, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.90))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(MonitorTheme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 Text(account.detailText)
                     .font(.system(size: 9.3, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .foregroundStyle(MonitorTheme.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -1067,14 +1839,14 @@ private struct BalanceAccountRow: View {
 
             VStack(alignment: .trailing, spacing: 4) {
                 Text(account.stateText)
-                    .font(.system(size: 10, weight: .heavy))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(account.state.color)
                     .lineLimit(1)
                     .minimumScaleFactor(0.68)
                 Text(account.amountText)
                     .font(.system(size: 9.5, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.66))
+                    .foregroundStyle(MonitorTheme.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
             }
@@ -1083,10 +1855,10 @@ private struct BalanceAccountRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(height: 62)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
         )
     }
 }
@@ -1098,15 +1870,19 @@ private struct RemoteSummaryCell: View {
     var body: some View {
         VStack(spacing: 2) {
             Text(label)
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.50))
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(MonitorTheme.textSecondary)
             Text(value)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .foregroundStyle(.white.opacity(0.90))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(MonitorTheme.textPrimary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 7)
-        .background(Color.white.opacity(0.026), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
     }
 }
 
@@ -1115,16 +1891,172 @@ private struct PeriodUsageCell: View {
     let value: String
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.52))
+                .font(.system(size: 9.6, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textSecondary)
             Text(value)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textPrimary)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+}
+
+private struct RadarSummaryCell: View {
+    let label: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 9.4, weight: .medium))
+                .foregroundStyle(MonitorTheme.textSecondary)
+            Text(value)
+                .font(.system(size: 10.8, weight: .semibold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.68)
+                .monospacedDigit()
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
-        .background(Color.white.opacity(0.026), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(MonitorTheme.rowFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(MonitorTheme.hairline, lineWidth: 0.6)
+        )
+    }
+}
+
+private struct CodexRadarModelCard: View {
+    let model: CodexRadarModelScore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: statusColor.opacity(0.38), radius: 3, x: 0, y: 0)
+
+                Text(model.label)
+                    .font(.system(size: 10.3, weight: .semibold))
+                    .foregroundStyle(MonitorTheme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            Text(scoreText)
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(statusColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .monospacedDigit()
+
+            HStack(spacing: 5) {
+                Text(passText)
+                if let wallTimeHuman = model.wallTimeHuman {
+                    Text(wallTimeHuman)
+                }
+            }
+            .font(.system(size: 8.7, weight: .medium))
+            .foregroundStyle(MonitorTheme.textTertiary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.70)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+        .background(statusColor.opacity(0.075), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(statusColor.opacity(0.18), lineWidth: 0.7)
+        )
+    }
+
+    private var scoreText: String {
+        guard let score = model.score else {
+            return "--"
+        }
+        return String(format: "%.1f", score)
+    }
+
+    private var passText: String {
+        guard let passed = model.passed,
+              let tasks = model.tasks else {
+            return "--/--"
+        }
+        return "\(passed)/\(tasks)"
+    }
+
+    private var statusColor: Color {
+        switch model.status?.lowercased() {
+        case "green":
+            MonitorTheme.healthy
+        case "yellow":
+            MonitorTheme.warning
+        case "red":
+            MonitorTheme.critical
+        default:
+            MonitorTheme.running
+        }
+    }
+}
+
+private struct CodexRadarQuotaRowView: View {
+    let row: CodexRadarQuotaRow
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(row.tier)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(MonitorTheme.textPrimary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(quotaText(row.fiveH))
+                .font(.system(size: 10.4, weight: .semibold))
+                .foregroundStyle(MonitorTheme.running)
+                .lineLimit(1)
+                .monospacedDigit()
+                .frame(width: 86, alignment: .trailing)
+
+            Text(quotaText(row.sevenD))
+                .font(.system(size: 10.4, weight: .semibold))
+                .foregroundStyle(MonitorTheme.healthy)
+                .lineLimit(1)
+                .monospacedDigit()
+                .frame(width: 86, alignment: .trailing)
+
+            Text(row.basis ?? "--")
+                .font(.system(size: 9.2, weight: .medium))
+                .foregroundStyle(MonitorTheme.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+                .frame(width: 96, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 31)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(MonitorTheme.separator)
+                .frame(height: 0.6)
+        }
+    }
+
+    private func quotaText(_ value: Double?) -> String {
+        guard let value else {
+            return "--"
+        }
+        return String(format: "%.1f", value)
     }
 }

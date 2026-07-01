@@ -23,9 +23,9 @@ private enum RefreshPreset: String, CaseIterable, Identifiable {
         case .realtime:
             (active: 2, idle: 4, usage: 20, watcher: 8, gap: 1)
         case .balanced:
-            (active: 3, idle: 6, usage: 30, watcher: 12, gap: 3)
+            (active: 15, idle: 90, usage: 180, watcher: 90, gap: 10)
         case .economy:
-            (active: 8, idle: 20, usage: 90, watcher: 30, gap: 8)
+            (active: 30, idle: 180, usage: 300, watcher: 180, gap: 15)
         }
     }
 
@@ -39,12 +39,13 @@ private enum RefreshPreset: String, CaseIterable, Identifiable {
     }
 
     static func matching(_ draft: SettingsDraft) -> RefreshPreset {
-        allCases.first { $0.matches(draft) } ?? .balanced
+        allCases.first { $0.matches(draft) } ?? .economy
     }
 }
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case codex
+    case codexRadar
     case remoteCodex
     case newAPI
     case subAPI
@@ -57,6 +58,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "Codex"
+        case .codexRadar:
+            "Codex Radar"
         case .remoteCodex:
             "CLIProxyAPI"
         case .newAPI:
@@ -74,6 +77,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "circle.grid.2x2.fill"
+        case .codexRadar:
+            "dot.radiowaves.left.and.right"
         case .remoteCodex:
             "network"
         case .newAPI:
@@ -100,13 +105,16 @@ private struct AccountEditorContext: Identifiable {
 }
 
 private struct SettingsDraft: Equatable {
-    var activeRefreshInterval: TimeInterval = 3
-    var idleRefreshInterval: TimeInterval = 6
-    var usageRefreshInterval: TimeInterval = 30
-    var watcherRefreshInterval: TimeInterval = 12
-    var fileChangeRefreshMinimumGap: TimeInterval = 3
+    var activeRefreshInterval: TimeInterval = 30
+    var idleRefreshInterval: TimeInterval = 180
+    var usageRefreshInterval: TimeInterval = 300
+    var watcherRefreshInterval: TimeInterval = 180
+    var fileChangeRefreshMinimumGap: TimeInterval = 15
     var rateLimitSource: RateLimitSourcePreference = .appServerFirst
     var showPeriodUsage = true
+    var showSparkQuota = false
+    var codexRadarEnabled = true
+    var codexRadarAPIToken = ""
     var taskHistoryRange: TaskHistoryRange = .threeDays
     var notchDisplaySource: NotchDisplaySource = .codex
     var remoteMonitorEnabled = false
@@ -147,6 +155,9 @@ private struct SettingsDraft: Equatable {
         fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
         rateLimitSource = settings.rateLimitSource
         showPeriodUsage = settings.showPeriodUsage
+        showSparkQuota = settings.showSparkQuota
+        codexRadarEnabled = settings.codexRadarEnabled
+        codexRadarAPIToken = CodexRadarTokenProvider.loadSavedToken()
         taskHistoryRange = settings.taskHistoryRange
         notchDisplaySource = settings.notchDisplaySource
         remoteMonitorEnabled = settings.remoteMonitorEnabled
@@ -191,7 +202,7 @@ private struct SettingsDraft: Equatable {
     }
 
     mutating func resetRefreshDefaults() {
-        applyPreset(.balanced)
+        applyPreset(.economy)
     }
 }
 
@@ -200,15 +211,17 @@ struct SettingsView: View {
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
     @ObservedObject var subAPIViewModel: BalanceMonitorViewModel
+    @ObservedObject var codexRadarViewModel: CodexRadarViewModel
     let onRefresh: () -> Void
 
     @State private var draft = SettingsDraft()
-    @State private var selectedPreset: RefreshPreset = .balanced
+    @State private var selectedPreset: RefreshPreset = .economy
     @State private var selectedTab: SettingsTab = .codex
     @State private var accountEditorContext: AccountEditorContext?
     @State private var accountEditorID: String?
     @State private var accountEditorDraft = BalanceAccountConfiguration(source: .newAPI)
     @State private var deleteCandidate: AccountDeleteCandidate?
+    @State private var codexRadarTokenError: String?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -233,6 +246,15 @@ struct SettingsView: View {
         .frame(minHeight: 660)
         .onAppear {
             reloadDraft()
+        }
+        .onChange(of: draft.remoteMonitorEnabled) { _, enabled in
+            loadRemoteCodexSecretsIfEnabling(enabled)
+        }
+        .onChange(of: draft.newAPIMonitorEnabled) { _, enabled in
+            loadBalanceSecretsIfEnabling(enabled, source: .newAPI)
+        }
+        .onChange(of: draft.subAPIMonitorEnabled) { _, enabled in
+            loadBalanceSecretsIfEnabling(enabled, source: .subAPI)
         }
         .sheet(item: $accountEditorContext, onDismiss: resetAccountEditorState) { context in
             accountEditorSheet(source: context.source)
@@ -347,6 +369,8 @@ struct SettingsView: View {
         switch selectedTab {
         case .codex:
             codexSettingsContent
+        case .codexRadar:
+            codexRadarSettingsContent
         case .remoteCodex:
             remoteCodexSettingsContent
         case .newAPI:
@@ -387,9 +411,9 @@ struct SettingsView: View {
             )
             presetControls
             intervalStepper("运行中", value: $draft.activeRefreshInterval, range: 2...30, help: "检测到 Codex 正在执行任务时的状态刷新间隔。数值越小越实时，功耗也越高。")
-            intervalStepper("空闲", value: $draft.idleRefreshInterval, range: 4...120, help: "Codex 没有运行中任务时的状态刷新间隔。")
+            intervalStepper("空闲", value: $draft.idleRefreshInterval, range: 4...300, help: "Codex 没有运行中任务时的状态刷新间隔。")
             intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 15...300, help: "统计 Codex 24小时、7天、30天 token 用量的刷新间隔。")
-            intervalStepper("文件监听", value: $draft.watcherRefreshInterval, range: 8...120, help: "扫描 Codex 会话文件变化的保底间隔，用于补偿文件事件丢失。")
+            intervalStepper("文件监听", value: $draft.watcherRefreshInterval, range: 8...300, help: "扫描 Codex 会话文件变化的保底间隔，用于补偿文件事件丢失。")
             intervalStepper("补刷节流", value: $draft.fileChangeRefreshMinimumGap, range: 1...30, help: "文件变化很多时，连续触发刷新之间的最小间隔。")
         }
 
@@ -405,6 +429,9 @@ struct SettingsView: View {
 
             Toggle(isOn: $draft.showPeriodUsage) {
                 HelpLabel(title: "显示 24小时 / 7天 / 30天", help: "控制详情页底部是否显示 Codex 三个时间窗口的 token 用量。")
+            }
+            Toggle(isOn: $draft.showSparkQuota) {
+                HelpLabel(title: "显示 GPT-5.3-Codex-Spark 额度", help: "开启后在 Codex 详情页显示 Spark 专属 5小时和7天额度。只复用已有额度数据，不增加刷新频率。")
             }
             Picker(selection: $draft.taskHistoryRange) {
                 ForEach(TaskHistoryRange.allCases) { range in
@@ -466,11 +493,58 @@ struct SettingsView: View {
 
             remoteStatusRow
 
-            if let error = settings.cliproxyKeychainError {
+            if draft.remoteMonitorEnabled, let error = settings.cliproxyKeychainError {
                 Text("管理密钥保存失败：\(error)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.red.opacity(0.85))
             }
+        }
+    }
+
+    @ViewBuilder
+    private var codexRadarSettingsContent: some View {
+        Section("Codex Radar") {
+            Toggle(isOn: $draft.codexRadarEnabled) {
+                HelpLabel(title: "启用 Codex Radar", help: "启用后详情页会出现 Codex Radar tab，默认优先读取 codexradar.com 授权 API。")
+            }
+
+            Text("默认使用 CodexRadar API；没有本机 token 时会自动降级到 public summary。每天最多两次自动刷新：北京时间 08:20 和 14:20。")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            labeledSecureField(
+                "API Token",
+                text: $draft.codexRadarAPIToken,
+                placeholder: "留空时读取环境变量或降级公开 summary",
+                help: "读取顺序：CODEXRADAR_API_TOKEN 环境变量、本机 token 文件、公开 summary 降级。本机 token 只保存到当前用户的 Application Support 目录。"
+            )
+            .disabled(!draft.codexRadarEnabled)
+
+            if let codexRadarTokenError {
+                Text("Radar token 保存失败：\(codexRadarTokenError)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.red.opacity(0.85))
+            }
+
+            HStack {
+                HelpLabel(title: "数据源", help: "有 token 时读取 https://codexradar.com/api/v1/current；没有 token 时读取 https://codexradar.com/current.json。不会缓存 Authorization header。")
+                Spacer()
+                Text(codexRadarStatusText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(codexRadarStatusColor)
+                    .lineLimit(1)
+                Button("刷新 Radar") {
+                    codexRadarViewModel.refreshNow()
+                }
+                .disabled(!settings.codexRadarEnabled || draft.codexRadarEnabled != settings.codexRadarEnabled || codexRadarViewModel.isRefreshing)
+            }
+        }
+
+        Section("归属") {
+            Text(CodexRadarSnapshot.defaultAttributionText)
+                .font(.system(size: 12, weight: .semibold))
+            Link("打开 codexradar.com", destination: CodexRadarSnapshot.siteURL)
         }
     }
 
@@ -683,7 +757,7 @@ struct SettingsView: View {
                 enabled: enabled.wrappedValue
             )
 
-            if let keychainError {
+            if enabled.wrappedValue, let keychainError {
                 Text("认证信息保存失败：\(keychainError)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.red.opacity(0.85))
@@ -1203,7 +1277,7 @@ struct SettingsView: View {
         HStack(spacing: 10) {
             Button("恢复默认刷新") {
                 draft.resetRefreshDefaults()
-                selectedPreset = .balanced
+                selectedPreset = .economy
             }
 
             if hasChanges {
@@ -1345,6 +1419,38 @@ struct SettingsView: View {
         }
     }
 
+    private var codexRadarStatusText: String {
+        switch codexRadarViewModel.snapshot.panelState {
+        case .disabled:
+            "未启用"
+        case .loading:
+            "读取中"
+        case .ready:
+            codexRadarViewModel.snapshot.models.isEmpty
+                ? "\(codexRadarViewModel.snapshot.dataSource.displayLabel) 无模型数据"
+                : "\(codexRadarViewModel.snapshot.dataSource.displayLabel) 已更新"
+        case .stale:
+            "数据可能过期"
+        case .error:
+            codexRadarViewModel.snapshot.message ?? "读取失败"
+        }
+    }
+
+    private var codexRadarStatusColor: Color {
+        switch codexRadarViewModel.snapshot.panelState {
+        case .disabled:
+            .secondary
+        case .loading:
+            .secondary
+        case .ready:
+            .green
+        case .stale:
+            .orange
+        case .error:
+            .red
+        }
+    }
+
     private func thresholdValidationMessage(for draft: SettingsDraft) -> String? {
         if let message = draft.newAPIThresholds.orderValidationMessage {
             return "NewAPI 默认阈值：\(message)"
@@ -1369,11 +1475,81 @@ struct SettingsView: View {
         selectedPreset = .matching(nextDraft)
     }
 
+    private func loadRemoteCodexSecretsIfEnabling(_ enabled: Bool) {
+        guard enabled else {
+            return
+        }
+        guard settings.loadSecretsIfNeeded() else {
+            draft.remoteMonitorEnabled = false
+            return
+        }
+        draft.cliproxyManagementKey = settings.cliproxyManagementKey
+    }
+
+    private func loadBalanceSecretsIfEnabling(_ enabled: Bool, source: BalanceMonitorSource) {
+        guard enabled else {
+            return
+        }
+        guard settings.loadSecretsIfNeeded() else {
+            switch source {
+            case .newAPI:
+                draft.newAPIMonitorEnabled = false
+            case .subAPI:
+                draft.subAPIMonitorEnabled = false
+            }
+            return
+        }
+        switch source {
+        case .newAPI:
+            draft.newAPIManagementKey = settings.newAPIManagementKey
+            draft.newAPIAccounts = settings.balanceAccounts(for: .newAPI)
+        case .subAPI:
+            draft.subAPIManagementKey = settings.subAPIManagementKey
+            draft.subAPIAccounts = settings.balanceAccounts(for: .subAPI)
+        }
+    }
+
+    private func remoteCodexSettingsChanged(from current: SettingsDraft, to next: SettingsDraft) -> Bool {
+        next.remoteMonitorEnabled != current.remoteMonitorEnabled
+            || next.remoteCodexDataSource != current.remoteCodexDataSource
+            || next.cliproxyPanelURL != current.cliproxyPanelURL
+            || next.cliproxyManagementKey != current.cliproxyManagementKey
+            || next.cliproxyRefreshInterval != current.cliproxyRefreshInterval
+            || next.cliproxyRequestTimeout != current.cliproxyRequestTimeout
+            || next.cliproxyAllowInsecureTLS != current.cliproxyAllowInsecureTLS
+    }
+
+    private func balanceSettingsChanged(
+        source: BalanceMonitorSource,
+        from current: SettingsDraft,
+        to next: SettingsDraft
+    ) -> Bool {
+        switch source {
+        case .newAPI:
+            next.newAPIMonitorEnabled != current.newAPIMonitorEnabled
+                || next.newAPIRefreshInterval != current.newAPIRefreshInterval
+                || next.newAPIAccounts != current.newAPIAccounts
+                || next.newAPIThresholds != current.newAPIThresholds
+        case .subAPI:
+            next.subAPIMonitorEnabled != current.subAPIMonitorEnabled
+                || next.subAPIRefreshInterval != current.subAPIRefreshInterval
+                || next.subAPIAccounts != current.subAPIAccounts
+                || next.subAPIThresholds != current.subAPIThresholds
+        }
+    }
+
     private func saveDraft() {
         guard thresholdValidationMessage == nil else {
             return
         }
         let next = draft
+        let requiresSecretLoad = next.secretStorageMode != settings.secretStorageMode
+            || next.remoteMonitorEnabled
+            || next.newAPIMonitorEnabled
+            || next.subAPIMonitorEnabled
+        if requiresSecretLoad, !settings.loadSecretsIfNeeded() {
+            return
+        }
         let current = currentDraft
         let managementKeyForSave = CodexNotchSettings.managementKeyForSave(
             draftKey: next.cliproxyManagementKey,
@@ -1417,47 +1593,78 @@ struct SettingsView: View {
         settings.fileChangeRefreshMinimumGap = next.fileChangeRefreshMinimumGap
         settings.rateLimitSource = next.rateLimitSource
         settings.showPeriodUsage = next.showPeriodUsage
+        settings.showSparkQuota = next.showSparkQuota
+        settings.codexRadarEnabled = next.codexRadarEnabled
+        do {
+            try CodexRadarTokenProvider.saveToken(next.codexRadarAPIToken)
+            codexRadarTokenError = nil
+        } catch {
+            codexRadarTokenError = error.localizedDescription
+            return
+        }
         settings.taskHistoryRange = next.taskHistoryRange
         settings.notchDisplaySource = next.notchDisplaySource
 
-        settings.remoteCodexDataSource = next.remoteCodexDataSource
-        settings.cliproxyPanelURL = next.cliproxyPanelURL
-        settings.cliproxyRefreshInterval = next.cliproxyRefreshInterval
-        settings.cliproxyRequestTimeout = next.cliproxyRequestTimeout
-        settings.cliproxyAllowInsecureTLS = next.cliproxyAllowInsecureTLS
-        settings.cliproxyManagementKey = managementKeyForSave
-        if next.remoteMonitorEnabled {
-            settings.remoteMonitorEnabled = true
+        if remoteCodexSettingsChanged(from: current, to: next)
+            || current.remoteMonitorEnabled
+            || next.remoteMonitorEnabled {
+            settings.remoteCodexDataSource = next.remoteCodexDataSource
+            settings.cliproxyPanelURL = next.cliproxyPanelURL
+            settings.cliproxyRefreshInterval = next.cliproxyRefreshInterval
+            settings.cliproxyRequestTimeout = next.cliproxyRequestTimeout
+            settings.cliproxyAllowInsecureTLS = next.cliproxyAllowInsecureTLS
+            if settings.secretsAreLoaded {
+                settings.cliproxyManagementKey = managementKeyForSave
+            }
+            if next.remoteMonitorEnabled {
+                settings.remoteMonitorEnabled = true
+            }
         }
 
-        settings.setBalanceDefaultThresholds(next.newAPIThresholds, for: .newAPI)
-        settings.setBalanceAccounts(newAPIAccounts, for: .newAPI)
-        settings.newAPIPanelURL = newAPIAccounts.first?.panelURL ?? ""
-        settings.newAPIUsername = next.newAPIMonitorEnabled ? (newAPIAccounts.first?.username ?? "") : ""
-        settings.newAPIRefreshInterval = next.newAPIRefreshInterval
-        settings.newAPIRequestTimeout = newAPIAccounts.first?.requestTimeout ?? next.newAPIRequestTimeout
-        settings.newAPIAllowInsecureTLS = newAPIAccounts.first?.allowInsecureTLS ?? next.newAPIAllowInsecureTLS
-        settings.newAPIManagementKey = legacyKeyForFirstAccount(
-            newAPIAccounts.first,
-            currentKey: current.newAPIManagementKey
-        )
-        if next.newAPIMonitorEnabled {
-            settings.newAPIMonitorEnabled = true
+        if balanceSettingsChanged(source: .newAPI, from: current, to: next)
+            || current.newAPIMonitorEnabled
+            || next.newAPIMonitorEnabled {
+            settings.setBalanceDefaultThresholds(next.newAPIThresholds, for: .newAPI)
+            if settings.secretsAreLoaded {
+                settings.setBalanceAccounts(newAPIAccounts, for: .newAPI)
+            }
+            settings.newAPIPanelURL = newAPIAccounts.first?.panelURL ?? ""
+            settings.newAPIUsername = next.newAPIMonitorEnabled ? (newAPIAccounts.first?.username ?? "") : ""
+            settings.newAPIRefreshInterval = next.newAPIRefreshInterval
+            settings.newAPIRequestTimeout = newAPIAccounts.first?.requestTimeout ?? next.newAPIRequestTimeout
+            settings.newAPIAllowInsecureTLS = newAPIAccounts.first?.allowInsecureTLS ?? next.newAPIAllowInsecureTLS
+            if settings.secretsAreLoaded {
+                settings.newAPIManagementKey = legacyKeyForFirstAccount(
+                    newAPIAccounts.first,
+                    currentKey: current.newAPIManagementKey
+                )
+            }
+            if next.newAPIMonitorEnabled {
+                settings.newAPIMonitorEnabled = true
+            }
         }
 
-        settings.setBalanceDefaultThresholds(next.subAPIThresholds, for: .subAPI)
-        settings.setBalanceAccounts(subAPIAccounts, for: .subAPI)
-        settings.subAPIPanelURL = subAPIAccounts.first?.panelURL ?? ""
-        settings.subAPIUsername = next.subAPIMonitorEnabled ? (subAPIAccounts.first?.username ?? "") : ""
-        settings.subAPIRefreshInterval = next.subAPIRefreshInterval
-        settings.subAPIRequestTimeout = subAPIAccounts.first?.requestTimeout ?? next.subAPIRequestTimeout
-        settings.subAPIAllowInsecureTLS = subAPIAccounts.first?.allowInsecureTLS ?? next.subAPIAllowInsecureTLS
-        settings.subAPIManagementKey = legacyKeyForFirstAccount(
-            subAPIAccounts.first,
-            currentKey: current.subAPIManagementKey
-        )
-        if next.subAPIMonitorEnabled {
-            settings.subAPIMonitorEnabled = true
+        if balanceSettingsChanged(source: .subAPI, from: current, to: next)
+            || current.subAPIMonitorEnabled
+            || next.subAPIMonitorEnabled {
+            settings.setBalanceDefaultThresholds(next.subAPIThresholds, for: .subAPI)
+            if settings.secretsAreLoaded {
+                settings.setBalanceAccounts(subAPIAccounts, for: .subAPI)
+            }
+            settings.subAPIPanelURL = subAPIAccounts.first?.panelURL ?? ""
+            settings.subAPIUsername = next.subAPIMonitorEnabled ? (subAPIAccounts.first?.username ?? "") : ""
+            settings.subAPIRefreshInterval = next.subAPIRefreshInterval
+            settings.subAPIRequestTimeout = subAPIAccounts.first?.requestTimeout ?? next.subAPIRequestTimeout
+            settings.subAPIAllowInsecureTLS = subAPIAccounts.first?.allowInsecureTLS ?? next.subAPIAllowInsecureTLS
+            if settings.secretsAreLoaded {
+                settings.subAPIManagementKey = legacyKeyForFirstAccount(
+                    subAPIAccounts.first,
+                    currentKey: current.subAPIManagementKey
+                )
+            }
+            if next.subAPIMonitorEnabled {
+                settings.subAPIMonitorEnabled = true
+            }
         }
 
         if next.launchAtLoginEnabled != settings.launchAtLoginEnabled {
@@ -1477,6 +1684,8 @@ struct SettingsView: View {
         switch selectedTab {
         case .codex, .launch, .about:
             onRefresh()
+        case .codexRadar:
+            codexRadarViewModel.refreshNow()
         case .remoteCodex:
             remoteViewModel.refreshNow()
         case .newAPI:

@@ -79,8 +79,19 @@ enum Shell {
         return output
     }
 
-    static func sqliteJSON<T: Decodable>(database: String, query: String, as type: T.Type) throws -> T {
-        let output = try run("/usr/bin/sqlite3", ["-json", database, query])
+    static func sqliteJSON<T: Decodable>(
+        database: String,
+        query: String,
+        as type: T.Type,
+        readOnly: Bool = false
+    ) throws -> T {
+        var arguments = ["-json"]
+        if readOnly {
+            arguments.append("-readonly")
+        }
+        arguments.append(contentsOf: [database, query])
+
+        let output = try run("/usr/bin/sqlite3", arguments)
         let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
         let candidate = sqliteJSONPayload(from: trimmedOutput)
         let data = Data(candidate.utf8)

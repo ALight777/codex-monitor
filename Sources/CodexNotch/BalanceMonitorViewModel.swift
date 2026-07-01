@@ -50,6 +50,18 @@ final class BalanceMonitorViewModel: ObservableObject {
             snapshot = .disabled(source: source)
             return
         }
+        guard settings.loadSecretsIfNeeded() else {
+            invalidateInFlightRefresh()
+            loadedSettings = nil
+            snapshot = BalanceMonitorSnapshot(
+                source: source,
+                panelState: .error,
+                accounts: [],
+                message: settings.secretStorageError ?? "密钥读取失败",
+                lastUpdated: Date()
+            )
+            return
+        }
 
         let settingsSnapshot = BalanceMonitorSettingsSnapshot(source: source, settings: settings)
         let targets = refreshTargets(from: settingsSnapshot)

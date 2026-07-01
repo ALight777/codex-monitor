@@ -25,6 +25,9 @@ let runner = TestRunner()
 
 runner.check(AppInfo.version == "0.1.2", "app info should expose version 0.1.2")
 runner.check(AppInfo.displayVersion == "0.1.2", "app info should fall back to source version when bundle version is unavailable")
+runner.check(TaskStatus.running.hudLabel == "RUNNING", "HUD running status should display RUNNING")
+runner.check(TaskStatus.recent.hudLabel == "IDLE", "HUD recent status should display as IDLE")
+runner.check(TaskStatus.idle.hudLabel == "IDLE", "HUD idle status should display as IDLE")
 
 let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",
@@ -33,23 +36,65 @@ let snapshotFormatterTask = CodexTask(
     detail: "gpt-5.5 · 高推理",
     tokenCount: 12345,
     updatedAt: Date(timeIntervalSince1970: 0),
-    activeSubagentCount: 3
+    activeSubagentCount: 3,
+    delta10mTokens: 1200,
+    delta1hTokens: 3456,
+    todayTokens: 12,
+    todaySharePercent: 10.81081081081081,
+    contextInputTokens: 58609,
+    contextWindowTokens: 258400,
+    contextPercent: 22.681501547987615,
+    contextUpdatedAt: Date(timeIntervalSince1970: 10)
 )
 let snapshotFormatterSnapshot = UsageSnapshot(
     primaryPercent: 88,
     secondaryPercent: 66,
+    primaryResetsAt: 1_783_000_000,
+    secondaryResetsAt: 1_783_400_000,
+    usage1h: 444,
     usage24h: 111,
     usage7d: 222,
     usage30d: 333,
+    sparkQuotaWindows: [
+        SparkQuotaWindow(
+            id: "spark-5h",
+            label: "5h",
+            remainingPercent: 12,
+            usedPercent: 88,
+            resetAt: 1_783_000_000,
+            resetText: "2h"
+        )
+    ],
     tasks: [snapshotFormatterTask],
     isRunning: true,
     lastUpdated: Date(timeIntervalSince1970: 0),
-    errorMessage: nil
+    errorMessage: nil,
+    monitorStats: MonitorPerformanceStats(
+        lastSnapshotDurationMs: 42,
+        lastUsageDurationMs: 84,
+        lastDeltaDurationMs: 5,
+        lastRateLimitSource: "local-jsonl",
+        watchedPathCount: 7,
+        jsonlContextScans: 2,
+        monitorModelTokens: 0
+    )
 )
 let humanSnapshotLines = SnapshotOutputFormatter.humanLines(for: snapshotFormatterSnapshot)
 runner.check(
-    humanSnapshotLines.contains("task=运行中 父任务 12345"),
-    "human snapshot task line should preserve the token count as the final field"
+    humanSnapshotLines.contains("usage1h=444 usage24h=111 usage7d=222 usage30d=333"),
+    "human snapshot output should expose aggregate 1 hour usage"
+)
+runner.check(
+    humanSnapshotLines.contains("spark=5h=12%"),
+    "human snapshot output should expose Spark quota windows"
+)
+runner.check(
+    humanSnapshotLines.contains("monitor snapshot_ms=42 usage_ms=84 delta_ms=5 rate=local-jsonl watched=7 context_scans=2 model_tokens=0"),
+    "human snapshot output should expose monitor self cost"
+)
+runner.check(
+    humanSnapshotLines.contains("task=运行中 父任务 12345 delta10m=+1.2千 today=12 11% ctx=6万/26万"),
+    "human snapshot task line should expose short delta, Today usage share, and context ratio"
 )
 runner.check(
     !humanSnapshotLines.contains { $0.contains("subagents=") },
@@ -58,11 +103,131 @@ runner.check(
 let jsonSnapshot = try JSONSerialization.jsonObject(
     with: SnapshotOutputFormatter.jsonData(for: snapshotFormatterSnapshot)
 ) as? [String: Any]
+let jsonMonitor = jsonSnapshot?["monitor"] as? [String: Any]
+runner.check(
+    jsonSnapshot?["usage_1h"] as? Int == 444,
+    "JSON snapshot output should expose aggregate 1 hour usage"
+)
+runner.check(
+    jsonSnapshot?["primary_reset_at"] as? Int == 1_783_000_000,
+    "JSON snapshot output should expose primary quota reset time"
+)
+runner.check(
+    jsonSnapshot?["secondary_reset_at"] as? Int == 1_783_400_000,
+    "JSON snapshot output should expose secondary quota reset time"
+)
+let jsonSparkWindows = jsonSnapshot?["spark_quota_windows"] as? [[String: Any]]
+runner.check(
+    jsonSparkWindows?.first?["label"] as? String == "5h",
+    "JSON snapshot output should expose Spark quota labels"
+)
+runner.check(
+    jsonSparkWindows?.first?["remaining_percent"] as? Int == 12,
+    "JSON snapshot output should expose Spark quota remaining percent"
+)
+runner.check(
+    Formatters.quotaResetText(
+        1_783_000_000,
+        now: Date(timeIntervalSince1970: 1_782_999_000),
+        timeZone: TimeZone(secondsFromGMT: 0)!
+    ) == "13:46 恢复",
+    "quota reset formatter should display future reset time"
+)
+runner.check(
+    Formatters.quotaResetText(
+        1_783_518_400,
+        style: .date,
+        now: Date(timeIntervalSince1970: 1_783_000_000),
+        timeZone: TimeZone(secondsFromGMT: 0)!
+    ) == "7/8 恢复",
+    "quota reset formatter should display same-year reset date"
+)
+runner.check(
+    Formatters.quotaResetText(
+        1_798_859_045,
+        style: .date,
+        now: Date(timeIntervalSince1970: 1_798_675_200),
+        timeZone: TimeZone(secondsFromGMT: 0)!
+    ) == "2027/1/2 恢复",
+    "quota reset formatter should include year for cross-year reset date"
+)
+runner.check(
+    Formatters.quotaResetText(
+        1_783_000_000,
+        now: Date(timeIntervalSince1970: 1_783_000_000),
+        timeZone: TimeZone(secondsFromGMT: 0)!
+    ) == nil,
+    "quota reset formatter should hide expired reset time"
+)
+runner.check(
+    jsonMonitor?["last_snapshot_duration_ms"] as? Int == 42,
+    "JSON snapshot output should expose snapshot duration"
+)
+runner.check(
+    jsonMonitor?["last_usage_duration_ms"] as? Int == 84,
+    "JSON snapshot output should expose usage duration"
+)
+runner.check(
+    jsonMonitor?["last_delta_duration_ms"] as? Int == 5,
+    "JSON snapshot output should expose delta duration"
+)
+runner.check(
+    jsonMonitor?["last_rate_limit_source"] as? String == "local-jsonl",
+    "JSON snapshot output should expose rate limit source"
+)
+runner.check(
+    jsonMonitor?["watched_path_count"] as? Int == 7,
+    "JSON snapshot output should expose watched path count"
+)
+runner.check(
+    jsonMonitor?["jsonl_context_scans"] as? Int == 2,
+    "JSON snapshot output should expose context scan count"
+)
+runner.check(
+    jsonMonitor?["monitor_model_tokens"] as? Int == 0,
+    "JSON snapshot output should report zero monitor model tokens"
+)
 let jsonSnapshotTasks = jsonSnapshot?["tasks"] as? [[String: Any]]
 runner.check(
     jsonSnapshotTasks?.first?["subagents"] as? Int == 3,
     "JSON snapshot output should expose active subagent counts"
 )
+runner.check(
+    jsonSnapshotTasks?.first?["delta_10m_tokens"] as? Int == 1200,
+    "JSON snapshot output should expose 10 minute token deltas"
+)
+runner.check(
+    jsonSnapshotTasks?.first?["delta_1h_tokens"] as? Int == 3456,
+    "JSON snapshot output should expose 1 hour token deltas"
+)
+runner.check(
+    jsonSnapshotTasks?.first?["today_tokens"] as? Int == 12,
+    "JSON snapshot output should expose Today token usage"
+)
+runner.check(
+    (jsonSnapshotTasks?.first?["today_share_percent"] as? Double).map { abs($0 - 10.81081081081081) < 0.000001 } == true,
+    "JSON snapshot output should expose Today usage share percent"
+)
+runner.check(
+    jsonSnapshotTasks?.first?["context_input_tokens"] as? Int == 58609,
+    "JSON snapshot output should expose context input tokens"
+)
+runner.check(
+    jsonSnapshotTasks?.first?["context_window_tokens"] as? Int == 258400,
+    "JSON snapshot output should expose model context window tokens"
+)
+runner.check(
+    (jsonSnapshotTasks?.first?["context_percent"] as? Double).map { abs($0 - 22.681501547987615) < 0.000001 } == true,
+    "JSON snapshot output should expose context percentage"
+)
+let tokenContextLine = #"{"timestamp":"2026-06-29T15:01:43.961Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":39217907,"cached_input_tokens":35158912,"output_tokens":176936,"reasoning_output_tokens":60714,"total_tokens":39394843},"last_token_usage":{"input_tokens":57907,"cached_input_tokens":55168,"output_tokens":644,"reasoning_output_tokens":230,"total_tokens":58551},"model_context_window":258400},"rate_limits":{"limit_id":"codex"}}}"#
+let parsedContext = runner.require(
+    TokenContextUsageParser.parse(line: tokenContextLine),
+    "token context parser should read token_count context payloads"
+)
+runner.check(parsedContext.inputTokens == 57907, "token context parser should use last_token_usage input tokens")
+runner.check(parsedContext.windowTokens == 258400, "token context parser should read model_context_window")
+runner.check(abs(parsedContext.percent - 22.40982972136223) < 0.000001, "token context parser should calculate context percentage")
 runner.check(
     TaskBadgeFormatter.subagentBadgeText(for: 3) == "子代理 3",
     "task row subagent badge should use compact text"
@@ -70,6 +235,294 @@ runner.check(
 runner.check(
     TaskBadgeFormatter.subagentBadgeText(for: 0) == nil,
     "task row subagent badge should stay hidden for zero active subagents"
+)
+
+let appServerRateLimitOutput = """
+{"jsonrpc":"2.0","id":2,"result":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":20,"resets_at":1783000000},"secondary":{"used_percent":30,"resets_at":1783400000}},"rate_limits_by_limit_id":{"codex":{"limit_id":"codex","primary":{"used_percent":20,"resets_at":1783000000},"secondary":{"used_percent":30,"resets_at":1783400000}},"GPT-5.3-Codex-Spark":{"limit_id":"gpt-5.3-codex-spark","limit_name":"GPT-5.3-Codex-Spark","primary":{"used_percent":100,"resets_at":1783000000},"secondary":{"used_percent":25,"resets_at":1783400000}}}}}
+"""
+let appServerSnapshot = runner.require(
+    CodexUsageStore().parseAppServerRateLimits(
+        output: appServerRateLimitOutput,
+        now: Date(timeIntervalSince1970: 1_782_900_000)
+    ),
+    "app-server rate limit fixture should parse"
+)
+runner.check(appServerSnapshot.primaryPercent == 80, "app-server codex primary quota should remain the main 5h quota")
+runner.check(appServerSnapshot.secondaryPercent == 70, "app-server codex secondary quota should remain the main 7d quota")
+runner.check(appServerSnapshot.primaryResetsAt == 1783000000, "app-server codex primary reset time should decode")
+runner.check(appServerSnapshot.secondaryResetsAt == 1783400000, "app-server codex secondary reset time should decode")
+runner.check(appServerSnapshot.sparkQuotaWindows.map(\.label) == ["5h", "7d"], "app-server Spark quota windows should decode")
+runner.check(appServerSnapshot.sparkQuotaWindows.first?.remainingPercent == 0, "app-server Spark 5h remaining percent should decode")
+runner.check(appServerSnapshot.sparkQuotaWindows.last?.remainingPercent == 75, "app-server Spark 7d remaining percent should decode")
+
+@MainActor
+func dateFromISO8601(_ value: String, message: String) -> Date {
+    runner.require(CodexRadarDateParser.parse(value), message)
+}
+
+let codexRadarFixture = """
+{
+  "monitored_at": "2026-07-01T06:27:00+08:00",
+  "status": "community_confirmed",
+  "recommended_action": "reset_completed",
+  "window": {
+    "message": "社区反馈已完成重置"
+  },
+  "prediction": {
+    "summary": "官方重置已经完成。"
+  },
+  "api_access": {
+    "requirements": {
+      "attribution_required": true,
+      "attribution_text": "数据来自 Codex 雷达 codexradar.com",
+      "site": "https://codexradar.com"
+    }
+  },
+  "model_iq": {
+    "latest": {
+      "score": 62.5,
+      "status": "red",
+      "passed": 5,
+      "tasks": 12,
+      "wall_time_human": "37分钟",
+      "model": "gpt-5.5",
+      "reasoning_effort": "xhigh",
+      "cost_usd": 46.348455
+    },
+    "comparisons": {
+      "gpt_55_high": {
+        "label": "GPT-5.5 high",
+        "latest": {
+          "score": 75.0,
+          "status": "red",
+          "passed": 6,
+          "tasks": 12,
+          "wall_time_human": "36分钟",
+          "cost_usd": 24.929204
+        }
+      },
+      "gpt_55_medium": {
+        "label": "GPT-5.5 medium",
+        "latest": {
+          "score": 87.5,
+          "status": "yellow",
+          "passed": 7,
+          "tasks": 12,
+          "wall_time_human": "32分钟",
+          "cost_usd": 20.98977
+        }
+      },
+      "gpt_54_xhigh": {
+        "label": "GPT-5.4 xhigh",
+        "latest": {
+          "score": 50.0,
+          "status": "red",
+          "passed": 4,
+          "tasks": 12,
+          "wall_time_human": "35分钟",
+          "cost_usd": 22.651593
+        }
+      },
+      "gpt_54_high": {
+        "label": "GPT-5.4 high",
+        "latest": {
+          "score": 87.5,
+          "status": "yellow",
+          "passed": 7,
+          "tasks": 12,
+          "wall_time_human": "36分钟",
+          "cost_usd": 17.771049
+        }
+      }
+    },
+    "quota_radar": {
+      "updated_at": "2026-06-30T22:27:57Z",
+      "cost_usd": 132.690071,
+      "rows": [
+        {"tier": "20x Pro", "basis": "measured 7d", "five_h": 276.44, "seven_d": 1658.63},
+        {"tier": "5x Pro", "basis": "model /4", "five_h": 69.11, "seven_d": 414.66},
+        {"tier": "Plus", "basis": "model /20", "five_h": 13.82, "seven_d": 82.93}
+      ]
+    }
+  }
+}
+""".data(using: .utf8)!
+let radarFetchedAt = dateFromISO8601("2026-07-01T06:28:00+08:00", message: "Codex Radar fetched timestamp should parse")
+let radarSnapshot = try CodexRadarSnapshot.decodePublicSummary(
+    from: codexRadarFixture,
+    fetchedAt: radarFetchedAt,
+    dataSource: .authorizedAPI
+)
+runner.check(radarSnapshot.models.count == 5, "Codex Radar summary should expose five model cards")
+runner.check(radarSnapshot.models.map(\.label) == [
+    "GPT-5.5 xhigh",
+    "GPT-5.5 high",
+    "GPT-5.5 medium",
+    "GPT-5.4 xhigh",
+    "GPT-5.4 high"
+], "Codex Radar model cards should preserve the expected display order")
+runner.check(radarSnapshot.models.first?.score == 62.5, "Codex Radar latest model should decode score")
+runner.check(radarSnapshot.models.first?.passed == 5, "Codex Radar latest model should decode passed tasks")
+runner.check(radarSnapshot.models.first?.tasks == 12, "Codex Radar latest model should decode task count")
+runner.check(radarSnapshot.quotaRows.count == 3, "Codex Radar quota radar should expose three plan rows")
+runner.check(radarSnapshot.quotaRows.first?.tier == "20x Pro", "Codex Radar quota row should preserve tier")
+runner.check(radarSnapshot.quotaRows.first?.fiveH == 276.44, "Codex Radar quota row should decode 5h estimate")
+runner.check(radarSnapshot.quotaRows.first?.sevenD == 1658.63, "Codex Radar quota row should decode 7d estimate")
+runner.check(radarSnapshot.costUSD == 132.690071, "Codex Radar cost should prefer quota_radar cost")
+runner.check(radarSnapshot.dataSource == .authorizedAPI, "Codex Radar snapshot should preserve the authorized API source")
+runner.check(
+    radarSnapshot.displayUpdatedAt == dateFromISO8601("2026-06-30T22:27:57Z", message: "Codex Radar display timestamp should parse"),
+    "Codex Radar display timestamp should prefer the freshest source data timestamp"
+)
+runner.check(radarSnapshot.attributionRequired, "Codex Radar should preserve required attribution flag")
+runner.check(radarSnapshot.attributionText == "数据来自 Codex 雷达 codexradar.com", "Codex Radar should preserve attribution text")
+runner.check(radarSnapshot.siteURL.absoluteString == "https://codexradar.com", "Codex Radar should preserve source site")
+
+let radarMissingModelIQ = """
+{
+  "monitored_at": "2026-07-01T06:27:00+08:00",
+  "api_access": {
+    "requirements": {
+      "attribution_required": true,
+      "attribution_text": "数据来自 Codex 雷达 codexradar.com",
+      "site": "https://codexradar.com"
+    }
+  }
+}
+""".data(using: .utf8)!
+let missingModelSnapshot = try CodexRadarSnapshot.decodePublicSummary(from: radarMissingModelIQ, fetchedAt: radarFetchedAt)
+runner.check(missingModelSnapshot.models.isEmpty, "Codex Radar should degrade when model_iq is missing")
+runner.check(missingModelSnapshot.quotaRows.isEmpty, "Codex Radar should degrade when quota radar is missing")
+runner.check(missingModelSnapshot.attributionText == CodexRadarSnapshot.defaultAttributionText, "Codex Radar should keep attribution on partial data")
+
+let radarMissingComparisons = """
+{
+  "monitored_at": "2026-07-01T06:27:00+08:00",
+  "model_iq": {
+    "latest": {
+      "score": 62.5,
+      "status": "red",
+      "passed": 5,
+      "tasks": 12
+    },
+    "quota_radar": {
+      "rows": []
+    }
+  }
+}
+""".data(using: .utf8)!
+let missingComparisonsSnapshot = try CodexRadarSnapshot.decodePublicSummary(from: radarMissingComparisons, fetchedAt: radarFetchedAt)
+runner.check(missingComparisonsSnapshot.models.count == 1, "Codex Radar should still show latest model when comparisons are missing")
+runner.check(missingComparisonsSnapshot.quotaRows.isEmpty, "Codex Radar should allow an empty quota radar row list")
+
+runner.check(
+    CodexRadarClient.isAllowedPublicSummaryURL(URL(string: "https://codexradar.com/current.json")!),
+    "Codex Radar client should allow the public summary URL"
+)
+runner.check(
+    CodexRadarClient.isAllowedAuthorizedAPIURL(URL(string: "https://codexradar.com/api/v1/current")!),
+    "Codex Radar client should allow the authorized current API URL"
+)
+runner.check(
+    !CodexRadarClient.isAllowedPublicSummaryURL(URL(string: "https://codexradar.com/api/v1/current")!),
+    "Codex Radar public summary allowlist should not allow the API URL"
+)
+runner.check(
+    !CodexRadarClient.isAllowedPublicSummaryURL(URL(string: "https://codexradar.com@evil.example.com/current.json")!),
+    "Codex Radar client should reject userinfo spoofing"
+)
+runner.check(
+    !CodexRadarClient.isAllowedPublicSummaryURL(URL(string: "http://codexradar.com/current.json")!),
+    "Codex Radar client should require HTTPS"
+)
+runner.check(
+    !CodexRadarClient.isAllowedAuthorizedAPIURL(URL(string: "http://codexradar.com/api/v1/current")!),
+    "Codex Radar authorized API should require HTTPS"
+)
+runner.check(
+    !CodexRadarClient.isAllowedAuthorizedAPIURL(URL(string: "https://codexradar.com@evil.example.com/api/v1/current")!),
+    "Codex Radar authorized API should reject userinfo spoofing"
+)
+
+let radarTokenDirectory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("CodexRadarTokenProvider-\(UUID().uuidString)", isDirectory: true)
+let radarTokenFile = radarTokenDirectory.appendingPathComponent("token")
+let emptyRadarTokenProvider = CodexRadarTokenProvider(environment: [:], tokenFileURL: radarTokenFile)
+runner.check(emptyRadarTokenProvider.token() == nil, "Codex Radar token provider should return nil when no token is configured")
+try CodexRadarTokenProvider.saveToken("  local-token  ", to: radarTokenFile)
+let fileRadarTokenProvider = CodexRadarTokenProvider(environment: [:], tokenFileURL: radarTokenFile)
+runner.check(fileRadarTokenProvider.token() == "local-token", "Codex Radar token provider should read the local token file")
+let environmentRadarTokenProvider = CodexRadarTokenProvider(
+    environment: [CodexRadarTokenProvider.environmentKey: "  env-token  "],
+    tokenFileURL: radarTokenFile
+)
+runner.check(environmentRadarTokenProvider.token() == "env-token", "Codex Radar token provider should prefer the environment token")
+try CodexRadarTokenProvider.saveToken("", to: radarTokenFile)
+runner.check(!FileManager.default.fileExists(atPath: radarTokenFile.path), "Codex Radar empty token save should remove the local token file")
+try? FileManager.default.removeItem(at: radarTokenDirectory)
+
+let radarCalendar = CodexRadarRefreshPolicy.beijingCalendar
+let beforeMorningSlot = dateFromISO8601("2026-07-01T07:00:00+08:00", message: "before morning slot date should parse")
+let morningSlot = dateFromISO8601("2026-07-01T08:20:00+08:00", message: "morning slot date should parse")
+let afternoonSlot = dateFromISO8601("2026-07-01T14:20:00+08:00", message: "afternoon slot date should parse")
+let afterAfternoonSlot = dateFromISO8601("2026-07-01T14:30:00+08:00", message: "after afternoon slot date should parse")
+runner.check(
+    CodexRadarRefreshPolicy.nextScheduledRefresh(after: beforeMorningSlot, calendar: radarCalendar) == morningSlot,
+    "Codex Radar scheduler should use the Beijing 08:20 refresh point"
+)
+runner.check(
+    CodexRadarRefreshPolicy.nextScheduledRefresh(after: morningSlot, calendar: radarCalendar) == afternoonSlot,
+    "Codex Radar scheduler should use the Beijing 14:20 refresh point"
+)
+runner.check(
+    CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: nil, now: beforeMorningSlot, calendar: radarCalendar),
+    "Codex Radar should refresh on first launch with no cache"
+)
+runner.check(
+    !CodexRadarRefreshPolicy.shouldRefresh(
+        lastFetchAt: dateFromISO8601("2026-07-01T08:21:00+08:00", message: "fresh cache date should parse"),
+        now: dateFromISO8601("2026-07-01T09:00:00+08:00", message: "after morning date should parse"),
+        calendar: radarCalendar
+    ),
+    "Codex Radar should not refresh when cache is fresh for the latest schedule point"
+)
+runner.check(
+    CodexRadarRefreshPolicy.shouldRefresh(
+        lastFetchAt: dateFromISO8601("2026-07-01T08:10:00+08:00", message: "stale morning cache date should parse"),
+        now: dateFromISO8601("2026-07-01T09:00:00+08:00", message: "after morning stale date should parse"),
+        calendar: radarCalendar
+    ),
+    "Codex Radar should refresh after crossing the 08:20 schedule point"
+)
+runner.check(
+    CodexRadarRefreshPolicy.shouldRefresh(
+        lastFetchAt: dateFromISO8601("2026-07-01T08:21:00+08:00", message: "morning cache date should parse"),
+        now: afterAfternoonSlot,
+        calendar: radarCalendar
+    ),
+    "Codex Radar should refresh after crossing the 14:20 schedule point"
+)
+runner.check(
+    !CodexRadarRefreshPolicy.shouldRefresh(
+        lastFetchAt: dateFromISO8601("2026-07-01T14:21:00+08:00", message: "fresh afternoon cache date should parse"),
+        now: afterAfternoonSlot,
+        calendar: radarCalendar
+    ),
+    "Codex Radar should only refresh once per schedule point"
+)
+runner.check(
+    !CodexRadarRefreshPolicy.canManualRefresh(
+        lastManualRefreshAt: beforeMorningSlot,
+        now: beforeMorningSlot.addingTimeInterval(299)
+    ),
+    "Codex Radar manual refresh should enforce a 5 minute gap"
+)
+runner.check(
+    CodexRadarRefreshPolicy.canManualRefresh(
+        lastManualRefreshAt: beforeMorningSlot,
+        now: beforeMorningSlot.addingTimeInterval(300)
+    ),
+    "Codex Radar manual refresh should be allowed after 5 minutes"
 )
 
 final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
@@ -81,6 +534,41 @@ final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
 
     func setEnabled(_ enabled: Bool) throws {
         isEnabled = enabled
+    }
+}
+
+enum CountingSecretStoreError: Error {
+    case load
+    case save
+}
+
+final class CountingSecretStore: SecretStore {
+    private var vault: SecretVault
+    private let failOnLoad: Bool
+    private let failOnSave: Bool
+    private(set) var loadCount = 0
+    private(set) var saveCount = 0
+
+    init(vault: SecretVault = SecretVault(), failOnLoad: Bool = false, failOnSave: Bool = false) {
+        self.vault = vault
+        self.failOnLoad = failOnLoad
+        self.failOnSave = failOnSave
+    }
+
+    func loadVault() throws -> SecretVault {
+        loadCount += 1
+        if failOnLoad {
+            throw CountingSecretStoreError.load
+        }
+        return vault
+    }
+
+    func saveVault(_ vault: SecretVault) throws {
+        saveCount += 1
+        if failOnSave {
+            throw CountingSecretStoreError.save
+        }
+        self.vault = vault
     }
 }
 
@@ -188,6 +676,35 @@ try databaseSecretStore.saveVault(secretVault)
 let loadedDatabaseVault = try databaseSecretStore.loadVault()
 runner.check(loadedDatabaseVault == secretVault, "database secret store should persist one vault")
 try? FileManager.default.removeItem(at: secretDatabaseURL.deletingLastPathComponent())
+
+var lazyStartupVault = SecretVault()
+lazyStartupVault.set("lazy-clip-secret", for: .cliproxyManagement)
+let lazyStartupKeychainStore = CountingSecretStore(vault: lazyStartupVault)
+let lazyStartupSuiteName = "CodexNotchLazySecrets-\(UUID().uuidString)"
+let lazyStartupDefaults = runner.require(
+    UserDefaults(suiteName: lazyStartupSuiteName),
+    "lazy secret defaults should be available"
+)
+lazyStartupDefaults.removePersistentDomain(forName: lazyStartupSuiteName)
+let lazyStartupSettings = CodexNotchSettings(
+    defaults: lazyStartupDefaults,
+    secretStores: SecretStoreFactory(keychain: lazyStartupKeychainStore, database: MemorySecretStore()),
+    launchAtLoginManager: FakeLaunchAtLoginManager()
+)
+runner.check(lazyStartupKeychainStore.loadCount == 0, "settings startup should not read Keychain when remote monitors are disabled")
+runner.check(lazyStartupSettings.cliproxyManagementKey.isEmpty, "lazy settings should leave CLIProxyAPI key unloaded at startup")
+runner.check(!lazyStartupSettings.secretsAreLoaded, "settings should expose unloaded secret state before remote features need credentials")
+lazyStartupSettings.codexRadarEnabled = false
+lazyStartupSettings.showSparkQuota = true
+lazyStartupSettings.resetRefreshDefaults()
+runner.check(lazyStartupKeychainStore.loadCount == 0, "local settings changes should not read Keychain")
+runner.check(lazyStartupKeychainStore.saveCount == 0, "local settings changes should not write secret storage")
+runner.check(lazyStartupSettings.loadSecretsIfNeeded(), "explicit secret load should succeed")
+runner.check(lazyStartupKeychainStore.loadCount == 1, "explicit secret load should read Keychain once")
+runner.check(lazyStartupSettings.cliproxyManagementKey == "lazy-clip-secret", "explicit secret load should populate CLIProxyAPI key")
+runner.check(lazyStartupSettings.secretsAreLoaded, "explicit secret load should mark settings secrets as loaded")
+lazyStartupDefaults.removePersistentDomain(forName: lazyStartupSuiteName)
+
 let settings = CodexNotchSettings(
     defaults: settingsDefaults,
     initialManagementKey: "",
@@ -203,10 +720,81 @@ settings.watcherRefreshInterval = settings.watcherRefreshInterval
 settings.fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
 settings.cliproxyRefreshInterval = settings.cliproxyRefreshInterval
 settings.cliproxyRequestTimeout = settings.cliproxyRequestTimeout
-runner.check(settings.activeRefreshInterval == 3, "saving unchanged refresh intervals should not recurse or change values")
+runner.check(settings.activeRefreshInterval == 30, "saving unchanged refresh intervals should keep the folded low-power active default")
+runner.check(settings.idleRefreshInterval == 180, "saving unchanged refresh intervals should keep the folded low-power idle default")
+runner.check(settings.usageRefreshInterval == 300, "saving unchanged refresh intervals should keep the low-power usage default")
+runner.check(settings.watcherRefreshInterval == 180, "saving unchanged refresh intervals should keep the folded low-power watcher default")
+runner.check(settings.fileChangeRefreshMinimumGap == 15, "saving unchanged refresh intervals should keep the folded low-power debounce default")
+runner.check(settings.codexRadarEnabled, "Codex Radar should default to enabled")
+runner.check(!settings.showSparkQuota, "Spark quota display should default to disabled")
+settings.activeRefreshInterval = 2
+settings.idleRefreshInterval = 4
+settings.usageRefreshInterval = 15
+settings.watcherRefreshInterval = 8
+settings.fileChangeRefreshMinimumGap = 1
+settings.resetRefreshDefaults()
+runner.check(settings.activeRefreshInterval == 30, "reset refresh defaults should restore folded low-power active refresh")
+runner.check(settings.idleRefreshInterval == 180, "reset refresh defaults should restore folded low-power idle refresh")
+runner.check(settings.usageRefreshInterval == 300, "reset refresh defaults should restore low-power usage refresh")
+runner.check(settings.watcherRefreshInterval == 180, "reset refresh defaults should restore folded low-power watcher refresh")
+runner.check(settings.fileChangeRefreshMinimumGap == 15, "reset refresh defaults should restore folded low-power debounce")
+
+let legacyRefreshSuiteName = "CodexNotchLegacyRefresh-\(UUID().uuidString)"
+let legacyRefreshDefaults = runner.require(
+    UserDefaults(suiteName: legacyRefreshSuiteName),
+    "legacy refresh defaults should be available"
+)
+legacyRefreshDefaults.removePersistentDomain(forName: legacyRefreshSuiteName)
+legacyRefreshDefaults.set(3, forKey: "activeRefreshInterval")
+legacyRefreshDefaults.set(6, forKey: "idleRefreshInterval")
+legacyRefreshDefaults.set(30, forKey: "usageRefreshInterval")
+legacyRefreshDefaults.set(12, forKey: "watcherRefreshInterval")
+legacyRefreshDefaults.set(3, forKey: "fileChangeRefreshMinimumGap")
+let migratedLegacyRefreshSettings = CodexNotchSettings(
+    defaults: legacyRefreshDefaults,
+    initialManagementKey: "",
+    initialNewAPIKey: "",
+    initialSubAPIKey: "",
+    secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
+    launchAtLoginManager: FakeLaunchAtLoginManager()
+)
+runner.check(migratedLegacyRefreshSettings.activeRefreshInterval == 30, "legacy refresh defaults should migrate to folded low-power active refresh")
+runner.check(migratedLegacyRefreshSettings.idleRefreshInterval == 180, "legacy refresh defaults should migrate to folded low-power idle refresh")
+runner.check(migratedLegacyRefreshSettings.usageRefreshInterval == 300, "legacy refresh defaults should migrate to low-power usage refresh")
+runner.check(migratedLegacyRefreshSettings.watcherRefreshInterval == 180, "legacy refresh defaults should migrate to folded low-power watcher refresh")
+runner.check(migratedLegacyRefreshSettings.fileChangeRefreshMinimumGap == 15, "legacy refresh defaults should migrate to folded low-power debounce")
+legacyRefreshDefaults.removePersistentDomain(forName: legacyRefreshSuiteName)
+
+let previousLowPowerSuiteName = "CodexNotchPreviousLowPower-\(UUID().uuidString)"
+let previousLowPowerDefaults = runner.require(
+    UserDefaults(suiteName: previousLowPowerSuiteName),
+    "previous low-power defaults should be available"
+)
+previousLowPowerDefaults.removePersistentDomain(forName: previousLowPowerSuiteName)
+previousLowPowerDefaults.set(15, forKey: "activeRefreshInterval")
+previousLowPowerDefaults.set(90, forKey: "idleRefreshInterval")
+previousLowPowerDefaults.set(300, forKey: "usageRefreshInterval")
+previousLowPowerDefaults.set(120, forKey: "watcherRefreshInterval")
+previousLowPowerDefaults.set(10, forKey: "fileChangeRefreshMinimumGap")
+let migratedPreviousLowPowerSettings = CodexNotchSettings(
+    defaults: previousLowPowerDefaults,
+    initialManagementKey: "",
+    initialNewAPIKey: "",
+    initialSubAPIKey: "",
+    secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
+    launchAtLoginManager: FakeLaunchAtLoginManager()
+)
+runner.check(migratedPreviousLowPowerSettings.activeRefreshInterval == 30, "previous low-power defaults should migrate to folded low-power active refresh")
+runner.check(migratedPreviousLowPowerSettings.idleRefreshInterval == 180, "previous low-power defaults should migrate to folded low-power idle refresh")
+runner.check(migratedPreviousLowPowerSettings.usageRefreshInterval == 300, "previous low-power defaults should migrate to low-power usage refresh")
+runner.check(migratedPreviousLowPowerSettings.watcherRefreshInterval == 180, "previous low-power defaults should migrate to folded low-power watcher refresh")
+runner.check(migratedPreviousLowPowerSettings.fileChangeRefreshMinimumGap == 15, "previous low-power defaults should migrate to folded low-power debounce")
+previousLowPowerDefaults.removePersistentDomain(forName: previousLowPowerSuiteName)
 
 runner.check(settings.remoteCodexDataSource == .cpaManagerPlus, "remote Codex monitor should default to CPA Manager Plus data")
 runner.check(settings.notchDisplaySource == .codex, "collapsed notch display should default to local Codex")
+settings.codexRadarEnabled = false
+settings.showSparkQuota = true
 settings.remoteCodexDataSource = .cliProxyAPI
 settings.notchDisplaySource = .remoteCodex
 settings.newAPIMonitorEnabled = true
@@ -227,6 +815,8 @@ let reloadedSettings = CodexNotchSettings(
 )
 runner.check(reloadedSettings.remoteCodexDataSource == .cliProxyAPI, "remote Codex data source should persist")
 runner.check(reloadedSettings.notchDisplaySource == .remoteCodex, "collapsed notch display source should persist")
+runner.check(!reloadedSettings.codexRadarEnabled, "Codex Radar enablement should persist")
+runner.check(reloadedSettings.showSparkQuota, "Spark quota display preference should persist")
 runner.check(reloadedSettings.newAPIMonitorEnabled, "NewAPI monitor enablement should persist")
 runner.check(reloadedSettings.newAPIPanelURL == "https://newapi.example.com", "NewAPI panel URL should persist")
 runner.check(reloadedSettings.newAPIUsername == "owner", "NewAPI username should persist")
@@ -289,6 +879,7 @@ let reloadedDatabaseModeSettings = CodexNotchSettings(
     launchAtLoginManager: FakeLaunchAtLoginManager()
 )
 runner.check(reloadedDatabaseModeSettings.secretStorageMode == .database, "secret storage mode should persist")
+runner.check(reloadedDatabaseModeSettings.loadSecretsIfNeeded(), "database mode should load secrets on demand")
 runner.check(reloadedDatabaseModeSettings.cliproxyManagementKey == "clip-secret", "database mode should reload CLIProxyAPI key")
 runner.check(reloadedDatabaseModeSettings.newAPIManagementKey == "newapi-secret", "database mode should reload NewAPI key")
 runner.check(reloadedDatabaseModeSettings.subAPIManagementKey == "subapi-secret", "database mode should reload Sub2API key")
@@ -1698,6 +2289,9 @@ let completedFinalAnswerSessionID = "019e073a-c032-74e2-966e-b85ede0c9ccf"
 let dbBackedSessionID = "019e073a-c032-74e2-966e-b85ede0c9cce"
 let staleDBTokenSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd2"
 let activeToolCallSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd3"
+let codexQuotaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cdb"
+let sparkQuotaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cda"
+let archivedUsageSessionID = "019e073a-c032-74e2-966e-b85ede0c9cdc"
 let sessionDirectory = tempRoot
     .appendingPathComponent("sessions/2026/06/14", isDirectory: true)
 try FileManager.default.createDirectory(at: sessionDirectory, withIntermediateDirectories: true)
@@ -1705,6 +2299,7 @@ let rolloutPath = sessionDirectory
     .appendingPathComponent("rollout-2026-06-14T02-20-00-\(sessionID).jsonl")
 let now = Date()
 let timestamp = ISO8601DateFormatter().string(from: now)
+let subagentQuotaTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(30))
 let rolloutBody = """
 {"timestamp":"\(timestamp)","type":"turn_context","payload":{"model":"gpt-5.5","effort":"xhigh","collaboration_mode":{"settings":{"reasoning_effort":"xhigh"}}}}
 {"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"正在运行的 Codex 任务"}]}}
@@ -1720,10 +2315,11 @@ let subagentRolloutBody = """
 {"timestamp":"\(timestamp)","type":"session_meta","payload":{"id":"\(subagentSessionID)","parent_thread_id":"\(sessionID)","source":{"subagent":{"thread_spawn":{"parent_thread_id":"\(sessionID)","depth":1,"agent_nickname":"Test","agent_role":"explorer"}}},"thread_source":"subagent","agent_nickname":"Test","agent_role":"explorer"}}
 {"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"子代理任务不应该显示"}]}}
 {"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10000}}}}
+{"timestamp":"\(subagentQuotaTimestamp)","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":0}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":8,"resets_at":1783000600},"secondary":{"used_percent":2,"resets_at":1783400600}}}}
 {"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":23456}}}}
 """
 try subagentRolloutBody.write(to: subagentRolloutPath, atomically: true, encoding: .utf8)
-try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: subagentRolloutPath.path)
+try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(30)], ofItemAtPath: subagentRolloutPath.path)
 
 let historicalSubagentRolloutPath = sessionDirectory
     .appendingPathComponent("rollout-2026-06-14T02-20-04-\(historicalSubagentSessionID).jsonl")
@@ -1879,6 +2475,104 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     """
 ])
 
+let codexQuotaPath = sessionDirectory
+    .appendingPathComponent("rollout-2026-06-14T02-20-18-\(codexQuotaSessionID).jsonl")
+let codexQuotaBody = """
+{"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Codex 额度恢复时间测试"}]}}
+{"timestamp":"\(timestamp)","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":0}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":33,"resets_at":1783000000},"secondary":{"used_percent":55,"resets_at":1783400000}}}}
+"""
+try codexQuotaBody.write(to: codexQuotaPath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: codexQuotaPath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    stateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(codexQuotaSessionID)', 'Codex 额度恢复时间测试', 0, 'gpt-5.5', 'high', '\(codexQuotaPath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+
+let sparkQuotaPath = sessionDirectory
+    .appendingPathComponent("rollout-2026-06-14T02-20-17-\(sparkQuotaSessionID).jsonl")
+let sparkQuotaBody = """
+{"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Spark 额度测试"}]}}
+{"timestamp":"\(timestamp)","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":0}},"rate_limits":{"limit_id":"gpt-5.3-codex-spark","primary":{"used_percent":40,"resets_at":1783000000},"secondary":{"used_percent":"10","resets_at":1783400000}}}}
+"""
+try sparkQuotaBody.write(to: sparkQuotaPath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: sparkQuotaPath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    stateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(sparkQuotaSessionID)', 'Spark 额度测试', 0, 'gpt-5.5', 'high', '\(sparkQuotaPath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+
+let archivedUsagePath = sessionDirectory
+    .appendingPathComponent("rollout-2026-06-14T02-20-19-\(archivedUsageSessionID).jsonl")
+let archivedUsageBody = """
+{"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":999999}}}}
+"""
+try archivedUsageBody.write(to: archivedUsagePath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: archivedUsagePath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    stateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(archivedUsageSessionID)', 'Archived usage should be excluded', 999999, 'gpt-5.5', 'high', '\(archivedUsagePath.path)', \(Int(now.timeIntervalSince1970)), 1);
+    """
+])
+
+let deltaDirectory = tempRoot.appendingPathComponent("context-guard", isDirectory: true)
+try FileManager.default.createDirectory(at: deltaDirectory, withIntermediateDirectories: true)
+let deltaDatabase = deltaDirectory.appendingPathComponent("usage-deltas.sqlite").path
+let observedNowMs = Int64((now.timeIntervalSince1970 * 1_000).rounded())
+let oneHourBaselineMs = observedNowMs - Int64(61 * 60 * 1_000)
+let twentyFourHourBaselineMs = observedNowMs - Int64(25 * 60 * 60 * 1_000)
+let staleCurrentMs = observedNowMs - Int64(2 * 60 * 60 * 1_000)
+let staleBaselineMs = observedNowMs - Int64(3 * 60 * 60 * 1_000)
+let staleDeltaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd8"
+let missingBaselineDeltaSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd9"
+_ = try Shell.run("/usr/bin/sqlite3", [
+    deltaDatabase,
+    """
+    create table token_snapshots (
+      thread_id text primary key,
+      tokens_used integer not null,
+      updated_at_ms integer not null,
+      observed_at_ms integer not null
+    );
+    create table token_snapshot_history (
+      thread_id text not null,
+      tokens_used integer not null,
+      updated_at_ms integer not null,
+      observed_at_ms integer not null,
+      primary key(thread_id, observed_at_ms)
+    );
+    create index idx_token_snapshot_history_lookup
+      on token_snapshot_history(thread_id, observed_at_ms desc);
+    insert into token_snapshots(thread_id, tokens_used, updated_at_ms, observed_at_ms)
+    values
+      ('\(sessionID)', 185801, \(observedNowMs), \(observedNowMs)),
+      ('\(parentOnlySessionID)', 80245, \(observedNowMs), \(observedNowMs)),
+      ('\(staleDeltaSessionID)', 10000, \(staleCurrentMs), \(staleCurrentMs)),
+      ('\(missingBaselineDeltaSessionID)', 500, \(observedNowMs), \(observedNowMs));
+    insert into token_snapshot_history(thread_id, tokens_used, updated_at_ms, observed_at_ms)
+    values
+      ('\(sessionID)', 180000, \(oneHourBaselineMs), \(oneHourBaselineMs)),
+      ('\(sessionID)', 150000, \(twentyFourHourBaselineMs), \(twentyFourHourBaselineMs)),
+      ('\(parentOnlySessionID)', 80000, \(oneHourBaselineMs), \(oneHourBaselineMs)),
+      ('\(parentOnlySessionID)', 60000, \(twentyFourHourBaselineMs), \(twentyFourHourBaselineMs)),
+      ('\(staleDeltaSessionID)', 1000, \(staleBaselineMs), \(staleBaselineMs));
+    """
+])
+_ = try Shell.run("/usr/bin/sqlite3", [
+    stateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(missingBaselineDeltaSessionID)', 'Today baseline missing', 500, 'gpt-5.5', 'high', '', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+
 let localStore = CodexUsageStore(codexDirectory: tempRoot)
 let localSnapshot = localStore.loadSnapshot(
     includePeriodUsage: false,
@@ -1888,6 +2582,17 @@ let localSnapshot = localStore.loadSnapshot(
     now: now
 )
 runner.check(localSnapshot.isRunning, "recent session rollout should mark local Codex as running")
+runner.check(localSnapshot.usage1h == 6046, "aggregate 1 hour usage should sum all recent delta snapshots")
+runner.check(localSnapshot.tasks.first?.delta1hTokens != localSnapshot.usage1h, "aggregate 1 hour usage should not reuse the first visible task delta")
+runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.todayTokens == 35801, "session Today usage should use the 24 hour delta baseline")
+runner.check(localSnapshot.tasks.first { $0.id == parentOnlySessionID }?.todayTokens == 20245, "parent-only session Today usage should use the 24 hour delta baseline")
+runner.check(localSnapshot.tasks.first { $0.id == missingBaselineDeltaSessionID }?.todayTokens == nil, "missing 24 hour baseline should hide session Today usage")
+runner.check(localSnapshot.primaryPercent == 67, "local JSONL Codex quota should expose main 5h quota")
+runner.check(localSnapshot.secondaryPercent == 45, "local JSONL Codex quota should expose main 7d quota")
+runner.check(localSnapshot.primaryResetsAt == 1783000000, "local JSONL Codex quota should expose primary reset time")
+runner.check(localSnapshot.secondaryResetsAt == 1783400000, "local JSONL Codex quota should expose secondary reset time")
+runner.check(localSnapshot.primaryPercent != 92, "subagent Codex quota should not override the main 5h quota")
+runner.check(localSnapshot.sparkQuotaWindows.map(\.remainingPercent) == [60, 90], "local JSONL Spark quota windows should decode")
 runner.check(localSnapshot.tasks.contains { $0.id == sessionID && $0.status == .running }, "recent session rollout should appear in running task list")
 runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.title == "正在运行的 Codex 任务", "session rollout should use the user message as task title")
 runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.detail.contains("gpt-5.5 · 超高推理") == true, "session rollout should use turn context model and effort")
@@ -2050,6 +2755,14 @@ runner.check(cachedLocalSnapshot.tasks.contains { $0.id == parentOnlySessionID &
 runner.check(cachedLocalSnapshot.tasks.first { $0.id == parentOnlySessionID }?.activeSubagentCount == 1, "fast snapshot cache should preserve active subagent counts")
 runner.check(localStore.loadUsageTotals(now: now)?.day == 120743379, "session rollout token counts should contribute to local usage totals")
 runner.check(localStore.loadUsageTotals(now: now.addingTimeInterval(1))?.day == 120743379, "unchanged local usage totals should remain stable across cached refreshes")
+let localExportSnapshot = localStore.loadSnapshot(
+    includePeriodUsage: true,
+    bypassFastCache: true,
+    rateLimitSource: .localFilesOnly,
+    taskHistoryRange: .day,
+    now: now
+)
+runner.check(localExportSnapshot.usage24h == 120743379, "export snapshots should include active period usage totals")
 
 let largeUsageRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchLargeUsage-\(UUID().uuidString)")
@@ -2112,7 +2825,7 @@ _ = try Shell.run("/usr/bin/sqlite3", [
 let largeUsageStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [fakeRipgrepPath])
 runner.check(largeUsageStore.loadUsageTotals(now: now)?.day == 1, "large rollout usage totals should use exact token events when fast search is available")
 let largeUsageFallbackStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [])
-runner.check(largeUsageFallbackStore.loadUsageTotals(now: now)?.day == 777777, "large rollout usage totals should fall back to database tokens when fast search is unavailable")
+runner.check(largeUsageFallbackStore.loadUsageTotals(now: now)?.day == 0, "large rollout usage totals should not count whole database tokens when fast search is unavailable")
 
 let tokenCacheRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchTokenCache-\(UUID().uuidString)")

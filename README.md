@@ -201,6 +201,7 @@ Tests/CodexNotchRegressionTests/ 回归测试
 scripts/build-app.sh             构建 .app 和 .dmg
 scripts/install-user-app.sh      安装到 ~/Applications
 scripts/run-regression-tests.sh  运行回归测试
+scripts/clean-dev-artifacts.sh   清理 .build 和 dist 开发产物
 ```
 
 <a id="english"></a>
@@ -399,4 +400,5 @@ Tests/CodexNotchRegressionTests/ Regression tests
 scripts/build-app.sh             Build .app and .dmg
 scripts/install-user-app.sh      Install to ~/Applications
 scripts/run-regression-tests.sh  Run regression tests
+scripts/clean-dev-artifacts.sh   Remove .build and dist development artifacts
 ```

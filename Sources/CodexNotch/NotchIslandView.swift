@@ -262,13 +262,13 @@ struct NotchIslandView: View {
                     color: MonitorTheme.textPrimary
                 )
             ]
-            if let delta10m = snapshot.tasks.first?.delta10mTokens {
+            if let delta1h = snapshot.tasks.first?.delta1hTokens {
                 metrics.append(
                     CollapsedMetric(
-                        id: "delta10m",
-                        label: "+10m",
-                        value: Formatters.signedCompactTokens(delta10m),
-                        color: delta10m > 0 ? MonitorTheme.running : MonitorTheme.textSecondary
+                        id: "delta1h",
+                        label: "近一小时使用量",
+                        value: Formatters.signedCompactTokens(delta1h),
+                        color: delta1h > 0 ? MonitorTheme.running : MonitorTheme.textSecondary
                     )
                 )
             }

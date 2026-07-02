@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import SQLite3
 
 enum ShellError: Error, LocalizedError {
     case launchFailed(String)
@@ -80,32 +81,16 @@ enum Shell {
     }
 
     static func sqliteJSON<T: Decodable>(database: String, query: String, as type: T.Type) throws -> T {
-        let output = try run("/usr/bin/sqlite3", ["-json", database, query])
-        let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        let candidate = sqliteJSONPayload(from: trimmedOutput)
-        let data = Data(candidate.utf8)
+        let data = try SQLiteJSONReader.query(database: database, query: query)
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
-            if trimmedOutput.isEmpty,
+            if data.isEmpty,
                let decoded = try? JSONDecoder().decode(T.self, from: Data("[]".utf8)) {
                 return decoded
             }
             throw ShellError.decodeFailed(error.localizedDescription)
         }
-    }
-
-    private static func sqliteJSONPayload(from output: String) -> String {
-        guard let start = output.firstIndex(where: { $0 == "[" || $0 == "{" }) else {
-            return output
-        }
-
-        let close: Character = output[start] == "[" ? "]" : "}"
-        guard let end = output.lastIndex(of: close), end >= start else {
-            return String(output[start...])
-        }
-
-        return String(output[start...end])
     }
 
     static func terminateProcessTree(rootPID: pid_t, signal: Int32) {
@@ -160,5 +145,78 @@ enum Shell {
         }
 
         return relationships
+    }
+}
+
+private enum SQLiteJSONReader {
+    static func query(database: String, query: String) throws -> Data {
+        var connection: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(database, &connection, flags, nil) == SQLITE_OK,
+              let connection else {
+            let message = connection.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
+            if let connection {
+                sqlite3_close(connection)
+            }
+            throw ShellError.nonZeroExit("sqlite3", 1, message)
+        }
+        defer {
+            sqlite3_close(connection)
+        }
+
+        sqlite3_busy_timeout(connection, 1_000)
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(connection, query, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw ShellError.nonZeroExit("sqlite3", 1, String(cString: sqlite3_errmsg(connection)))
+        }
+        defer {
+            sqlite3_finalize(statement)
+        }
+
+        let columnCount = sqlite3_column_count(statement)
+        var rows: [[String: Any]] = []
+
+        while true {
+            let status = sqlite3_step(statement)
+            if status == SQLITE_DONE {
+                break
+            }
+            guard status == SQLITE_ROW else {
+                throw ShellError.nonZeroExit("sqlite3", 1, String(cString: sqlite3_errmsg(connection)))
+            }
+
+            var row: [String: Any] = [:]
+            for index in 0..<columnCount {
+                let name = sqlite3_column_name(statement, index).map(String.init(cString:)) ?? "column_\(index)"
+                row[name] = value(statement: statement, column: index)
+            }
+            rows.append(row)
+        }
+
+        return try JSONSerialization.data(withJSONObject: rows, options: [])
+    }
+
+    private static func value(statement: OpaquePointer, column: Int32) -> Any {
+        switch sqlite3_column_type(statement, column) {
+        case SQLITE_INTEGER:
+            return NSNumber(value: sqlite3_column_int64(statement, column))
+        case SQLITE_FLOAT:
+            return NSNumber(value: sqlite3_column_double(statement, column))
+        case SQLITE_TEXT:
+            guard let text = sqlite3_column_text(statement, column) else {
+                return NSNull()
+            }
+            return String(cString: text)
+        case SQLITE_BLOB:
+            guard let bytes = sqlite3_column_blob(statement, column) else {
+                return NSNull()
+            }
+            let count = Int(sqlite3_column_bytes(statement, column))
+            return Data(bytes: bytes, count: count).base64EncodedString()
+        default:
+            return NSNull()
+        }
     }
 }

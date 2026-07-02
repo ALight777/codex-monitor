@@ -84,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 final class NotchOverlayController {
-    private let settings = CodexNotchSettings()
+    private let settings = CodexNotchSettings(loadSecretsSynchronously: false)
     private lazy var viewModel = UsageViewModel(settings: settings)
     private lazy var remoteViewModel = RemoteMonitorViewModel(settings: settings)
     private lazy var newAPIViewModel = BalanceMonitorViewModel(source: .newAPI, settings: settings)
@@ -209,15 +209,33 @@ final class NotchOverlayController {
         overlayState.$isExpanded
             .removeDuplicates()
             .sink { [weak self] isExpanded in
-                self?.setDetailVisible(isExpanded)
+                guard let self else {
+                    return
+                }
+                self.setDetailVisible(isExpanded)
+                if isExpanded, self.settings.showPeriodUsage {
+                    self.viewModel.refreshUsageTotalsIfStale()
+                } else {
+                    self.viewModel.pauseUsageTotals()
+                }
             }
             .store(in: &cancellables)
 
         settings.$taskHistoryRange
             .combineLatest(settings.$showPeriodUsage)
-            .sink { [weak self] _, _ in
+            .sink { [weak self] _, showPeriodUsage in
                 DispatchQueue.main.async {
-                    self?.updateFrames()
+                    guard let self else {
+                        return
+                    }
+                    if self.overlayState.isExpanded {
+                        if showPeriodUsage {
+                            self.viewModel.refreshUsageTotalsIfStale()
+                        } else {
+                            self.viewModel.pauseUsageTotals()
+                        }
+                    }
+                    self.updateFrames()
                 }
             }
             .store(in: &cancellables)

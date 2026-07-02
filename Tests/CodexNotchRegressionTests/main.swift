@@ -23,8 +23,8 @@ final class TestRunner {
 
 let runner = TestRunner()
 
-runner.check(AppInfo.version == "0.1.2", "app info should expose version 0.1.2")
-runner.check(AppInfo.displayVersion == "0.1.2", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.1.3", "app info should expose version 0.1.3")
+runner.check(AppInfo.displayVersion == "0.1.3", "app info should fall back to source version when bundle version is unavailable")
 
 let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",
@@ -82,6 +82,55 @@ final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
     func setEnabled(_ enabled: Bool) throws {
         isEnabled = enabled
     }
+}
+
+final class SequencedSecretStore: SecretStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var vaults: [SecretVault]
+    private(set) var loadCount = 0
+    private(set) var savedVaults: [SecretVault] = []
+    let secondLoadStarted = DispatchSemaphore(value: 0)
+    let releaseSecondLoad = DispatchSemaphore(value: 0)
+
+    init(vaults: [SecretVault]) {
+        self.vaults = vaults
+    }
+
+    func loadVault() throws -> SecretVault {
+        lock.lock()
+        loadCount += 1
+        let index = min(loadCount - 1, max(vaults.count - 1, 0))
+        let vault = vaults.isEmpty ? SecretVault() : vaults[index]
+        let shouldWait = loadCount == 2
+        lock.unlock()
+
+        if shouldWait {
+            secondLoadStarted.signal()
+            _ = releaseSecondLoad.wait(timeout: .now() + 2)
+        }
+        return vault
+    }
+
+    func saveVault(_ vault: SecretVault) throws {
+        lock.lock()
+        savedVaults.append(vault)
+        if vaults.isEmpty {
+            vaults = [vault]
+        } else {
+            vaults[vaults.count - 1] = vault
+        }
+        lock.unlock()
+    }
+}
+
+func pumpMainRunLoop(until deadline: Date, condition: () -> Bool) -> Bool {
+    while Date() < deadline {
+        if condition() {
+            return true
+        }
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    return condition()
 }
 
 func remoteAccount(
@@ -155,11 +204,34 @@ runner.check(modelOnlyQuotaAccount.quotaSummaryText == "额度 --", "CLIProxyAPI
 
 runner.check(RefreshCadence.pendingSnapshotDelay(for: 2) == 1, "coalesced snapshot refresh should wait at least one second")
 runner.check(RefreshCadence.pendingSnapshotDelay(for: 6) == 3, "coalesced snapshot refresh should cap short follow-up waits")
-runner.check(RefreshCadence.pendingUsageDelay(for: 30) == 8, "coalesced usage refresh should wait instead of immediately restarting")
-runner.check(RefreshCadence.pendingUsageDelay(for: 300) == 15, "coalesced usage refresh should cap long follow-up waits")
+runner.check(RefreshCadence.pendingUsageDelay(for: 30) == 15, "coalesced usage refresh should avoid tight restart loops")
+runner.check(RefreshCadence.pendingUsageDelay(for: 300) == 60, "coalesced usage refresh should cap long follow-up waits")
+runner.check(UsageRefreshCadence.refreshInterval(configured: 30, lastDuration: nil) == 120, "period usage refresh should not run more often than the power-safe floor")
+runner.check(UsageRefreshCadence.refreshInterval(configured: 300, lastDuration: nil) == 300, "period usage refresh should respect larger configured intervals")
+runner.check(UsageRefreshCadence.refreshInterval(configured: 120, lastDuration: 6) == 180, "slow usage scans should push the next refresh farther out")
+runner.check(UsageRefreshCadence.refreshInterval(configured: 600, lastDuration: 40) == 1_200, "very slow usage scans should adapt without exceeding the cap")
 runner.check(BalanceRefreshCadence.refreshInterval(base: 300, consecutiveFailures: 0) == 300, "healthy balance refresh should use the configured interval")
 runner.check(BalanceRefreshCadence.refreshInterval(base: 300, consecutiveFailures: 1) == 30, "failed balance refresh should retry quickly instead of leaving stale timeout state")
 runner.check(BalanceRefreshCadence.refreshInterval(base: 60, consecutiveFailures: 3) == 30, "repeated balance failures should cap retry interval")
+
+let decoder = CodexSessionEventDecoder()
+let decoderNow = Date(timeIntervalSince1970: 1_800_000_000)
+let decoderFormatter = ISO8601DateFormatter()
+let decoderTimestamp = decoderFormatter.string(from: decoderNow)
+let decoderText = """
+{"timestamp":"\(decoderTimestamp)","type":"turn_context","payload":{"model":"gpt-5.5","effort":"xhigh"}}
+{"timestamp":"\(decoderTimestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"## My request for Codex:\\n集中解析 JSONL"}]}}
+{"timestamp":"\(decoderTimestamp)","type":"response_item","payload":{"type":"function_call","name":"exec_command"}}
+{"timestamp":"\(decoderFormatter.string(from: decoderNow.addingTimeInterval(1)))","type":"event_msg","payload":{"type":"task_complete"}}
+"""
+runner.check(decoder.title(from: decoderText) == "集中解析 JSONL", "session decoder should normalize Codex request titles")
+runner.check(decoder.runtimeInfo(from: decoderText)?.model == "gpt-5.5", "session decoder should read turn context model")
+runner.check(decoder.runtimeInfo(from: decoderText)?.reasoningEffort == "xhigh", "session decoder should read turn context effort")
+runner.check(decoder.activityInfo(from: decoderText)?.latestDone != nil, "session decoder should detect task completion events")
+runner.check(
+    decoder.tokenCountTokens(from: #"{"timestamp":"\#(decoderTimestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":123}}}}"#) == 123,
+    "session decoder should extract token_count totals"
+)
 
 let settingsSuiteName = "CodexNotchRegressionTests-\(UUID().uuidString)"
 let settingsDefaults = runner.require(
@@ -188,6 +260,54 @@ try databaseSecretStore.saveVault(secretVault)
 let loadedDatabaseVault = try databaseSecretStore.loadVault()
 runner.check(loadedDatabaseVault == secretVault, "database secret store should persist one vault")
 try? FileManager.default.removeItem(at: secretDatabaseURL.deletingLastPathComponent())
+
+let asyncSecretSuiteName = "CodexNotchAsyncSecretLoad-\(UUID().uuidString)"
+let asyncSecretDefaults = runner.require(
+    UserDefaults(suiteName: asyncSecretSuiteName),
+    "async secret defaults should be available"
+)
+asyncSecretDefaults.removePersistentDomain(forName: asyncSecretSuiteName)
+var staleAsyncVault = SecretVault()
+staleAsyncVault.set("old-clip-secret", for: .cliproxyManagement)
+staleAsyncVault.set("old-newapi-secret", for: .balanceAccount(source: .newAPI, id: "async-account"))
+let sequencedSecretStore = SequencedSecretStore(vaults: [SecretVault(), staleAsyncVault])
+let asyncSettings = CodexNotchSettings(
+    defaults: asyncSecretDefaults,
+    secretStores: SecretStoreFactory(keychain: sequencedSecretStore, database: MemorySecretStore()),
+    launchAtLoginManager: FakeLaunchAtLoginManager(),
+    loadSecretsSynchronously: false
+)
+runner.check(
+    sequencedSecretStore.secondLoadStarted.wait(timeout: .now() + 2) == .success,
+    "async secret load should start in the background"
+)
+asyncSettings.remoteMonitorEnabled = true
+asyncSettings.cliproxyPanelURL = "https://new.example.com/management.html"
+asyncSettings.cliproxyManagementKey = "new-clip-secret"
+asyncSettings.setBalanceAccounts([
+    BalanceAccountConfiguration(
+        id: "async-account",
+        source: .newAPI,
+        enabled: true,
+        label: "Async",
+        panelURL: "https://newapi.example.com",
+        username: "owner",
+        secret: "new-account-secret",
+        requestTimeout: 6
+    )
+], for: .newAPI)
+sequencedSecretStore.releaseSecondLoad.signal()
+_ = pumpMainRunLoop(until: Date().addingTimeInterval(1)) {
+    sequencedSecretStore.loadCount >= 2
+}
+RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
+runner.check(asyncSettings.cliproxyManagementKey == "new-clip-secret", "late async secret load should not overwrite a user-saved CLIProxyAPI key")
+runner.check(
+    asyncSettings.balanceAccounts(for: .newAPI).first?.secret == "new-account-secret",
+    "late async secret load should not overwrite a user-saved balance account password"
+)
+asyncSecretDefaults.removePersistentDomain(forName: asyncSecretSuiteName)
+
 let settings = CodexNotchSettings(
     defaults: settingsDefaults,
     initialManagementKey: "",
@@ -204,6 +324,8 @@ settings.fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
 settings.cliproxyRefreshInterval = settings.cliproxyRefreshInterval
 settings.cliproxyRequestTimeout = settings.cliproxyRequestTimeout
 runner.check(settings.activeRefreshInterval == 3, "saving unchanged refresh intervals should not recurse or change values")
+settings.usageRefreshInterval = 900
+runner.check(settings.usageRefreshInterval == 900, "low-power usage refresh intervals above five minutes should persist")
 
 runner.check(settings.remoteCodexDataSource == .cpaManagerPlus, "remote Codex monitor should default to CPA Manager Plus data")
 runner.check(settings.notchDisplaySource == .codex, "collapsed notch display should default to local Codex")
@@ -1695,6 +1817,7 @@ let longMetaParentSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd0"
 let longMetaSubagentID = "019ec23f-4444-7171-99d0-f1c2fe671252"
 let completedSessionID = "019e073a-c032-74e2-966e-b85ede0c9ccd"
 let completedFinalAnswerSessionID = "019e073a-c032-74e2-966e-b85ede0c9ccf"
+let completedLogFinalSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd4"
 let dbBackedSessionID = "019e073a-c032-74e2-966e-b85ede0c9cce"
 let staleDBTokenSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd2"
 let activeToolCallSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd3"
@@ -1824,6 +1947,32 @@ let completedFinalAnswerBody = """
 try completedFinalAnswerBody.write(to: completedFinalAnswerRolloutPath, atomically: true, encoding: .utf8)
 try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: completedFinalAnswerRolloutPath.path)
 
+let completedLogFinalRolloutPath = sessionDirectory
+    .appendingPathComponent("rollout-2026-06-14T02-20-14-\(completedLogFinalSessionID).jsonl")
+let completedLogFinalBody = """
+{"timestamp":"\(timestamp)","type":"turn_context","payload":{"model":"gpt-5.5","effort":"high","collaboration_mode":{"settings":{"reasoning_effort":"high"}}}}
+{"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"日志 final 完成的任务"}]}}
+{"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"完成"}],"phase":"final"}}
+"""
+try completedLogFinalBody.write(to: completedLogFinalRolloutPath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: completedLogFinalRolloutPath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    stateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(completedLogFinalSessionID)', '日志 final 完成的任务', 888, 'gpt-5.5', 'high', '\(completedLogFinalRolloutPath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+_ = try Shell.run("/usr/bin/sqlite3", [
+    logsDatabase,
+    """
+    insert into logs(thread_id, ts, target, feedback_log_body)
+    values
+      ('\(completedLogFinalSessionID)', \(Int(now.timeIntervalSince1970) - 30), 'codex_otel.trace_safe', '{"type":"event_msg","payload":{"type":"response.output_text.delta"}}'),
+      ('\(completedLogFinalSessionID)', \(Int(now.timeIntervalSince1970) - 20), 'codex_otel.trace_safe', '{"type":"response_item","payload":{"type":"message","role":"assistant","phase":"final"}}');
+    """
+])
+
 let dbBackedRolloutPath = sessionDirectory
     .appendingPathComponent("rollout-2026-06-14T02-20-06-\(dbBackedSessionID).jsonl")
 let dbBackedBody = """
@@ -1908,6 +2057,7 @@ runner.check(localSnapshot.tasks.first { $0.id == staleDBTokenSessionID }?.token
 runner.check(localSnapshot.tasks.contains { $0.id == activeToolCallSessionID && $0.status == .running }, "quiet tool calls should keep the running indicator on until a task-level completion event arrives")
 runner.check(localSnapshot.tasks.first { $0.id == completedSessionID }?.status == .recent, "fresh completed session rollout should not be treated as running")
 runner.check(localSnapshot.tasks.first { $0.id == completedFinalAnswerSessionID }?.status == .recent, "fresh final_answer/task_complete rollout should not be treated as running")
+runner.check(localSnapshot.tasks.first { $0.id == completedLogFinalSessionID }?.status == .recent, "logs final-phase completion should clear stale running state")
 runner.check(localSnapshot.tasks.first { $0.id == dbBackedSessionID }?.tokenCount == 777, "recent rollout fallback should reuse database tokens even when the database updated_at is outside the task range")
 let localWatchPaths = Set(localStore.rateLimitWatchPaths())
 let normalizedSessionDirectory = sessionDirectory.resolvingSymlinksInPath().path
@@ -2048,6 +2198,86 @@ let cachedLocalSnapshot = localStore.loadSnapshot(
 )
 runner.check(cachedLocalSnapshot.tasks.contains { $0.id == parentOnlySessionID && $0.status == .running }, "fast snapshot cache should preserve active parent task ids")
 runner.check(cachedLocalSnapshot.tasks.first { $0.id == parentOnlySessionID }?.activeSubagentCount == 1, "fast snapshot cache should preserve active subagent counts")
+
+let snapshotLogRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+    .appendingPathComponent("CodexNotchSnapshotLogSignature-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: snapshotLogRoot, withIntermediateDirectories: true)
+defer {
+    try? FileManager.default.removeItem(at: snapshotLogRoot)
+}
+let snapshotLogStateDatabase = snapshotLogRoot.appendingPathComponent("state_5.sqlite").path
+let snapshotLogLogsDatabase = snapshotLogRoot.appendingPathComponent("logs_2.sqlite").path
+_ = try Shell.run("/usr/bin/sqlite3", [
+    snapshotLogStateDatabase,
+    """
+    create table threads(
+      id text,
+      title text,
+      tokens_used integer,
+      model text,
+      reasoning_effort text,
+      rollout_path text,
+      updated_at integer,
+      archived integer default 0
+    );
+    """
+])
+_ = try Shell.run("/usr/bin/sqlite3", [
+    snapshotLogLogsDatabase,
+    """
+    create table logs(
+      thread_id text,
+      ts integer,
+      target text,
+      feedback_log_body text
+    );
+    """
+])
+let snapshotLogDirectory = snapshotLogRoot.appendingPathComponent("sessions/2026/06/14", isDirectory: true)
+try FileManager.default.createDirectory(at: snapshotLogDirectory, withIntermediateDirectories: true)
+let snapshotLogSessionID = "019e073a-c032-74e2-966e-b85ede0c9cd7"
+let snapshotLogPath = snapshotLogDirectory.appendingPathComponent("rollout-2026-06-14T02-20-17-\(snapshotLogSessionID).jsonl")
+try """
+{"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"日志触发运行状态"}]}}
+{"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"完成"}],"phase":"final"}}
+"""
+    .write(to: snapshotLogPath, atomically: true, encoding: .utf8)
+try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: snapshotLogPath.path)
+_ = try Shell.run("/usr/bin/sqlite3", [
+    snapshotLogStateDatabase,
+    """
+    insert into threads(id, title, tokens_used, model, reasoning_effort, rollout_path, updated_at, archived)
+    values('\(snapshotLogSessionID)', '日志触发运行状态', 0, 'gpt-5.5', 'high', '\(snapshotLogPath.path)', \(Int(now.timeIntervalSince1970)), 0);
+    """
+])
+let snapshotLogStore = CodexUsageStore(codexDirectory: snapshotLogRoot, ripgrepCandidates: [])
+let idleSnapshotBeforeLog = snapshotLogStore.loadSnapshot(
+    includePeriodUsage: false,
+    bypassFastCache: false,
+    rateLimitSource: .localFilesOnly,
+    taskHistoryRange: .day,
+    now: now
+)
+runner.check(idleSnapshotBeforeLog.tasks.first { $0.id == snapshotLogSessionID }?.status == .recent, "snapshot log fixture should start as a recent task")
+_ = try Shell.run("/usr/bin/sqlite3", [
+    snapshotLogLogsDatabase,
+    """
+    insert into logs(thread_id, ts, target, feedback_log_body)
+    values('\(snapshotLogSessionID)', \(Int(now.timeIntervalSince1970) + 1), 'codex_otel.trace_safe', '{"type":"event_msg","payload":{"type":"response.output_item.added"}}');
+    """
+])
+let runningSnapshotAfterLog = snapshotLogStore.loadSnapshot(
+    includePeriodUsage: false,
+    bypassFastCache: false,
+    rateLimitSource: .localFilesOnly,
+    taskHistoryRange: .day,
+    now: now.addingTimeInterval(1)
+)
+runner.check(
+    runningSnapshotAfterLog.tasks.first { $0.id == snapshotLogSessionID }?.status == .running,
+    "fast snapshot cache should invalidate when logs database activity changes"
+)
+
 runner.check(localStore.loadUsageTotals(now: now)?.day == 120743379, "session rollout token counts should contribute to local usage totals")
 runner.check(localStore.loadUsageTotals(now: now.addingTimeInterval(1))?.day == 120743379, "unchanged local usage totals should remain stable across cached refreshes")
 

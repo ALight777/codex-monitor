@@ -27,6 +27,9 @@ final class UsageViewModel: ObservableObject {
     private var pendingUsageRefresh = false
     private var pendingWatchPathsRefresh = false
     private var lastFileChangeRefreshScheduledAt: Date = .distantPast
+    private var lastUsageRefreshDuration: TimeInterval?
+    private var lastUsageRefreshCompletedAt: Date?
+    private var periodUsageRefreshEnabled = false
     private var watcherRefreshGeneration = 0
     private var observedSettings: LocalUsageSettingsSnapshot?
 
@@ -34,7 +37,6 @@ final class UsageViewModel: ObservableObject {
         self.store = store
         self.settings = settings
         refresh(bypassFastCache: true)
-        refreshUsageTotals()
         refreshWatchPaths()
         observeSettings()
     }
@@ -90,12 +92,33 @@ final class UsageViewModel: ObservableObject {
 
     func refreshAll() {
         refresh(bypassFastCache: true)
-        refreshUsageTotals()
+        refreshUsageTotals(scheduleNext: periodUsageRefreshEnabled)
     }
 
-    private func refreshUsageTotals() {
+    func refreshUsageTotalsIfStale(maxAge: TimeInterval = 120) {
+        periodUsageRefreshEnabled = true
+        let now = Date()
+        let shouldRefresh = lastUsageRefreshCompletedAt.map { now.timeIntervalSince($0) >= maxAge } ?? true
+        if shouldRefresh {
+            refreshUsageTotals(scheduleNext: true)
+        } else {
+            scheduleUsageRefresh()
+        }
+    }
+
+    func pauseUsageTotals() {
+        periodUsageRefreshEnabled = false
+        usageTimer?.invalidate()
+        usageTimer = nil
+        pendingUsageTimer?.invalidate()
+        pendingUsageTimer = nil
+        pendingUsageRefresh = false
+    }
+
+    private func refreshUsageTotals(scheduleNext: Bool? = nil) {
+        let shouldScheduleNext = scheduleNext ?? periodUsageRefreshEnabled
         guard !isRefreshingUsage else {
-            pendingUsageRefresh = true
+            pendingUsageRefresh = pendingUsageRefresh || shouldScheduleNext
             return
         }
         usageTimer?.invalidate()
@@ -105,9 +128,13 @@ final class UsageViewModel: ObservableObject {
         isRefreshingUsage = true
         updateRefreshingState()
 
+        let refreshStartedAt = Date()
         Task.detached(priority: .utility) { [store] in
             let usage = store.loadUsageTotals()
+            let duration = Date().timeIntervalSince(refreshStartedAt)
             await MainActor.run {
+                self.lastUsageRefreshDuration = duration
+                self.lastUsageRefreshCompletedAt = Date()
                 if let usage {
                     self.snapshot.usage24h = usage.day
                     self.snapshot.usage7d = usage.week
@@ -119,7 +146,7 @@ final class UsageViewModel: ObservableObject {
                 self.pendingUsageRefresh = false
                 if shouldRefreshAgain {
                     self.schedulePendingUsageRefresh()
-                } else {
+                } else if shouldScheduleNext && self.periodUsageRefreshEnabled {
                     self.scheduleUsageRefresh()
                 }
             }
@@ -156,12 +183,16 @@ final class UsageViewModel: ObservableObject {
 
     private func scheduleUsageRefresh() {
         usageTimer?.invalidate()
-        let timer = Timer.scheduledTimer(withTimeInterval: settings.usageRefreshInterval, repeats: false) { [weak self] _ in
+        let interval = UsageRefreshCadence.refreshInterval(
+            configured: settings.usageRefreshInterval,
+            lastDuration: lastUsageRefreshDuration
+        )
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshUsageTotals()
             }
         }
-        timer.tolerance = 5
+        timer.tolerance = min(60, interval * 0.2)
         usageTimer = timer
     }
 
@@ -174,7 +205,7 @@ final class UsageViewModel: ObservableObject {
         let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.pendingUsageTimer = nil
-                self?.refreshUsageTotals()
+                self?.refreshUsageTotals(scheduleNext: true)
             }
         }
         timer.tolerance = min(5, delay * 0.35)
@@ -329,7 +360,9 @@ final class UsageViewModel: ObservableObject {
         watcherRefreshTimer = nil
 
         refresh(bypassFastCache: true)
-        refreshUsageTotals()
+        if periodUsageRefreshEnabled {
+            refreshUsageTotals(scheduleNext: true)
+        }
         refreshWatchPaths()
     }
 

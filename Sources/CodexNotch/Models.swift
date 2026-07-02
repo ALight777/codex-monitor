@@ -249,7 +249,23 @@ enum RefreshCadence {
     }
 
     static func pendingUsageDelay(for interval: TimeInterval) -> TimeInterval {
-        clamped((interval * 0.25).rounded(), min: 5, max: 15)
+        clamped((interval * 0.25).rounded(), min: 15, max: 60)
+    }
+
+    private static func clamped(_ value: TimeInterval, min: TimeInterval, max: TimeInterval) -> TimeInterval {
+        Swift.min(max, Swift.max(min, value))
+    }
+}
+
+enum UsageRefreshCadence {
+    static func refreshInterval(configured: TimeInterval, lastDuration: TimeInterval?) -> TimeInterval {
+        let base = clamped(configured.rounded(), min: 120, max: 1_800)
+        guard let lastDuration, lastDuration > 0 else {
+            return base
+        }
+
+        let adaptive = (lastDuration * 30).rounded()
+        return clamped(max(base, adaptive), min: 120, max: 1_800)
     }
 
     private static func clamped(_ value: TimeInterval, min: TimeInterval, max: TimeInterval) -> TimeInterval {

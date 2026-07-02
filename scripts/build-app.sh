@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="codex监测"
 PACKAGE_NAME="codex-monitor"
-APP_VERSION="0.1.2"
+APP_VERSION="0.1.3"
 BUNDLE_ID="com.alight.codexnotch"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"

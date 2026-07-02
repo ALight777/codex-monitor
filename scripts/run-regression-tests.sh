@@ -22,6 +22,7 @@ swiftc \
   "${ROOT_DIR}/Sources/CodexNotch/Shell.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/KeychainStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/SecretStore.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/CodexSessionEventDecoder.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexNotchSettings.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexUsageStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/BalanceMonitorModels.swift" \

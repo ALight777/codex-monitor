@@ -21,11 +21,11 @@ private enum RefreshPreset: String, CaseIterable, Identifiable {
     var values: (active: TimeInterval, idle: TimeInterval, usage: TimeInterval, watcher: TimeInterval, gap: TimeInterval) {
         switch self {
         case .realtime:
-            (active: 2, idle: 4, usage: 20, watcher: 8, gap: 1)
+            (active: 2, idle: 4, usage: 120, watcher: 8, gap: 1)
         case .balanced:
-            (active: 3, idle: 6, usage: 30, watcher: 12, gap: 3)
+            (active: 3, idle: 6, usage: 300, watcher: 12, gap: 3)
         case .economy:
-            (active: 8, idle: 20, usage: 90, watcher: 30, gap: 8)
+            (active: 8, idle: 20, usage: 900, watcher: 30, gap: 8)
         }
     }
 
@@ -102,7 +102,7 @@ private struct AccountEditorContext: Identifiable {
 private struct SettingsDraft: Equatable {
     var activeRefreshInterval: TimeInterval = 3
     var idleRefreshInterval: TimeInterval = 6
-    var usageRefreshInterval: TimeInterval = 30
+    var usageRefreshInterval: TimeInterval = 300
     var watcherRefreshInterval: TimeInterval = 12
     var fileChangeRefreshMinimumGap: TimeInterval = 3
     var rateLimitSource: RateLimitSourcePreference = .appServerFirst
@@ -388,7 +388,7 @@ struct SettingsView: View {
             presetControls
             intervalStepper("运行中", value: $draft.activeRefreshInterval, range: 2...30, help: "检测到 Codex 正在执行任务时的状态刷新间隔。数值越小越实时，功耗也越高。")
             intervalStepper("空闲", value: $draft.idleRefreshInterval, range: 4...120, help: "Codex 没有运行中任务时的状态刷新间隔。")
-            intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 15...300, help: "统计 Codex 24小时、7天、30天 token 用量的刷新间隔。")
+            intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 120...1_800, help: "统计 Codex 24小时、7天、30天 token 用量的刷新间隔。会话文件较大时会自动延长下一次刷新，以降低功耗。")
             intervalStepper("文件监听", value: $draft.watcherRefreshInterval, range: 8...120, help: "扫描 Codex 会话文件变化的保底间隔，用于补偿文件事件丢失。")
             intervalStepper("补刷节流", value: $draft.fileChangeRefreshMinimumGap, range: 1...30, help: "文件变化很多时，连续触发刷新之间的最小间隔。")
         }

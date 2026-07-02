@@ -53,12 +53,12 @@ struct SecretVault: Codable, Equatable {
     }
 }
 
-protocol SecretStore {
+protocol SecretStore: Sendable {
     func loadVault() throws -> SecretVault
     func saveVault(_ vault: SecretVault) throws
 }
 
-struct SecretStoreFactory {
+struct SecretStoreFactory: Sendable {
     let keychain: any SecretStore
     let database: any SecretStore
 
@@ -99,7 +99,8 @@ struct KeychainSecretStore: SecretStore {
     }
 }
 
-final class MemorySecretStore: SecretStore {
+final class MemorySecretStore: SecretStore, @unchecked Sendable {
+    private let lock = NSLock()
     private var vault: SecretVault
 
     init(vault: SecretVault = SecretVault()) {
@@ -107,10 +108,18 @@ final class MemorySecretStore: SecretStore {
     }
 
     func loadVault() throws -> SecretVault {
-        vault
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return vault
     }
 
     func saveVault(_ vault: SecretVault) throws {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
         self.vault = vault
     }
 }

@@ -844,7 +844,7 @@ private struct RefreshIcon: View {
     var body: some View {
         Group {
             if isRefreshing {
-                TimelineView(.animation) { context in
+                TimelineView(.periodic(from: Date(), by: 0.25)) { context in
                     icon
                         .rotationEffect(.degrees(rotationAngle(at: context.date)))
                         .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))

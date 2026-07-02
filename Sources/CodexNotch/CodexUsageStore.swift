@@ -14,39 +14,22 @@ private enum UsageScanPolicy {
     static let periodUsageTailLineLimit = 4_000
     static let estimatedTokenLineBytes: UInt64 = 1_300
     static let periodUsageCacheTTL: TimeInterval = 120
+    static let activeFastCacheTTL: TimeInterval = 12
+    static let idleFastCacheTTL: TimeInterval = 60
     static let ripgrepTimeout: DispatchTimeInterval = .seconds(12)
     static let appServerSuccessCacheTTL: TimeInterval = 30
     static let appServerFailureCacheTTL: TimeInterval = 45
 }
 
 final class CodexUsageStore: @unchecked Sendable {
-    private struct SessionLineEvent {
-        let timestamp: Date
-        let topLevelType: String?
-        let payloadType: String?
-        let payloadPhase: String?
-        let payloadStatus: String?
-    }
-
     private let codexDirectory: URL
     private let stateDatabase: String
     private let logsDatabase: String
     private let sessionIndexPath: String
     private let appServerExecutable = "/Applications/Codex.app/Contents/Resources/codex"
     private let ripgrepCandidates: [String]
+    private let sessionDecoder = CodexSessionEventDecoder()
     private let tokenPattern = /tool_token_count=([0-9]+)/
-    private let terminalEventTypes: Set<String> = [
-        "task_complete",
-        "task_completed",
-        "task_stopped",
-        "task_failed",
-        "task_cancelled",
-        "turn_complete",
-        "turn_completed",
-        "turn_aborted",
-        "turn_failed",
-        "turn_cancelled"
-    ]
     private let cacheLock = NSLock()
     private var fastCache: FastSnapshotCache?
     private var recentPathsCache: RecentPathsCache?
@@ -54,6 +37,11 @@ final class CodexUsageStore: @unchecked Sendable {
     private var appServerRateLimitCache: AppServerRateLimitCache?
     private var periodUsageCache: PeriodUsageCache?
     private var sessionTokenTotalCache: [String: SessionTokenTotalCache] = [:]
+    private var sessionIndexNamesCache: FileValueCache<[String: String]>?
+    private var sessionMetaCache: [String: FileValueCache<SessionMetaInfo>] = [:]
+    private var sessionRuntimeInfoCache: [String: FileValueCache<SessionRuntimeInfo>] = [:]
+    private var sessionTitleCache: [String: FileValueCache<String>] = [:]
+    private var sessionActivityCache: [String: FileValueCache<SessionActivityInfo>] = [:]
 
     init(
         codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"),
@@ -123,13 +111,22 @@ final class CodexUsageStore: @unchecked Sendable {
         do {
             let databaseThreads = try loadRecentThreads(range: taskHistoryRange, now: now)
             let knownTokens = tokenMap(from: databaseThreads)
-            let sessionThreads = loadRecentSessionThreads(
+            let sessionCandidates = loadRecentSessionCandidates(
                 range: taskHistoryRange,
                 now: now,
                 knownTokens: knownTokens
             )
-            let activeSubagentParents = loadActiveSubagentParentThreads(now: now)
-            let subagentUsage = loadSubagentUsage(range: taskHistoryRange, now: now)
+            let sessionNames = loadSessionIndexThreadNames()
+            let sessionThreads = loadRecentSessionThreads(
+                candidates: sessionCandidates,
+                names: sessionNames
+            )
+            let activeSubagentParents = loadActiveSubagentParentThreads(
+                candidates: sessionCandidates,
+                names: sessionNames,
+                now: now
+            )
+            let subagentUsage = loadSubagentUsage(candidates: sessionCandidates, now: now)
             let threads = withSubagentUsage(
                 mergeThreadRecords(databaseThreads + sessionThreads + activeSubagentParents),
                 usage: subagentUsage
@@ -230,11 +227,17 @@ final class CodexUsageStore: @unchecked Sendable {
         let cache = fastCache
         cacheLock.unlock()
 
-        guard let cache,
-              cache.rateLimitSource == rateLimitSource,
+        guard let cache else {
+            return nil
+        }
+
+        let ttl = cache.activeThreadIDs.isEmpty
+            ? UsageScanPolicy.idleFastCacheTTL
+            : UsageScanPolicy.activeFastCacheTTL
+        guard cache.rateLimitSource == rateLimitSource,
               cache.taskHistoryRange == taskHistoryRange,
-              now.timeIntervalSince(cache.createdAt) < 1.5,
-              makeSignature(for: cache.rolloutPaths) == cache.signature else {
+              now.timeIntervalSince(cache.createdAt) < ttl,
+              makeSnapshotSignature(for: cache.rolloutPaths) == cache.signature else {
             return nil
         }
 
@@ -262,7 +265,7 @@ final class CodexUsageStore: @unchecked Sendable {
         taskHistoryRange: TaskHistoryRange
     ) {
         let rolloutPaths = Array(Set(signaturePaths + threads.map(\.rolloutPath)).filter { !$0.isEmpty }).sorted()
-        guard let signature = makeSignature(for: rolloutPaths) else {
+        guard let signature = makeSnapshotSignature(for: rolloutPaths) else {
             return
         }
 
@@ -315,27 +318,45 @@ final class CodexUsageStore: @unchecked Sendable {
             now: now,
             knownTokens: knownTokens
         ).compactMap { candidate in
-            let meta = sessionMeta(from: candidate.path)
-            guard includeSubagents || meta?.isSubagent != true else {
-                return nil
-            }
-
-            let runtime = sessionRuntimeInfo(from: candidate.path)
-            let title = names[candidate.sessionID] ?? sessionTitle(from: candidate.path) ?? "未命名任务"
-            let tokensUsed = tokenTotalForFastSnapshot(
-                path: candidate.path,
-                databaseTokens: candidate.databaseTokens
-            )
-            return ThreadRecord(
-                id: candidate.sessionID,
-                title: title,
-                tokensUsed: tokensUsed,
-                model: runtime?.model,
-                reasoningEffort: runtime?.reasoningEffort,
-                rolloutPath: candidate.path,
-                updatedAt: candidate.updatedAt
-            )
+            sessionThread(from: candidate, names: names, includeSubagents: includeSubagents)
         }
+    }
+
+    private func loadRecentSessionThreads(
+        candidates: [RecentSessionCandidate],
+        names: [String: String],
+        includeSubagents: Bool = false
+    ) -> [ThreadRecord] {
+        candidates.compactMap { candidate in
+            sessionThread(from: candidate, names: names, includeSubagents: includeSubagents)
+        }
+    }
+
+    private func sessionThread(
+        from candidate: RecentSessionCandidate,
+        names: [String: String],
+        includeSubagents: Bool
+    ) -> ThreadRecord? {
+        let meta = sessionMeta(from: candidate.path)
+        guard includeSubagents || meta?.isSubagent != true else {
+            return nil
+        }
+
+        let runtime = sessionRuntimeInfo(from: candidate.path)
+        let title = names[candidate.sessionID] ?? sessionTitle(from: candidate.path) ?? "未命名任务"
+        let tokensUsed = tokenTotalForFastSnapshot(
+            path: candidate.path,
+            databaseTokens: candidate.databaseTokens
+        )
+        return ThreadRecord(
+            id: candidate.sessionID,
+            title: title,
+            tokensUsed: tokensUsed,
+            model: runtime?.model,
+            reasoningEffort: runtime?.reasoningEffort,
+            rolloutPath: candidate.path,
+            updatedAt: candidate.updatedAt
+        )
     }
 
     private func loadSessionUsageThreads(
@@ -420,21 +441,43 @@ final class CodexUsageStore: @unchecked Sendable {
         return meta.isSubagent
     }
 
-    private func loadActiveSubagentParentThreads(now: Date) -> [ThreadRecord] {
-        let paths = recentTaskSessionPaths(limit: 48)
-        let names = loadSessionIndexThreadNames()
+    private func loadActiveSubagentParentThreads(
+        candidates: [RecentSessionCandidate],
+        names: [String: String],
+        now: Date
+    ) -> [ThreadRecord] {
+        let pathBySessionID = Dictionary(
+            candidates.map { ($0.sessionID.lowercased(), $0.path) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
-        let parents = paths.compactMap { path -> ThreadRecord? in
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
-                  let modifiedAt = attributes[.modificationDate] as? Date,
-                  let meta = sessionMeta(from: path),
+        let activeSubagents: [(candidate: RecentSessionCandidate, parentThreadID: String)] = candidates.compactMap { candidate in
+            guard let meta = sessionMeta(from: candidate.path),
                   meta.isSubagent,
-                  let parentThreadID = meta.parentThreadID,
+                  let parentThreadID = meta.parentThreadID?.lowercased(),
                   !parentThreadID.isEmpty,
-                  sessionLooksActive(path: path, fallbackUpdatedAt: Int(modifiedAt.timeIntervalSince1970), now: now) else {
+                  sessionLooksActive(
+                    path: candidate.path,
+                    fallbackUpdatedAt: candidate.updatedAt,
+                    now: now
+                  ) else {
                 return nil
             }
-            let parentPath = sessionPath(for: parentThreadID)
+            return (candidate, parentThreadID)
+        }
+
+        guard !activeSubagents.isEmpty else {
+            return []
+        }
+
+        let missingParentIDs = Set(activeSubagents.map(\.parentThreadID))
+            .subtracting(pathBySessionID.keys)
+        let missingParentPaths = sessionPaths(for: missingParentIDs)
+
+        let parents = activeSubagents.compactMap { item -> ThreadRecord? in
+            let parentThreadID = item.parentThreadID
+            let subagentUpdatedAt = item.candidate.updatedAt
+            let parentPath = pathBySessionID[parentThreadID] ?? missingParentPaths[parentThreadID]
             let runtime = parentPath.flatMap(sessionRuntimeInfo(from:))
             let title = parentPath.flatMap { names[parentThreadID] ?? sessionTitle(from: $0) }
                 ?? names[parentThreadID]
@@ -446,7 +489,7 @@ final class CodexUsageStore: @unchecked Sendable {
                 }
                 return Int(modifiedAt.timeIntervalSince1970)
             } ?? 0
-            let updatedAt = max(parentUpdatedAt, Int(modifiedAt.timeIntervalSince1970))
+            let updatedAt = max(parentUpdatedAt, subagentUpdatedAt)
             return ThreadRecord(
                 id: parentThreadID,
                 title: title,
@@ -462,25 +505,18 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func loadSubagentUsage(range: TaskHistoryRange, now: Date) -> [String: (count: Int, tokens: Int)] {
-        let since = Int(now.timeIntervalSince1970) - range.seconds
-        let paths = recentTaskSessionPaths(limit: max(range.queryLimit * 3, 80))
-        let sessionIDsByPath = Dictionary(
-            uniqueKeysWithValues: paths.compactMap { path -> (String, String)? in
-                guard let id = sessionID(from: path)?.lowercased() else {
-                    return nil
-                }
-                return (path, id)
-            }
-        )
-        let knownTokens = loadThreadTokenMap(for: Array(sessionIDsByPath.values))
+        let candidates = loadRecentSessionCandidates(range: range, now: now, knownTokens: [:])
+        return loadSubagentUsage(candidates: candidates, now: now)
+    }
+
+    private func loadSubagentUsage(
+        candidates: [RecentSessionCandidate],
+        now: Date
+    ) -> [String: (count: Int, tokens: Int)] {
         var usage: [String: (count: Int, tokens: Int)] = [:]
 
-        for path in paths {
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
-                  let modifiedAt = attributes[.modificationDate] as? Date,
-                  let sessionID = sessionIDsByPath[path],
-                  Int(modifiedAt.timeIntervalSince1970) >= since,
-                  let meta = sessionMeta(from: path),
+        for candidate in candidates {
+            guard let meta = sessionMeta(from: candidate.path),
                   meta.isSubagent,
                   let parentThreadID = meta.parentThreadID,
                   !parentThreadID.isEmpty else {
@@ -490,12 +526,15 @@ final class CodexUsageStore: @unchecked Sendable {
             let key = parentThreadID.lowercased()
             let current = usage[key] ?? (count: 0, tokens: 0)
             let isActive = sessionLooksActive(
-                path: path,
-                fallbackUpdatedAt: Int(modifiedAt.timeIntervalSince1970),
+                path: candidate.path,
+                fallbackUpdatedAt: candidate.updatedAt,
                 now: now
             )
-            let knownTokenTotal = knownTokens[sessionID] ?? 0
-            let tokenTotal = tokenTotalForFastSnapshot(path: path, databaseTokens: knownTokenTotal, allowInactiveScan: false)
+            let tokenTotal = tokenTotalForFastSnapshot(
+                path: candidate.path,
+                databaseTokens: candidate.databaseTokens,
+                allowInactiveScan: false
+            )
             usage[key] = (
                 count: current.count + (isActive ? 1 : 0),
                 tokens: current.tokens + tokenTotal
@@ -731,7 +770,21 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func loadSessionIndexThreadNames() -> [String: String] {
+        let signature = fileSignature(sessionIndexPath)
+
+        cacheLock.lock()
+        if let cached = sessionIndexNamesCache,
+           cached.signature == signature {
+            let names = cached.value ?? [:]
+            cacheLock.unlock()
+            return names
+        }
+        cacheLock.unlock()
+
         guard let content = try? String(contentsOfFile: sessionIndexPath, encoding: .utf8) else {
+            cacheLock.lock()
+            sessionIndexNamesCache = FileValueCache(signature: signature, value: [:])
+            cacheLock.unlock()
             return [:]
         }
 
@@ -750,6 +803,9 @@ final class CodexUsageStore: @unchecked Sendable {
             names[record.id] = name
         }
 
+        cacheLock.lock()
+        sessionIndexNamesCache = FileValueCache(signature: signature, value: names)
+        cacheLock.unlock()
         return names
     }
 
@@ -900,6 +956,9 @@ final class CodexUsageStore: @unchecked Sendable {
         let dayStart = now.addingTimeInterval(-24 * 60 * 60)
         let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
         let monthStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
+        let dayCutoff = timestampSecondPrefix(for: dayStart)
+        let weekCutoff = timestampSecondPrefix(for: weekStart)
+        let monthCutoff = timestampSecondPrefix(for: monthStart)
 
         var day = 0
         var week = 0
@@ -911,6 +970,22 @@ final class CodexUsageStore: @unchecked Sendable {
             }
 
             let line = String(rawLine[jsonStart...])
+            if let event = sessionDecoder.fastTokenCountLineInfo(line),
+               let timestampPrefix = timestampSecondPrefix(from: event.timestamp) {
+                guard timestampPrefix >= monthCutoff else {
+                    continue
+                }
+
+                month += event.tokens
+                if timestampPrefix >= weekCutoff {
+                    week += event.tokens
+                }
+                if timestampPrefix >= dayCutoff {
+                    day += event.tokens
+                }
+                continue
+            }
+
             guard let event = parseTokenCountEvent(line),
                   event.date >= monthStart else {
                 continue
@@ -1005,35 +1080,20 @@ final class CodexUsageStore: @unchecked Sendable {
 
     private func loadActiveThreadIDs(now: Date) throws -> Set<String> {
         let since = Int(now.timeIntervalSince1970) - UsageScanPolicy.runningActivityWindow
-        let query = """
-        select
-          thread_id,
-          max(case
-            when feedback_log_body like '%response.output_item.added%'
-              or feedback_log_body like '%response.output_text.delta%'
-              or feedback_log_body like '%"status":"in_progress"%'
-            then ts else 0 end) as latest_activity,
-          max(case
-            when feedback_log_body like '%"phase":"final_answer"%'
-              or feedback_log_body like '%"phase": "final_answer"%'
-              or feedback_log_body like '%"type":"task_complete"%'
-              or feedback_log_body like '%"type": "task_complete"%'
-              or feedback_log_body like '%"type":"task_completed"%'
-              or feedback_log_body like '%"type": "task_completed"%'
-              or feedback_log_body like '%"type":"task_stopped"%'
-              or feedback_log_body like '%"type": "task_stopped"%'
-              or feedback_log_body like '%"type":"task_failed"%'
-              or feedback_log_body like '%"type": "task_failed"%'
-              or feedback_log_body like '%"type":"task_cancelled"%'
-              or feedback_log_body like '%"type": "task_cancelled"%'
-            then ts else 0 end) as latest_done
-        from logs
-        where thread_id is not null
-          and ts >= \(since)
-        group by thread_id;
-        """
-
-        let records = try Shell.sqliteJSON(database: logsDatabase, query: query, as: [ActivityRecord].self)
+        let records: [ActivityRecord]
+        do {
+            records = try Shell.sqliteJSON(
+                database: logsDatabase,
+                query: activeThreadActivityQuery(since: since, indexedByTimestamp: true),
+                as: [ActivityRecord].self
+            )
+        } catch {
+            records = try Shell.sqliteJSON(
+                database: logsDatabase,
+                query: activeThreadActivityQuery(since: since, indexedByTimestamp: false),
+                as: [ActivityRecord].self
+            )
+        }
         let nowEpoch = Int(now.timeIntervalSince1970)
 
         return Set(records.compactMap { record in
@@ -1050,6 +1110,56 @@ final class CodexUsageStore: @unchecked Sendable {
             }
             return nil
         })
+    }
+
+    private func activeThreadActivityQuery(since: Int, indexedByTimestamp: Bool) -> String {
+        let table = indexedByTimestamp ? "logs indexed by idx_logs_ts" : "logs"
+        let activityCondition = """
+        feedback_log_body like '%response.output_item.added%'
+              or feedback_log_body like '%response.output_text.delta%'
+              or feedback_log_body like '%"status":"in_progress"%'
+        """
+        let completionCondition = """
+        feedback_log_body like '%"phase":"final_answer"%'
+              or feedback_log_body like '%"phase":"final"%'
+              or feedback_log_body like '%"phase": "final_answer"%'
+              or feedback_log_body like '%"phase": "final"%'
+              or feedback_log_body like '%"type":"task_complete"%'
+              or feedback_log_body like '%"type": "task_complete"%'
+              or feedback_log_body like '%"type":"task_completed"%'
+              or feedback_log_body like '%"type": "task_completed"%'
+              or feedback_log_body like '%"type":"task_stopped"%'
+              or feedback_log_body like '%"type": "task_stopped"%'
+              or feedback_log_body like '%"type":"task_failed"%'
+              or feedback_log_body like '%"type": "task_failed"%'
+              or feedback_log_body like '%"type":"task_cancelled"%'
+              or feedback_log_body like '%"type": "task_cancelled"%'
+              or feedback_log_body like '%"type":"turn_complete"%'
+              or feedback_log_body like '%"type": "turn_complete"%'
+              or feedback_log_body like '%"type":"turn_completed"%'
+              or feedback_log_body like '%"type": "turn_completed"%'
+              or feedback_log_body like '%"type":"turn_aborted"%'
+              or feedback_log_body like '%"type": "turn_aborted"%'
+              or feedback_log_body like '%"type":"turn_failed"%'
+              or feedback_log_body like '%"type": "turn_failed"%'
+              or feedback_log_body like '%"type":"turn_cancelled"%'
+              or feedback_log_body like '%"type": "turn_cancelled"%'
+        """
+
+        return """
+        select
+          thread_id,
+          max(case when \(activityCondition) then ts else 0 end) as latest_activity,
+          max(case when \(completionCondition) then ts else 0 end) as latest_done
+        from \(table)
+        where thread_id is not null
+          and ts >= \(since)
+          and (
+            \(activityCondition)
+            or \(completionCondition)
+          )
+        group by thread_id;
+        """
     }
 
     private func buildTasks(from threads: [ThreadRecord], activeThreadIDs: Set<String>, now: Date) -> [CodexTask] {
@@ -1088,36 +1198,18 @@ final class CodexUsageStore: @unchecked Sendable {
             return false
         }
 
-        guard let text = fileSuffix(from: path, maxBytes: 256 * 1024) else {
+        guard let activityInfo = sessionActivityInfo(from: path) else {
             return nowEpoch - fallbackUpdatedAt < 12
         }
 
-        var latestActivity: Date?
-        var latestDone: Date?
-
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            let lineText = String(line)
-            guard let event = sessionLineEvent(fromJSONLine: lineText) else {
-                continue
-            }
-
-            if sessionLineMarksCompletion(event) {
-                latestDone = maxDate(latestDone, event.timestamp)
-            }
-
-            if sessionLineMarksActivity(event) {
-                latestActivity = maxDate(latestActivity, event.timestamp)
-            }
-        }
-
-        if let latestActivity {
-            let done = latestDone ?? .distantPast
+        if let latestActivity = activityInfo.latestActivity {
+            let done = activityInfo.latestDone ?? .distantPast
             if latestActivity > done,
                now.timeIntervalSince(latestActivity) < TimeInterval(UsageScanPolicy.runningActivityWindow) {
                 return true
             }
             if now.timeIntervalSince(latestActivity) < 12,
-               latestDone == nil {
+               activityInfo.latestDone == nil {
                 return true
             }
         }
@@ -1125,124 +1217,38 @@ final class CodexUsageStore: @unchecked Sendable {
         return false
     }
 
-    private func sessionLineEvent(fromJSONLine line: String) -> SessionLineEvent? {
-        guard line.contains(#""timestamp""#),
-              let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let value = object["timestamp"] as? String,
-              let timestamp = parseTimestamp(value) else {
+    private func sessionActivityInfo(from path: String) -> SessionActivityInfo? {
+        cachedFileValue(
+            path: path,
+            cached: { sessionActivityCache[path] },
+            store: { sessionActivityCache[path] = $0 }
+        ) {
+            parseSessionActivityInfo(from: path)
+        }
+    }
+
+    private func parseSessionActivityInfo(from path: String) -> SessionActivityInfo? {
+        guard let text = fileSuffix(from: path, maxBytes: 256 * 1024) else {
             return nil
         }
-
-        let payload = object["payload"] as? [String: Any]
-        return SessionLineEvent(
-            timestamp: timestamp,
-            topLevelType: object["type"] as? String,
-            payloadType: payload?["type"] as? String,
-            payloadPhase: payload?["phase"] as? String,
-            payloadStatus: payload?["status"] as? String
-        )
-    }
-
-    private func sessionLineMarksCompletion(_ event: SessionLineEvent) -> Bool {
-        let phase = event.payloadPhase?.lowercased()
-        if phase == "final" || phase == "final_answer" {
-            return true
-        }
-
-        guard let payloadType = event.payloadType?.lowercased() else {
-            return false
-        }
-
-        if terminalEventTypes.contains(payloadType) {
-            return true
-        }
-
-        return false
-    }
-
-    private func sessionLineMarksActivity(_ event: SessionLineEvent) -> Bool {
-        if event.topLevelType == "response_item" {
-            return true
-        }
-
-        let payloadType = event.payloadType?.lowercased()
-        if payloadType == "response.output_item.added" || payloadType == "response.output_text.delta" {
-            return true
-        }
-
-        return event.payloadStatus?.lowercased() == "in_progress"
-    }
-
-    private func timestamp(fromJSONLine line: String) -> Date? {
-        guard line.contains(#""timestamp""#),
-              let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let value = object["timestamp"] as? String else {
-            return nil
-        }
-        return parseTimestamp(value)
-    }
-
-    private func maxDate(_ lhs: Date?, _ rhs: Date) -> Date {
-        guard let lhs else {
-            return rhs
-        }
-        return max(lhs, rhs)
+        return sessionDecoder.activityInfo(from: text)
     }
 
     private func sessionTitle(from path: String) -> String? {
+        cachedFileValue(
+            path: path,
+            cached: { sessionTitleCache[path] },
+            store: { sessionTitleCache[path] = $0 }
+        ) {
+            parseSessionTitle(from: path)
+        }
+    }
+
+    private func parseSessionTitle(from path: String) -> String? {
         guard let text = filePrefix(from: path, maxBytes: 256 * 1024) else {
             return nil
         }
-
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard line.contains(#""role":"user""#) || line.contains(#""role": "user""#),
-                  let data = String(line).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let payload = object["payload"] as? [String: Any],
-                  payload["type"] as? String == "message",
-                  payload["role"] as? String == "user",
-                  let content = payload["content"] as? [[String: Any]] else {
-                continue
-            }
-
-            for item in content {
-                guard let text = item["text"] as? String,
-                      let title = normalizedSessionTitle(from: text) else {
-                    continue
-                }
-                return title
-            }
-        }
-
-        return nil
-    }
-
-    private func normalizedSessionTitle(from text: String) -> String? {
-        var candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let requestRange = candidate.range(of: "## My request for Codex:") {
-            candidate = String(candidate[requestRange.upperBound...])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        for line in candidate.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty,
-                  !trimmed.hasPrefix("<environment_context"),
-                  !trimmed.hasPrefix("</environment_context"),
-                  !trimmed.hasPrefix("<permissions instructions"),
-                  !trimmed.hasPrefix("<app-context"),
-                  !trimmed.hasPrefix("# Files mentioned"),
-                  !trimmed.hasPrefix("# In app browser"),
-                  !trimmed.hasPrefix("## My request for Codex:"),
-                  !trimmed.hasPrefix("- ") else {
-                continue
-            }
-            return trimmed
-        }
-
-        return nil
+        return sessionDecoder.title(from: text)
     }
 
     private func sessionID(from path: String) -> String? {
@@ -1376,17 +1382,17 @@ final class CodexUsageStore: @unchecked Sendable {
             pending = String(lastLine)
 
             for line in lines.dropLast() where line.contains(#""token_count""#) {
-                guard let event = parseTokenCountEvent(String(line)) else {
+                guard let tokens = tokenCountTokens(from: String(line)) else {
                     continue
                 }
-                total += event.tokens
+                total += tokens
                 foundTokenEvent = true
             }
         }
 
         if pending.contains(#""token_count""#),
-           let event = parseTokenCountEvent(pending) {
-            total += event.tokens
+           let tokens = tokenCountTokens(from: pending) {
+            total += tokens
             pending = ""
             foundTokenEvent = true
         }
@@ -1437,114 +1443,65 @@ final class CodexUsageStore: @unchecked Sendable {
         }
     }
 
+    private func cachedFileValue<Value>(
+        path: String,
+        cached: () -> FileValueCache<Value>?,
+        store: (FileValueCache<Value>) -> Void,
+        load: () -> Value?
+    ) -> Value? {
+        let signature = fileSignature(path)
+        guard signature.exists else {
+            return nil
+        }
+
+        cacheLock.lock()
+        if let cached = cached(),
+           cached.signature == signature {
+            let value = cached.value
+            cacheLock.unlock()
+            return value
+        }
+        cacheLock.unlock()
+
+        let value = load()
+        cacheLock.lock()
+        store(FileValueCache(signature: signature, value: value))
+        cacheLock.unlock()
+        return value
+    }
+
     private func sessionMeta(from path: String) -> SessionMetaInfo? {
+        cachedFileValue(
+            path: path,
+            cached: { sessionMetaCache[path] },
+            store: { sessionMetaCache[path] = $0 }
+        ) {
+            parseSessionMeta(from: path)
+        }
+    }
+
+    private func parseSessionMeta(from path: String) -> SessionMetaInfo? {
         guard let text = filePrefix(from: path, maxBytes: 256 * 1024) else {
             return nil
         }
-
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard line.contains(#""session_meta""#) else {
-                continue
-            }
-
-            let lineText = String(line)
-            guard let data = lineText.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  object["type"] as? String == "session_meta",
-                  let payload = object["payload"] as? [String: Any] else {
-                if let fallback = fallbackSessionMeta(from: lineText) {
-                    return fallback
-                }
-                continue
-            }
-
-            let source = payload["source"] as? [String: Any]
-            let subagentSource = source?["subagent"] as? [String: Any]
-            let hasSubagentSource = subagentSource != nil
-            let threadSource = payload["thread_source"] as? String
-            let threadSpawn = subagentSource?["thread_spawn"] as? [String: Any]
-            let parentThreadID = (
-                payload["parent_thread_id"] as? String
-                    ?? payload["parentThreadId"] as? String
-                    ?? threadSpawn?["parent_thread_id"] as? String
-                    ?? threadSpawn?["parentThreadId"] as? String
-            )?.lowercased()
-            let isSubagent = threadSource == "subagent" || hasSubagentSource
-
-            return SessionMetaInfo(
-                isSubagent: isSubagent,
-                parentThreadID: isSubagent ? parentThreadID : nil
-            )
-        }
-
-        return nil
-    }
-
-    private func fallbackSessionMeta(from line: String) -> SessionMetaInfo? {
-        guard line.range(of: #""type"\s*:\s*"session_meta""#, options: .regularExpression) != nil else {
-            return nil
-        }
-
-        let threadSource = jsonStringValue(for: "thread_source", in: line)
-        let hasSubagentSource = line.range(
-            of: #""source"\s*:\s*\{\s*"subagent"\s*:"#,
-            options: .regularExpression
-        ) != nil
-        let isSubagent = threadSource == "subagent" || hasSubagentSource
-        guard isSubagent else {
-            return SessionMetaInfo(isSubagent: false, parentThreadID: nil)
-        }
-
-        return SessionMetaInfo(
-            isSubagent: true,
-            parentThreadID: (
-                jsonStringValue(for: "parent_thread_id", in: line)
-                    ?? jsonStringValue(for: "parentThreadId", in: line)
-            )?.lowercased()
-        )
-    }
-
-    private func jsonStringValue(for key: String, in line: String) -> String? {
-        let escapedKey = NSRegularExpression.escapedPattern(for: key)
-        let pattern = #"""# + escapedKey + #""\s*:\s*"((?:\\.|[^"\\])*)""#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return nil
-        }
-
-        let range = NSRange(line.startIndex..<line.endIndex, in: line)
-        guard let match = regex.firstMatch(in: line, range: range),
-              let valueRange = Range(match.range(at: 1), in: line) else {
-            return nil
-        }
-        return String(line[valueRange])
+        return sessionDecoder.meta(from: text)
     }
 
     private func sessionRuntimeInfo(from path: String) -> SessionRuntimeInfo? {
+        cachedFileValue(
+            path: path,
+            cached: { sessionRuntimeInfoCache[path] },
+            store: { sessionRuntimeInfoCache[path] = $0 }
+        ) {
+            parseSessionRuntimeInfo(from: path)
+        }
+    }
+
+    private func parseSessionRuntimeInfo(from path: String) -> SessionRuntimeInfo? {
         guard let text = filePrefix(from: path, maxBytes: 1_024 * 1_024) else {
             return nil
         }
-
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard line.contains(#""turn_context""#),
-                  let data = String(line).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  object["type"] as? String == "turn_context",
-                  let payload = object["payload"] as? [String: Any] else {
-                continue
-            }
-
-            let settings = (payload["collaboration_mode"] as? [String: Any])?["settings"] as? [String: Any]
-            let model = stringValue(payload["model"]) ?? stringValue(settings?["model"])
-            let reasoningEffort = stringValue(payload["effort"])
-                ?? stringValue(payload["reasoning_effort"])
-                ?? stringValue(settings?["reasoning_effort"])
-
-            if model != nil || reasoningEffort != nil {
-                return SessionRuntimeInfo(model: model, reasoningEffort: reasoningEffort)
-            }
-        }
-
-        return nil
+        return sessionDecoder.runtimeInfo(from: text)
     }
 
     private func candidateRateLimitPaths(from threads: [ThreadRecord], recentLimit: Int = 4) -> [String] {
@@ -1629,15 +1586,33 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func sessionPath(for sessionID: String) -> String? {
-        let normalized = sessionID.lowercased()
+        sessionPaths(for: [sessionID.lowercased()])[sessionID.lowercased()]
+    }
+
+    private func sessionPaths(for sessionIDs: Set<String>) -> [String: String] {
+        let normalizedIDs = Set(sessionIDs.map { $0.lowercased() }.filter { !$0.isEmpty })
+        guard !normalizedIDs.isEmpty else {
+            return [:]
+        }
+
         let roots = [
             codexDirectory.appendingPathComponent("sessions"),
             codexDirectory.appendingPathComponent("archived_sessions")
         ]
-        return collectRecentSessionPaths(roots: roots, limit: 1_000)
-            .first { path in
-                self.sessionID(from: path)?.lowercased() == normalized
+
+        var paths: [String: String] = [:]
+        for path in collectRecentSessionPaths(roots: roots, limit: 1_000) {
+            guard let id = sessionID(from: path)?.lowercased(),
+                  normalizedIDs.contains(id),
+                  paths[id] == nil else {
+                continue
             }
+            paths[id] = path
+            if paths.count == normalizedIDs.count {
+                break
+            }
+        }
+        return paths
     }
 
     private func collectRecentSessionPaths(roots: [URL], limit: Int) -> [String] {
@@ -1761,7 +1736,7 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func appServerRateLimitScript() -> String {
-        let initialize = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-notch","version":"0.1.2"},"capabilities":{"experimentalApi":true}}}"#
+        let initialize = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-notch","version":"0.1.3"},"capabilities":{"experimentalApi":true}}}"#
         let initialized = #"{"jsonrpc":"2.0","method":"initialized"}"#
         let readRateLimits = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":null}"#
 
@@ -1876,96 +1851,27 @@ final class CodexUsageStore: @unchecked Sendable {
         }
     }
 
+    private func tokenCountTokens(from line: String) -> Int? {
+        sessionDecoder.tokenCountTokens(from: line)
+    }
+
     private func parseTokenCountEvent(_ line: String) -> (date: Date, tokens: Int)? {
-        if lineContainsTokenCountPayload(line),
-           let timestamp = fastJSONStringValue(for: "timestamp", in: line),
-           let date = parseTimestamp(timestamp),
-           let tokens = fastLastTokenUsageTotal(in: line) {
-            return (date, tokens)
-        }
-
-        guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let timestamp = object["timestamp"] as? String,
-              let date = parseTimestamp(timestamp),
-              let payload = object["payload"] as? [String: Any],
-              payload["type"] as? String == "token_count",
-              let info = payload["info"] as? [String: Any],
-              let lastUsage = info["last_token_usage"] as? [String: Any],
-              let tokens = intValue(lastUsage["total_tokens"]) else {
+        guard let event = sessionDecoder.tokenCountEvent(from: line) else {
             return nil
         }
-
-        return (date, tokens)
+        return (event.date, event.tokens)
     }
 
-    private func lineContainsTokenCountPayload(_ line: String) -> Bool {
-        line.contains(#""type":"token_count""#)
-            || line.contains(#""type": "token_count""#)
-            || line.contains(#""type" : "token_count""#)
+    private func timestampSecondPrefix(for date: Date) -> String {
+        sessionDecoder.timestampSecondPrefix(for: date)
     }
 
-    private func fastLastTokenUsageTotal(in line: String) -> Int? {
-        guard let usageRange = line.range(of: #""last_token_usage""#),
-              let tokenRange = line[usageRange.upperBound...].range(of: #""total_tokens""#),
-              let colonRange = line[tokenRange.upperBound...].range(of: ":") else {
-            return nil
-        }
-
-        var index = colonRange.upperBound
-        while index < line.endIndex, line[index].isWhitespace {
-            index = line.index(after: index)
-        }
-
-        let start = index
-        while index < line.endIndex, line[index].isNumber {
-            index = line.index(after: index)
-        }
-
-        guard start < index else {
-            return nil
-        }
-        return Int(line[start..<index])
-    }
-
-    private func fastJSONStringValue(for key: String, in line: String) -> String? {
-        guard let keyRange = line.range(of: #"""# + key + #"""#),
-              let colonRange = line[keyRange.upperBound...].range(of: ":"),
-              let quoteStart = line[colonRange.upperBound...].firstIndex(of: "\"") else {
-            return nil
-        }
-
-        var index = line.index(after: quoteStart)
-        var value = ""
-        var isEscaped = false
-
-        while index < line.endIndex {
-            let character = line[index]
-            if isEscaped {
-                value.append(character)
-                isEscaped = false
-            } else if character == "\\" {
-                isEscaped = true
-            } else if character == "\"" {
-                return value
-            } else {
-                value.append(character)
-            }
-            index = line.index(after: index)
-        }
-
-        return nil
+    private func timestampSecondPrefix(from timestamp: String) -> String? {
+        sessionDecoder.timestampSecondPrefix(from: timestamp)
     }
 
     private func parseTimestamp(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) {
-            return date
-        }
-
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
+        sessionDecoder.parseTimestamp(value)
     }
 
     private func makeUsageSignature(for rolloutPaths: [String]) -> StoreSignature? {
@@ -1978,7 +1884,7 @@ final class CodexUsageStore: @unchecked Sendable {
         return StoreSignature(files: paths.map(fileSignature).sorted { $0.path < $1.path })
     }
 
-    private func makeSignature(for rolloutPaths: [String]) -> StoreSignature? {
+    private func makeSnapshotSignature(for rolloutPaths: [String]) -> StoreSignature? {
         let databasePaths = sqliteFileSet(stateDatabase) + sqliteFileSet(logsDatabase) + [sessionIndexPath]
         let paths = databasePaths + rolloutPaths.filter { !$0.isEmpty }
         guard !paths.isEmpty else {
@@ -2017,14 +1923,6 @@ final class CodexUsageStore: @unchecked Sendable {
             return number.intValue
         }
         return nil
-    }
-
-    private func stringValue(_ value: Any?) -> String? {
-        guard let string = value as? String else {
-            return nil
-        }
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func remainingPercent(fromUsedPercent value: Any?) -> Int? {
@@ -2066,6 +1964,11 @@ private struct SessionTokenScanResult {
     let foundTokenEvent: Bool
 }
 
+private struct FileValueCache<Value> {
+    let signature: FileSignature
+    let value: Value?
+}
+
 private struct RecentSessionCandidate {
     let path: String
     let sessionID: String
@@ -2088,16 +1991,6 @@ private struct PeriodUsageCache {
     let createdAt: Date
     let signature: StoreSignature
     let usage: PeriodUsage
-}
-
-private struct SessionMetaInfo {
-    let isSubagent: Bool
-    let parentThreadID: String?
-}
-
-private struct SessionRuntimeInfo {
-    let model: String?
-    let reasoningEffort: String?
 }
 
 private struct AppServerRateLimitResponse: Decodable {

@@ -13,7 +13,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CodexNotch",
-            path: "Sources/CodexNotch"
+            path: "Sources/CodexNotch",
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
         )
     ]
 )

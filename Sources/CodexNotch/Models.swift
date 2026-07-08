@@ -1,5 +1,7 @@
 import Foundation
 
+typealias NotchPointAdjustment = Double
+
 enum SettingsShortcutFilter {
     static func shouldSuppressTextInputKey(
         characters: String?,
@@ -39,6 +41,8 @@ enum SettingsShortcutFilter {
 struct UsageSnapshot: Equatable {
     var primaryPercent: Int?
     var secondaryPercent: Int?
+    var primaryResetsAt: Date? = nil
+    var secondaryResetsAt: Date? = nil
     var usage24h: Int
     var usage7d: Int
     var usage30d: Int
@@ -50,6 +54,8 @@ struct UsageSnapshot: Equatable {
     static let empty = UsageSnapshot(
         primaryPercent: nil,
         secondaryPercent: nil,
+        primaryResetsAt: nil,
+        secondaryResetsAt: nil,
         usage24h: 0,
         usage7d: 0,
         usage30d: 0,
@@ -58,6 +64,19 @@ struct UsageSnapshot: Equatable {
         lastUpdated: Date(),
         errorMessage: nil
     )
+
+    func stabilizedRateLimits(against previous: UsageSnapshot) -> UsageSnapshot {
+        var copy = self
+        if copy.primaryPercent == nil {
+            copy.primaryPercent = previous.primaryPercent
+            copy.primaryResetsAt = previous.primaryResetsAt
+        }
+        if copy.secondaryPercent == nil {
+            copy.secondaryPercent = previous.secondaryPercent
+            copy.secondaryResetsAt = previous.secondaryResetsAt
+        }
+        return copy
+    }
 }
 
 struct PeriodUsage: Equatable, Sendable {
@@ -388,12 +407,28 @@ struct RateLimitSnapshot: Equatable {
     let capturedAt: Date?
     let isPrimaryCodexLimit: Bool
 
+    var primaryResetDate: Date? {
+        resetDate(from: primaryResetsAt)
+    }
+
+    var secondaryResetDate: Date? {
+        resetDate(from: secondaryResetsAt)
+    }
+
     func primaryDisplayPercent(now: Date = Date()) -> Int? {
         displayPercent(primaryPercent, resetsAt: primaryResetsAt, now: now)
     }
 
     func secondaryDisplayPercent(now: Date = Date()) -> Int? {
         displayPercent(secondaryPercent, resetsAt: secondaryResetsAt, now: now)
+    }
+
+    func primaryDisplayResetDate(now: Date = Date()) -> Date? {
+        displayResetDate(primaryResetsAt, now: now)
+    }
+
+    func secondaryDisplayResetDate(now: Date = Date()) -> Date? {
+        displayResetDate(secondaryResetsAt, now: now)
     }
 
     private func displayPercent(_ percent: Int?, resetsAt: Int?, now: Date) -> Int? {
@@ -404,5 +439,20 @@ struct RateLimitSnapshot: Equatable {
             return 100
         }
         return percent
+    }
+
+    private func resetDate(from timestamp: Int?) -> Date? {
+        guard let timestamp else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: TimeInterval(timestamp))
+    }
+
+    private func displayResetDate(_ timestamp: Int?, now: Date) -> Date? {
+        guard let timestamp,
+              Int(now.timeIntervalSince1970) < timestamp else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: TimeInterval(timestamp))
     }
 }

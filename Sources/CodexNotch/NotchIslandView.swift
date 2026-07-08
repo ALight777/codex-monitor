@@ -44,14 +44,21 @@ struct NotchIslandView: View {
         viewModel.snapshot
     }
 
+    private var islandLayout: IslandLayout {
+        ScreenNotchGeometry.layout(
+            for: NSScreen.main ?? NSScreen.screens.first,
+            adjustment: CGFloat(settings.notchWidthAdjustment)
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             islandBackground
             collapsedContent
         }
         .frame(
-            width: IslandMetrics.width,
-            height: IslandMetrics.collapsedHeight,
+            width: islandLayout.width,
+            height: islandLayout.collapsedHeight,
             alignment: .top
         )
         .contentShape(Rectangle())
@@ -81,8 +88,8 @@ struct NotchIslandView: View {
         BottomRoundedRectangle(radius: 21)
             .fill(Color.black.opacity(0.985))
             .frame(
-                width: IslandMetrics.width,
-                height: IslandMetrics.collapsedHeight,
+                width: islandLayout.width,
+                height: islandLayout.collapsedHeight,
                 alignment: .top
             )
             .overlay(alignment: .top) {
@@ -93,22 +100,22 @@ struct NotchIslandView: View {
     private var centerNotchMask: some View {
         BottomRoundedRectangle(radius: 20)
             .fill(Color.black)
-            .frame(width: IslandMetrics.notchWidth, height: IslandMetrics.collapsedHeight)
+            .frame(width: islandLayout.notchWidth, height: islandLayout.collapsedHeight)
             .offset(x: 0, y: 0)
     }
 
     private var collapsedContent: some View {
         HStack(spacing: 0) {
             statusBlock
-                .frame(width: IslandMetrics.shoulderWidth, height: IslandMetrics.collapsedHeight - 4)
+                .frame(width: islandLayout.shoulderWidth, height: islandLayout.collapsedHeight - 4)
 
             Color.clear
-                .frame(width: IslandMetrics.notchWidth, height: IslandMetrics.collapsedHeight)
+                .frame(width: islandLayout.notchWidth, height: islandLayout.collapsedHeight)
 
             rateLimitBlock
-                .frame(width: IslandMetrics.shoulderWidth, height: IslandMetrics.collapsedHeight - 4)
+                .frame(width: islandLayout.shoulderWidth, height: islandLayout.collapsedHeight - 4)
         }
-        .frame(width: IslandMetrics.width, height: IslandMetrics.collapsedHeight, alignment: .top)
+        .frame(width: islandLayout.width, height: islandLayout.collapsedHeight, alignment: .top)
     }
 
     private var statusBlock: some View {
@@ -289,6 +296,24 @@ struct DetailPanelView: View {
         viewModel.snapshot
     }
 
+    private var islandLayout: IslandLayout {
+        ScreenNotchGeometry.layout(
+            for: NSScreen.main ?? NSScreen.screens.first,
+            adjustment: CGFloat(settings.notchWidthAdjustment)
+        )
+    }
+
+    private var currentScreen: NSScreen? {
+        NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private var detailTopPadding: CGFloat {
+        IslandMetrics.detailContentTopPadding(
+            safeAreaTop: ScreenNotchGeometry.topSafeInset(for: currentScreen),
+            collapsedHeight: islandLayout.collapsedHeight
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             BottomRoundedRectangle(radius: 24)
@@ -313,11 +338,13 @@ struct DetailPanelView: View {
                 .frame(maxHeight: .infinity, alignment: .top)
             }
             .padding(.horizontal, 14)
-            .padding(.top, IslandMetrics.detailTopPadding)
+            .padding(.top, detailTopPadding)
             .padding(.bottom, IslandMetrics.detailBottomPadding)
             .frame(maxHeight: .infinity, alignment: .top)
+
+            quotaResetStrip
         }
-        .frame(width: IslandMetrics.width, height: detailHeight)
+        .frame(width: islandLayout.width, height: detailHeight)
         .clipShape(BottomRoundedRectangle(radius: 24))
     }
 
@@ -326,31 +353,27 @@ struct DetailPanelView: View {
     }
 
     private var detailHeight: CGFloat {
-        let localHeight = IslandMetrics.detailHeight(
-            taskRows: IslandMetrics.visibleTaskRows,
-            showsPeriodUsage: settings.showPeriodUsage
-        )
         guard settings.remoteMonitorEnabled else {
             let balanceRows = [
                 settings.newAPIMonitorEnabled ? newAPIViewModel.snapshot.accounts.count : nil,
                 settings.subAPIMonitorEnabled ? subAPIViewModel.snapshot.accounts.count : nil
             ].compactMap { $0 }
-            guard !balanceRows.isEmpty else {
-                return localHeight
-            }
-            return max(localHeight, IslandMetrics.remoteDetailHeight(accountRows: max(1, balanceRows.max() ?? 1)))
+            return IslandMetrics.combinedDetailHeight(
+                accountRows: balanceRows.isEmpty ? nil : max(1, balanceRows.max() ?? 1),
+                showsPeriodUsage: settings.showPeriodUsage,
+                topPadding: detailTopPadding
+            )
         }
         let rows = [
             remoteViewModel.snapshot.accounts.count,
             settings.newAPIMonitorEnabled ? newAPIViewModel.snapshot.accounts.count : nil,
             settings.subAPIMonitorEnabled ? subAPIViewModel.snapshot.accounts.count : nil
         ].compactMap { $0 }
-        return max(
-            localHeight,
-            IslandMetrics.remoteDetailHeight(
-                accountRows: max(1, rows.max() ?? 1),
-                usesTallRows: remoteViewModel.snapshot.accounts.contains { $0.displayQuotaWindows.count > 2 }
-            )
+        return IslandMetrics.combinedDetailHeight(
+            accountRows: max(1, rows.max() ?? 1),
+            showsPeriodUsage: settings.showPeriodUsage,
+            usesTallRemoteRows: remoteViewModel.snapshot.accounts.contains { $0.displayQuotaWindows.count > 2 },
+            topPadding: detailTopPadding
         )
     }
 
@@ -528,6 +551,48 @@ struct DetailPanelView: View {
 
     private var selectedPage: DetailPage {
         availablePages.contains(detailPage) ? detailPage : .codex
+    }
+
+    @ViewBuilder
+    private var quotaResetStrip: some View {
+        if selectedPage == .codex {
+            HStack(spacing: 12) {
+                quotaResetItem(
+                    label: "5h",
+                    date: snapshot.primaryResetsAt,
+                    color: Color(red: 0.61, green: 0.95, blue: 0.68)
+                )
+                quotaResetItem(
+                    label: "7d",
+                    date: snapshot.secondaryResetsAt,
+                    color: Color(red: 0.50, green: 0.78, blue: 1.00)
+                )
+            }
+            .padding(
+                .top,
+                IslandMetrics.quotaResetTopPadding(
+                    safeAreaTop: ScreenNotchGeometry.topSafeInset(for: currentScreen),
+                    collapsedHeight: islandLayout.collapsedHeight
+                )
+            )
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    private func quotaResetItem(label: String, date: Date?, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .foregroundStyle(.white.opacity(0.46))
+            Text("刷新")
+                .foregroundStyle(.white.opacity(0.38))
+            Text(Formatters.quotaResetTime(date))
+                .foregroundStyle(color.opacity(0.82))
+                .monospacedDigit()
+        }
+        .font(.system(size: 8.8, weight: .bold, design: .rounded))
+        .lineLimit(1)
+        .minimumScaleFactor(0.76)
     }
 
     private func refreshCurrentPage() {

@@ -152,6 +152,8 @@ final class CodexUsageStore: @unchecked Sendable {
             return UsageSnapshot(
                 primaryPercent: rateLimits.primaryDisplayPercent(now: now),
                 secondaryPercent: rateLimits.secondaryDisplayPercent(now: now),
+                primaryResetsAt: rateLimits.primaryDisplayResetDate(now: now),
+                secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
                 usage24h: usage.day,
                 usage7d: usage.week,
                 usage30d: usage.month,
@@ -192,6 +194,8 @@ final class CodexUsageStore: @unchecked Sendable {
         UsageSnapshot(
             primaryPercent: nil,
             secondaryPercent: nil,
+            primaryResetsAt: nil,
+            secondaryResetsAt: nil,
             usage24h: 0,
             usage7d: 0,
             usage30d: 0,
@@ -246,6 +250,8 @@ final class CodexUsageStore: @unchecked Sendable {
         return UsageSnapshot(
             primaryPercent: cache.rateLimits.primaryDisplayPercent(now: now),
             secondaryPercent: cache.rateLimits.secondaryDisplayPercent(now: now),
+            primaryResetsAt: cache.rateLimits.primaryDisplayResetDate(now: now),
+            secondaryResetsAt: cache.rateLimits.secondaryDisplayResetDate(now: now),
             usage24h: usage.day,
             usage7d: usage.week,
             usage30d: usage.month,
@@ -1736,7 +1742,7 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func appServerRateLimitScript() -> String {
-        let initialize = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-notch","version":"0.1.3"},"capabilities":{"experimentalApi":true}}}"#
+        let initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"codex-notch\",\"version\":\"\(AppInfo.version)\"},\"capabilities\":{\"experimentalApi\":true}}}"
         let initialized = #"{"jsonrpc":"2.0","method":"initialized"}"#
         let readRateLimits = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":null}"#
 

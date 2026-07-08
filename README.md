@@ -19,6 +19,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 点击刘海区域展开详情面板，再次点击外部区域可收起。
 - 详情页使用多 tab 模式：`Codex`、`CLIProxyAPI`、`NewAPI`、`Sub2API`。
 - 支持手动选择刘海区域显示来源，也支持自动模式优先展示有提醒的外部监控。
+- 支持根据 macOS 顶部安全区和辅助菜单区自动识别物理刘海尺寸，并提供物理刘海宽度微调。
 - 支持设置页独立开关每一种监控源。
 - 支持刷新按钮、设置按钮、右键菜单、开机自启和运行指示灯动画。
 
@@ -30,6 +31,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 - Codex 是否正在执行任务。
 - 5 小时和 7 天额度剩余百分比。
+- 5 小时和 7 天额度刷新时间。
 - 正在运行和最近活动的对话列表。
 - 当前活跃任务的活跃子代理数量。
 - 每个对话的 token 用量，包含该对话下的子代理用量。
@@ -90,7 +92,7 @@ NewAPI 和 Sub2API 用于监测普通用户账号余额，而不是管理员侧�
 - `CLIProxyAPI`：远程 Codex 数据源、面板地址、管理密钥、刷新频率、请求超时和 TLS 设置。
 - `NewAPI`：NewAPI 监测开关、刷新频率、默认阈值和账号列表。
 - `Sub2API`：Sub2API 监测开关、刷新频率、默认阈值和账号列表。
-- `启动与外观`：刘海显示来源、密钥存储方式、开机自启和指示灯动画。
+- `启动与外观`：刘海显示来源、物理刘海微调、密钥存储方式、开机自启和指示灯动画。
 - `关于`：软件简介、当前版本号和监测能力说明。
 
 设置页中的问号按钮会解释每个配置项的作用。大部分远程配置只有在点击“保存”后才会生效，避免输入密码或密钥时立即触发请求。
@@ -132,8 +134,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.3-arm64.dmg
-dist/codex-monitor-0.1.3-amd64.dmg
+dist/codex-monitor-0.1.4-arm64.dmg
+dist/codex-monitor-0.1.4-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -187,6 +189,7 @@ dist/codex-monitor-0.1.3-amd64.dmg
 ### 注意事项
 
 - 本项目当前面向 MacBook 刘海屏设计。在无刘海屏或外接显示器上也可以运行，但视觉位置可能需要按实际设备调整。
+- 刘海尺寸会优先根据 macOS 暴露的顶部安全区和辅助菜单区自动推断。如果系统、缩放模式或机型导致识别偏宽或偏窄，可以在设置页使用“物理刘海微调”校准。
 - 本机 Codex 的额度和任务状态依赖 Codex 本地数据文件。如果 Codex 改变文件结构，可能需要同步适配。
 - CPA Manager Plus 模式读取的是服务端巡检结果。服务端巡检频率由 CPA Manager Plus 自身配置决定，客户端刷新只是读取最新结果。
 - `允许不安全 TLS` 会信任自签名或证书不完整的面板证书。请只在你控制的测试环境中启用。
@@ -218,6 +221,7 @@ The app currently supports local Codex telemetry, CLIProxyAPI / CPA Manager Plus
 - Multi-tab detail panel: `Codex`, `CLIProxyAPI`, `NewAPI`, and `Sub2API`.
 - Per-source enable/disable switches.
 - Manual or automatic notch display source selection.
+- Automatic physical notch size inference from macOS safe-area and auxiliary menu-bar geometry, with a manual notch-width adjustment when needed.
 - Manual refresh buttons, settings button, context menu, launch at login, and optional pulse animation.
 
 ### Local Codex Monitoring
@@ -228,6 +232,7 @@ It can show:
 
 - Whether Codex is currently running a task.
 - Remaining 5-hour and 7-day quota percentages.
+- 5-hour and 7-day quota refresh times.
 - Running and recent conversations.
 - Active subagent count for currently running tasks.
 - Token usage per conversation, including subagent usage under the same conversation.
@@ -288,7 +293,7 @@ The settings window is split into these tabs:
 - `CLIProxyAPI`: remote Codex source, panel URL, management key, refresh interval, timeout, and TLS settings.
 - `NewAPI`: NewAPI monitoring, refresh interval, default thresholds, and account list.
 - `Sub2API`: Sub2API monitoring, refresh interval, default thresholds, and account list.
-- `Launch & Appearance`: notch display source, secret storage mode, launch at login, and pulse animation.
+- `Launch & Appearance`: notch display source, physical notch adjustment, secret storage mode, launch at login, and pulse animation.
 - `About`: app summary, current version, and supported monitoring sources.
 
 Question-mark buttons next to setting labels explain what each option does. Most remote settings take effect only after clicking Save, so typing passwords or keys does not immediately trigger network requests.
@@ -330,8 +335,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.3-arm64.dmg
-dist/codex-monitor-0.1.3-amd64.dmg
+dist/codex-monitor-0.1.4-arm64.dmg
+dist/codex-monitor-0.1.4-amd64.dmg
 ```
 
 Install into the current user's Applications folder:
@@ -385,6 +390,7 @@ Run regression tests:
 ### Notes
 
 - The UI is designed for MacBook displays with a physical notch. It can run on external or non-notched displays, but visual positioning may need adjustment.
+- Notch dimensions are inferred from macOS safe-area and auxiliary menu-bar geometry. If a macOS version, display scaling mode, or MacBook model reports imperfect geometry, use the physical notch adjustment setting to fine-tune the center mask.
 - Local Codex monitoring depends on Codex's local data files. If Codex changes its file format, the app may need an update.
 - CPA Manager Plus mode reads server-side inspection results. The inspection frequency is controlled by CPA Manager Plus, while this app only controls how often it reads the latest result.
 - `Allow insecure TLS` trusts self-signed or incomplete certificates for the configured panel request. Use it only for testing environments you control.

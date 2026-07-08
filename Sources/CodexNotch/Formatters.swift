@@ -22,6 +22,26 @@ enum Formatters {
         return "\(value)%"
     }
 
+    static func quotaResetTime(_ date: Date?, now: Date = Date(), calendar: Calendar = .autoupdatingCurrent) -> String {
+        guard let date else {
+            return "--"
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        if calendar.isDate(date, inSameDayAs: now) {
+            formatter.dateFormat = "HH:mm"
+        } else if let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)),
+                  calendar.isDate(date, inSameDayAs: tomorrow) {
+            formatter.dateFormat = "'明天' HH:mm"
+        } else {
+            formatter.dateFormat = "M月d日"
+        }
+        return formatter.string(from: date)
+    }
+
     static func shortTitle(_ title: String) -> String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {

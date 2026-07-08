@@ -382,12 +382,7 @@ final class UsageViewModel: ObservableObject {
         var snapshot = next
         let previous = self.snapshot
 
-        if snapshot.primaryPercent == nil {
-            snapshot.primaryPercent = previous.primaryPercent
-        }
-        if snapshot.secondaryPercent == nil {
-            snapshot.secondaryPercent = previous.secondaryPercent
-        }
+        snapshot = snapshot.stabilizedRateLimits(against: previous)
 
         if snapshot.errorMessage != nil,
            snapshot.usage24h == 0,

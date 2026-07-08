@@ -109,6 +109,7 @@ private struct SettingsDraft: Equatable {
     var showPeriodUsage = true
     var taskHistoryRange: TaskHistoryRange = .threeDays
     var notchDisplaySource: NotchDisplaySource = .codex
+    var notchWidthAdjustment: NotchPointAdjustment = 0
     var remoteMonitorEnabled = false
     var remoteCodexDataSource: RemoteCodexDataSource = .cpaManagerPlus
     var cliproxyPanelURL = ""
@@ -149,6 +150,7 @@ private struct SettingsDraft: Equatable {
         showPeriodUsage = settings.showPeriodUsage
         taskHistoryRange = settings.taskHistoryRange
         notchDisplaySource = settings.notchDisplaySource
+        notchWidthAdjustment = settings.notchWidthAdjustment
         remoteMonitorEnabled = settings.remoteMonitorEnabled
         remoteCodexDataSource = settings.remoteCodexDataSource
         cliproxyPanelURL = settings.cliproxyPanelURL
@@ -485,6 +487,13 @@ struct SettingsView: View {
                 HelpLabel(title: "显示来源", help: "选择收起状态下刘海左右区域显示哪一种监控数据。自动模式会优先显示有提醒的外部监控，否则显示 Codex。")
             }
             .pickerStyle(.menu)
+
+            pointStepper(
+                "物理刘海微调",
+                value: $draft.notchWidthAdjustment,
+                range: -NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit)...NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit),
+                help: "默认会根据 macOS 顶部安全区域自动识别物理刘海宽度。只有在你的机型识别偏宽或偏窄时，才需要用这个值微调中心遮挡区。"
+            )
         }
 
         Section("启动与外观") {
@@ -592,6 +601,25 @@ struct SettingsView: View {
 
     private func intervalStepper(
         _ title: String,
+        value: Binding<NotchPointAdjustment>,
+        range: ClosedRange<NotchPointAdjustment>,
+        help: String
+    ) -> some View {
+        HStack {
+            HelpLabel(title: title, help: help)
+            Spacer()
+            Text(intervalText(value.wrappedValue))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 58, alignment: .trailing)
+            Stepper("", value: value, in: range, step: 1)
+                .labelsHidden()
+        }
+    }
+
+    private func pointStepper(
+        _ title: String,
         value: Binding<TimeInterval>,
         range: ClosedRange<TimeInterval>,
         help: String
@@ -599,7 +627,7 @@ struct SettingsView: View {
         HStack {
             HelpLabel(title: title, help: help)
             Spacer()
-            Text(intervalText(value.wrappedValue))
+            Text(pointText(value.wrappedValue))
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -1419,6 +1447,7 @@ struct SettingsView: View {
         settings.showPeriodUsage = next.showPeriodUsage
         settings.taskHistoryRange = next.taskHistoryRange
         settings.notchDisplaySource = next.notchDisplaySource
+        settings.notchWidthAdjustment = next.notchWidthAdjustment
 
         settings.remoteCodexDataSource = next.remoteCodexDataSource
         settings.cliproxyPanelURL = next.cliproxyPanelURL
@@ -1471,6 +1500,14 @@ struct SettingsView: View {
 
     private func intervalText(_ value: TimeInterval) -> String {
         "\(Int(value)) 秒"
+    }
+
+    private func pointText(_ value: NotchPointAdjustment) -> String {
+        let points = Int(value.rounded())
+        if points > 0 {
+            return "+\(points) pt"
+        }
+        return "\(points) pt"
     }
 
     private func refreshSelectedTab() {

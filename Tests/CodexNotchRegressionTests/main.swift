@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 final class TestRunner {
     private(set) var failures = 0
@@ -23,8 +24,8 @@ final class TestRunner {
 
 let runner = TestRunner()
 
-runner.check(AppInfo.version == "0.1.3", "app info should expose version 0.1.3")
-runner.check(AppInfo.displayVersion == "0.1.3", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.1.4", "app info should expose version 0.1.4")
+runner.check(AppInfo.displayVersion == "0.1.4", "app info should fall back to source version when bundle version is unavailable")
 
 let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",
@@ -70,6 +71,110 @@ runner.check(
 runner.check(
     TaskBadgeFormatter.subagentBadgeText(for: 0) == nil,
     "task row subagent badge should stay hidden for zero active subagents"
+)
+let previousRateLimitSnapshot = UsageSnapshot(
+    primaryPercent: 88,
+    secondaryPercent: 66,
+    primaryResetsAt: Date(timeIntervalSince1970: 2_000),
+    secondaryResetsAt: Date(timeIntervalSince1970: 3_000),
+    usage24h: 1,
+    usage7d: 2,
+    usage30d: 3,
+    tasks: [],
+    isRunning: false,
+    lastUpdated: Date(timeIntervalSince1970: 1_000),
+    errorMessage: nil
+)
+let missingRateLimitSnapshot = UsageSnapshot(
+    primaryPercent: nil,
+    secondaryPercent: nil,
+    primaryResetsAt: nil,
+    secondaryResetsAt: nil,
+    usage24h: 4,
+    usage7d: 5,
+    usage30d: 6,
+    tasks: [],
+    isRunning: false,
+    lastUpdated: Date(timeIntervalSince1970: 1_100),
+    errorMessage: nil
+)
+let stabilizedRateLimitSnapshot = missingRateLimitSnapshot.stabilizedRateLimits(against: previousRateLimitSnapshot)
+runner.check(stabilizedRateLimitSnapshot.primaryPercent == 88, "stabilized snapshot should preserve missing 5h percent")
+runner.check(stabilizedRateLimitSnapshot.primaryResetsAt == previousRateLimitSnapshot.primaryResetsAt, "stabilized snapshot should preserve missing 5h reset time")
+runner.check(stabilizedRateLimitSnapshot.secondaryPercent == 66, "stabilized snapshot should preserve missing 7d percent")
+runner.check(stabilizedRateLimitSnapshot.secondaryResetsAt == previousRateLimitSnapshot.secondaryResetsAt, "stabilized snapshot should preserve missing 7d reset time")
+let rateLimitNow = Date(timeIntervalSince1970: 2_000)
+let expiredRateLimitSnapshot = RateLimitSnapshot(
+    primaryPercent: 42,
+    secondaryPercent: 58,
+    primaryResetsAt: 1_900,
+    secondaryResetsAt: 2_500,
+    capturedAt: rateLimitNow,
+    isPrimaryCodexLimit: true
+)
+runner.check(expiredRateLimitSnapshot.primaryDisplayPercent(now: rateLimitNow) == 100, "expired 5h quota should display as restored")
+runner.check(expiredRateLimitSnapshot.primaryDisplayResetDate(now: rateLimitNow) == nil, "expired 5h reset time should be hidden")
+runner.check(expiredRateLimitSnapshot.secondaryDisplayResetDate(now: rateLimitNow) == Date(timeIntervalSince1970: 2_500), "future 7d reset time should be preserved")
+var fixedCalendar = Calendar(identifier: .gregorian)
+fixedCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
+let formatterNow = fixedCalendar.date(from: DateComponents(year: 2030, month: 1, day: 1, hour: 23, minute: 0))!
+let formatterTomorrow = fixedCalendar.date(from: DateComponents(year: 2030, month: 1, day: 2, hour: 1, minute: 30))!
+let formatterLater = fixedCalendar.date(from: DateComponents(year: 2030, month: 1, day: 3, hour: 9, minute: 0))!
+runner.check(Formatters.quotaResetTime(nil, now: formatterNow, calendar: fixedCalendar) == "--", "nil reset time should render as placeholder")
+runner.check(Formatters.quotaResetTime(formatterTomorrow, now: formatterNow, calendar: fixedCalendar) == "明天 01:30", "reset formatter should calculate tomorrow relative to the supplied now")
+runner.check(Formatters.quotaResetTime(formatterLater, now: formatterNow, calendar: fixedCalendar) == "1月3日", "reset formatter should show date for later reset times")
+runner.check(
+    ScreenNotchGeometry.inferredNotchWidth(
+        leftArea: CGRect(x: 0, y: 1291, width: 918, height: 38),
+        rightArea: CGRect(x: 1138, y: 1291, width: 918, height: 38),
+        fallback: IslandMetrics.notchWidth
+    ) == 220,
+    "notch width should be inferred from the gap between macOS auxiliary menu bar areas"
+)
+runner.check(
+    ScreenNotchGeometry.adjustedNotchWidth(base: 220, adjustment: 12) == 232,
+    "manual notch adjustment should be applied after system inference"
+)
+runner.check(
+    ScreenNotchGeometry.adjustedNotchWidth(base: 300, adjustment: 200) == IslandMetrics.maximumNotchWidth,
+    "manual notch adjustment should clamp to the supported maximum"
+)
+runner.check(
+    ScreenNotchGeometry.inferredNotchWidth(leftArea: .zero, rightArea: .zero, fallback: IslandMetrics.notchWidth) == IslandMetrics.notchWidth,
+    "notch width inference should fall back when auxiliary areas are unavailable"
+)
+runner.check(
+    IslandMetrics.detailObscuredTopHeight(safeAreaTop: 38) == 18,
+    "detail panel should know how much of its top overlaps the physical notch area"
+)
+runner.check(
+    IslandMetrics.quotaResetTopPadding(safeAreaTop: 38) >= 25,
+    "quota reset text should start below the overlapped physical notch area"
+)
+let tallNotchLayout = ScreenNotchGeometry.layout(
+    leftArea: CGRect(x: 0, y: 1291, width: 900, height: 60),
+    rightArea: CGRect(x: 1_120, y: 1291, width: 900, height: 60),
+    safeAreaTop: 60,
+    adjustment: 0
+)
+runner.check(tallNotchLayout.notchWidth == 220, "pure notch layout should infer width from auxiliary areas")
+runner.check(tallNotchLayout.collapsedHeight == 60, "notch layout should grow collapsed height for taller physical notches")
+runner.check(
+    IslandMetrics.detailObscuredTopHeight(safeAreaTop: 60, collapsedHeight: tallNotchLayout.collapsedHeight) == 18,
+    "taller collapsed islands should keep reset text below the physical notch without growing top content unnecessarily"
+)
+runner.check(
+    IslandMetrics.detailContentTopPadding(safeAreaTop: 60, collapsedHeight: tallNotchLayout.collapsedHeight) == IslandMetrics.detailTopPadding,
+    "detail content top padding should stay compact when the collapsed island height already accounts for the taller notch"
+)
+runner.check(
+    IslandMetrics.combinedDetailHeight(
+        accountRows: 4,
+        showsPeriodUsage: true,
+        usesTallRemoteRows: true,
+        topPadding: IslandMetrics.detailTopPadding
+    ) == IslandMetrics.remoteDetailHeight(accountRows: 4, usesTallRows: true, topPadding: IslandMetrics.detailTopPadding),
+    "shared detail height should preserve tall remote account rows"
 )
 
 final class FakeLaunchAtLoginManager: LaunchAtLoginManaging {
@@ -331,6 +436,7 @@ runner.check(settings.remoteCodexDataSource == .cpaManagerPlus, "remote Codex mo
 runner.check(settings.notchDisplaySource == .codex, "collapsed notch display should default to local Codex")
 settings.remoteCodexDataSource = .cliProxyAPI
 settings.notchDisplaySource = .remoteCodex
+settings.notchWidthAdjustment = 8
 settings.newAPIMonitorEnabled = true
 settings.newAPIPanelURL = "https://newapi.example.com"
 settings.newAPIUsername = "owner"
@@ -349,6 +455,11 @@ let reloadedSettings = CodexNotchSettings(
 )
 runner.check(reloadedSettings.remoteCodexDataSource == .cliProxyAPI, "remote Codex data source should persist")
 runner.check(reloadedSettings.notchDisplaySource == .remoteCodex, "collapsed notch display source should persist")
+runner.check(reloadedSettings.notchWidthAdjustment == 8, "manual notch width adjustment should persist")
+reloadedSettings.notchWidthAdjustment = 200
+runner.check(reloadedSettings.notchWidthAdjustment == 40, "manual notch width adjustment should clamp high values")
+reloadedSettings.notchWidthAdjustment = -200
+runner.check(reloadedSettings.notchWidthAdjustment == -40, "manual notch width adjustment should clamp low values")
 runner.check(reloadedSettings.newAPIMonitorEnabled, "NewAPI monitor enablement should persist")
 runner.check(reloadedSettings.newAPIPanelURL == "https://newapi.example.com", "NewAPI panel URL should persist")
 runner.check(reloadedSettings.newAPIUsername == "owner", "NewAPI username should persist")
@@ -1828,11 +1939,13 @@ let rolloutPath = sessionDirectory
     .appendingPathComponent("rollout-2026-06-14T02-20-00-\(sessionID).jsonl")
 let now = Date()
 let timestamp = ISO8601DateFormatter().string(from: now)
+let primaryResetAt = Int(now.timeIntervalSince1970) + 3_600
+let secondaryResetAt = Int(now.timeIntervalSince1970) + 3 * 24 * 60 * 60
 let rolloutBody = """
 {"timestamp":"\(timestamp)","type":"turn_context","payload":{"model":"gpt-5.5","effort":"xhigh","collaboration_mode":{"settings":{"reasoning_effort":"xhigh"}}}}
 {"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"正在运行的 Codex 任务"}]}}
 {"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":90000}}}}
-{"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":12345}}}}
+{"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":12345}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":12,"resets_at":\(primaryResetAt)},"secondary":{"used_percent":34,"resets_at":\(secondaryResetAt)}}}}
 """
 try rolloutBody.write(to: rolloutPath, atomically: true, encoding: .utf8)
 try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: rolloutPath.path)
@@ -2059,6 +2172,10 @@ runner.check(localSnapshot.tasks.first { $0.id == completedSessionID }?.status =
 runner.check(localSnapshot.tasks.first { $0.id == completedFinalAnswerSessionID }?.status == .recent, "fresh final_answer/task_complete rollout should not be treated as running")
 runner.check(localSnapshot.tasks.first { $0.id == completedLogFinalSessionID }?.status == .recent, "logs final-phase completion should clear stale running state")
 runner.check(localSnapshot.tasks.first { $0.id == dbBackedSessionID }?.tokenCount == 777, "recent rollout fallback should reuse database tokens even when the database updated_at is outside the task range")
+runner.check(localSnapshot.primaryPercent == 88, "local snapshot should expose the latest Codex 5h remaining quota")
+runner.check(localSnapshot.secondaryPercent == 66, "local snapshot should expose the latest Codex 7d remaining quota")
+runner.check(localSnapshot.primaryResetsAt == Date(timeIntervalSince1970: TimeInterval(primaryResetAt)), "local snapshot should expose the 5h reset time")
+runner.check(localSnapshot.secondaryResetsAt == Date(timeIntervalSince1970: TimeInterval(secondaryResetAt)), "local snapshot should expose the 7d reset time")
 let localWatchPaths = Set(localStore.rateLimitWatchPaths())
 let normalizedSessionDirectory = sessionDirectory.resolvingSymlinksInPath().path
 let normalizedRolloutPath = rolloutPath.resolvingSymlinksInPath().path

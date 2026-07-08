@@ -15,6 +15,8 @@ swift build -c release --build-path "${BUILD_DIR}/package-build"
 swiftc \
   -swift-version 6 \
   "${ROOT_DIR}/Sources/CodexNotch/Models.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/IslandMetrics.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/ScreenNotchGeometry.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/AppInfo.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/Formatters.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/SnapshotOutputFormatter.swift" \

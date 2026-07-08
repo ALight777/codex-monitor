@@ -199,7 +199,7 @@ final class NotchOverlayController {
             }
         )
         let detailHostingView = NSHostingView(rootView: detailView)
-        detailHostingView.frame = NSRect(x: 0, y: 0, width: IslandMetrics.width, height: currentDetailHeight)
+        detailHostingView.frame = NSRect(x: 0, y: 0, width: IslandMetrics.width, height: currentDetailHeight())
         detailHostingView.wantsLayer = true
         detailHostingView.layer?.backgroundColor = NSColor.clear.cgColor
         detailWindow.contentView = detailHostingView
@@ -236,6 +236,15 @@ final class NotchOverlayController {
                         }
                     }
                     self.updateFrames()
+                }
+            }
+            .store(in: &cancellables)
+
+        settings.$notchWidthAdjustment
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.updateFrames()
                 }
             }
             .store(in: &cancellables)
@@ -362,21 +371,26 @@ final class NotchOverlayController {
             return
         }
 
-        let detailHeight = currentDetailHeight
-        let x = screen.frame.midX - IslandMetrics.width / 2
-        let islandY = screen.frame.maxY - IslandMetrics.collapsedHeight
-        let islandFrame = NSRect(x: x, y: islandY, width: IslandMetrics.width, height: IslandMetrics.collapsedHeight)
+        let layout = currentIslandLayout(for: screen)
+        let detailHeight = currentDetailHeight(for: screen, layout: layout)
+        let x = screen.frame.midX - layout.width / 2
+        let islandY = screen.frame.maxY - layout.collapsedHeight
+        let islandFrame = NSRect(x: x, y: islandY, width: layout.width, height: layout.collapsedHeight)
         let detailFrame = NSRect(
             x: x,
             y: islandY - detailHeight + IslandMetrics.detailOverlap,
-            width: IslandMetrics.width,
+            width: layout.width,
             height: detailHeight
         )
 
         window.setFrame(islandFrame, display: true, animate: false)
-        window.contentView?.frame = NSRect(x: 0, y: 0, width: IslandMetrics.width, height: IslandMetrics.collapsedHeight)
+        window.contentView?.frame = NSRect(x: 0, y: 0, width: layout.width, height: layout.collapsedHeight)
         detailWindow.setFrame(detailFrame, display: true, animate: false)
-        detailWindow.contentView?.frame = NSRect(x: 0, y: 0, width: IslandMetrics.width, height: detailHeight)
+        detailWindow.contentView?.frame = NSRect(x: 0, y: 0, width: layout.width, height: detailHeight)
+    }
+
+    private func currentIslandLayout(for screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first) -> IslandLayout {
+        ScreenNotchGeometry.layout(for: screen, adjustment: CGFloat(settings.notchWidthAdjustment))
     }
 
     private func showSettings() {
@@ -399,10 +413,15 @@ final class NotchOverlayController {
         )
     }
 
-    private var currentDetailHeight: CGFloat {
-        let localHeight = IslandMetrics.detailHeight(
-            taskRows: IslandMetrics.visibleTaskRows,
-            showsPeriodUsage: settings.showPeriodUsage
+    private func currentDetailHeight(
+        for screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first,
+        layout: IslandLayout? = nil
+    ) -> CGFloat {
+        let layout = layout ?? currentIslandLayout(for: screen)
+        let safeAreaTop = ScreenNotchGeometry.topSafeInset(for: screen)
+        let topPadding = IslandMetrics.detailContentTopPadding(
+            safeAreaTop: safeAreaTop,
+            collapsedHeight: layout.collapsedHeight
         )
         let enabledExternalRows = [
             settings.remoteMonitorEnabled ? remoteViewModel.snapshot.accounts.count : nil,
@@ -410,11 +429,14 @@ final class NotchOverlayController {
             settings.subAPIMonitorEnabled ? subAPIViewModel.snapshot.accounts.count : nil
         ].compactMap { $0 }
 
-        guard !enabledExternalRows.isEmpty else {
-            return localHeight
-        }
-        let remoteRows = max(1, enabledExternalRows.max() ?? 1)
-        return max(localHeight, IslandMetrics.remoteDetailHeight(accountRows: remoteRows))
+        let accountRows = enabledExternalRows.isEmpty ? nil : max(1, enabledExternalRows.max() ?? 1)
+        let usesTallRemoteRows = remoteViewModel.snapshot.accounts.contains { $0.displayQuotaWindows.count > 2 }
+        return IslandMetrics.combinedDetailHeight(
+            accountRows: accountRows,
+            showsPeriodUsage: settings.showPeriodUsage,
+            usesTallRemoteRows: usesTallRemoteRows,
+            topPadding: topPadding
+        )
     }
 }
 

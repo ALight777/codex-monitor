@@ -40,6 +40,7 @@ final class CodexNotchSettings: ObservableObject {
         static let enablePulse = "enablePulse"
         static let taskHistoryRange = "taskHistoryRange"
         static let notchDisplaySource = "notchDisplaySource"
+        static let notchWidthAdjustment = "notchWidthAdjustment"
         static let remoteMonitorEnabled = "remoteMonitorEnabled"
         static let remoteCodexDataSource = "remoteCodexDataSource"
         static let cliproxyPanelURL = "cliproxyPanelURL"
@@ -133,6 +134,12 @@ final class CodexNotchSettings: ObservableObject {
     @Published var notchDisplaySource: NotchDisplaySource {
         didSet {
             defaults.set(notchDisplaySource.rawValue, forKey: Keys.notchDisplaySource)
+        }
+    }
+
+    @Published var notchWidthAdjustment: NotchPointAdjustment {
+        didSet {
+            normalizeNotchWidthAdjustment()
         }
     }
 
@@ -393,6 +400,11 @@ final class CodexNotchSettings: ObservableObject {
         self.enablePulse = defaults.object(forKey: Keys.enablePulse) as? Bool ?? true
         self.taskHistoryRange = TaskHistoryRange(rawValue: defaults.string(forKey: Keys.taskHistoryRange) ?? "") ?? .threeDays
         self.notchDisplaySource = NotchDisplaySource(rawValue: defaults.string(forKey: Keys.notchDisplaySource) ?? "") ?? .codex
+        self.notchWidthAdjustment = Self.clamped(
+            defaults.object(forKey: Keys.notchWidthAdjustment) as? NotchPointAdjustment ?? 0,
+            min: -NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit),
+            max: NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit)
+        )
         self.remoteMonitorEnabled = defaults.object(forKey: Keys.remoteMonitorEnabled) as? Bool ?? false
         self.remoteCodexDataSource = RemoteCodexDataSource(rawValue: defaults.string(forKey: Keys.remoteCodexDataSource) ?? "") ?? .cpaManagerPlus
         self.cliproxyPanelURL = defaults.string(forKey: Keys.cliproxyPanelURL) ?? ""
@@ -1197,6 +1209,18 @@ final class CodexNotchSettings: ObservableObject {
         )
         if subAPIRequestTimeout != value {
             subAPIRequestTimeout = value
+        }
+    }
+
+    private func normalizeNotchWidthAdjustment() {
+        let value = normalized(
+            notchWidthAdjustment,
+            min: -NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit),
+            max: NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit),
+            key: Keys.notchWidthAdjustment
+        )
+        if notchWidthAdjustment != value {
+            notchWidthAdjustment = value
         }
     }
 

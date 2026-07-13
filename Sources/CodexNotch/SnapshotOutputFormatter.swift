@@ -8,8 +8,11 @@ enum TaskBadgeFormatter {
 
 enum SnapshotOutputFormatter {
     static func humanLines(for snapshot: UsageSnapshot, taskLimit: Int = 4) -> [String] {
+        let quotaText = snapshot.displayRateLimitWindows
+            .map { "\($0.shortLabel)=\(Formatters.percent($0.remainingPercent))" }
+            .joined(separator: " ")
         var lines = [
-            "primary=\(Formatters.percent(snapshot.primaryPercent)) secondary=\(Formatters.percent(snapshot.secondaryPercent)) running=\(snapshot.isRunning)",
+            "quotas=\(quotaText.isEmpty ? "--" : quotaText) running=\(snapshot.isRunning)",
             "usage24h=\(snapshot.usage24h) usage7d=\(snapshot.usage7d) usage30d=\(snapshot.usage30d)"
         ]
 
@@ -28,6 +31,7 @@ enum SnapshotOutputFormatter {
         let payload = SnapshotJSON(
             primaryPercent: snapshot.primaryPercent,
             secondaryPercent: snapshot.secondaryPercent,
+            quotaWindows: snapshot.displayRateLimitWindows.map(SnapshotQuotaWindowJSON.init(window:)),
             running: snapshot.isRunning,
             usage24h: snapshot.usage24h,
             usage7d: snapshot.usage7d,
@@ -46,6 +50,7 @@ enum SnapshotOutputFormatter {
 private struct SnapshotJSON: Encodable {
     let primaryPercent: Int?
     let secondaryPercent: Int?
+    let quotaWindows: [SnapshotQuotaWindowJSON]
     let running: Bool
     let usage24h: Int
     let usage7d: Int
@@ -57,6 +62,7 @@ private struct SnapshotJSON: Encodable {
     enum CodingKeys: String, CodingKey {
         case primaryPercent = "primary_percent"
         case secondaryPercent = "secondary_percent"
+        case quotaWindows = "quota_windows"
         case running
         case usage24h = "usage_24h"
         case usage7d = "usage_7d"
@@ -64,6 +70,27 @@ private struct SnapshotJSON: Encodable {
         case lastUpdated = "last_updated"
         case error
         case tasks
+    }
+}
+
+private struct SnapshotQuotaWindowJSON: Encodable {
+    let id: String
+    let label: String
+    let remainingPercent: Int?
+    let resetsAt: String?
+
+    init(window: UsageQuotaWindow) {
+        id = window.id
+        label = window.shortLabel
+        remainingPercent = window.remainingPercent
+        resetsAt = window.resetsAt.map { ISO8601DateFormatter().string(from: $0) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case remainingPercent = "remaining_percent"
+        case resetsAt = "resets_at"
     }
 }
 

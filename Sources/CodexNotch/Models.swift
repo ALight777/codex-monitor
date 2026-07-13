@@ -43,6 +43,7 @@ struct UsageSnapshot: Equatable {
     var secondaryPercent: Int?
     var primaryResetsAt: Date? = nil
     var secondaryResetsAt: Date? = nil
+    var rateLimitWindows: [UsageQuotaWindow] = []
     var usage24h: Int
     var usage7d: Int
     var usage30d: Int
@@ -67,16 +68,77 @@ struct UsageSnapshot: Equatable {
 
     func stabilizedRateLimits(against previous: UsageSnapshot) -> UsageSnapshot {
         var copy = self
-        if copy.primaryPercent == nil {
+        if !copy.rateLimitWindows.isEmpty {
+            return copy
+        }
+
+        if previous.rateLimitWindows.isEmpty {
+            if copy.primaryPercent == nil {
+                copy.primaryPercent = previous.primaryPercent
+                copy.primaryResetsAt = previous.primaryResetsAt
+            }
+            if copy.secondaryPercent == nil {
+                copy.secondaryPercent = previous.secondaryPercent
+                copy.secondaryResetsAt = previous.secondaryResetsAt
+            }
+            return copy
+        }
+
+        if copy.primaryPercent == nil && copy.secondaryPercent == nil {
+            copy.rateLimitWindows = previous.rateLimitWindows
             copy.primaryPercent = previous.primaryPercent
             copy.primaryResetsAt = previous.primaryResetsAt
-        }
-        if copy.secondaryPercent == nil {
             copy.secondaryPercent = previous.secondaryPercent
             copy.secondaryResetsAt = previous.secondaryResetsAt
         }
         return copy
     }
+
+    var displayRateLimitWindows: [UsageQuotaWindow] {
+        if !rateLimitWindows.isEmpty {
+            return rateLimitWindows
+        }
+
+        var windows: [UsageQuotaWindow] = []
+        if primaryPercent != nil || primaryResetsAt != nil {
+            windows.append(
+                UsageQuotaWindow(
+                    id: "legacy-primary",
+                    shortLabel: "5h",
+                    remainingPercent: primaryPercent,
+                    resetsAt: primaryResetsAt
+                )
+            )
+        }
+        if secondaryPercent != nil || secondaryResetsAt != nil {
+            windows.append(
+                UsageQuotaWindow(
+                    id: "legacy-secondary",
+                    shortLabel: "7d",
+                    remainingPercent: secondaryPercent,
+                    resetsAt: secondaryResetsAt
+                )
+            )
+        }
+        if windows.isEmpty {
+            windows.append(
+                UsageQuotaWindow(
+                    id: "weekly-placeholder",
+                    shortLabel: "7d",
+                    remainingPercent: nil,
+                    resetsAt: nil
+                )
+            )
+        }
+        return windows
+    }
+}
+
+struct UsageQuotaWindow: Equatable, Identifiable {
+    let id: String
+    let shortLabel: String
+    let remainingPercent: Int?
+    let resetsAt: Date?
 }
 
 struct PeriodUsage: Equatable, Sendable {
@@ -406,6 +468,7 @@ struct RateLimitSnapshot: Equatable {
     let secondaryResetsAt: Int?
     let capturedAt: Date?
     let isPrimaryCodexLimit: Bool
+    var windows: [UsageQuotaWindow] = []
 
     var primaryResetDate: Date? {
         resetDate(from: primaryResetsAt)
@@ -431,8 +494,30 @@ struct RateLimitSnapshot: Equatable {
         displayResetDate(secondaryResetsAt, now: now)
     }
 
+    func displayWindows(now: Date = Date()) -> [UsageQuotaWindow] {
+        let source = windows.isEmpty ? legacyWindows() : windows
+        return source.map { window in
+            UsageQuotaWindow(
+                id: window.id,
+                shortLabel: window.shortLabel,
+                remainingPercent: displayPercent(window.remainingPercent, resetsAt: window.resetsAt, now: now),
+                resetsAt: displayResetDate(window.resetsAt, now: now)
+            )
+        }
+    }
+
     private func displayPercent(_ percent: Int?, resetsAt: Int?, now: Date) -> Int? {
         if let resetsAt, Int(now.timeIntervalSince1970) >= resetsAt {
+            return 100
+        }
+        if let percent, percent >= 99 {
+            return 100
+        }
+        return percent
+    }
+
+    private func displayPercent(_ percent: Int?, resetsAt: Date?, now: Date) -> Int? {
+        if let resetsAt, now >= resetsAt {
             return 100
         }
         if let percent, percent >= 99 {
@@ -454,5 +539,37 @@ struct RateLimitSnapshot: Equatable {
             return nil
         }
         return Date(timeIntervalSince1970: TimeInterval(timestamp))
+    }
+
+    private func displayResetDate(_ date: Date?, now: Date) -> Date? {
+        guard let date, now < date else {
+            return nil
+        }
+        return date
+    }
+
+    private func legacyWindows() -> [UsageQuotaWindow] {
+        var result: [UsageQuotaWindow] = []
+        if primaryPercent != nil || primaryResetsAt != nil {
+            result.append(
+                UsageQuotaWindow(
+                    id: "legacy-primary",
+                    shortLabel: "5h",
+                    remainingPercent: primaryPercent,
+                    resetsAt: primaryResetDate
+                )
+            )
+        }
+        if secondaryPercent != nil || secondaryResetsAt != nil {
+            result.append(
+                UsageQuotaWindow(
+                    id: "legacy-secondary",
+                    shortLabel: "7d",
+                    remainingPercent: secondaryPercent,
+                    resetsAt: secondaryResetDate
+                )
+            )
+        }
+        return result
     }
 }

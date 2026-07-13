@@ -220,20 +220,14 @@ struct NotchIslandView: View {
     private var collapsedMetrics: [CollapsedMetric] {
         switch effectiveDisplaySource {
         case .automatic, .codex:
-            return [
+            return snapshot.displayRateLimitWindows.map { window in
                 CollapsedMetric(
-                    id: "5h",
-                    label: "5h",
-                    value: Formatters.percent(snapshot.primaryPercent),
-                    color: Color(red: 0.61, green: 0.95, blue: 0.68)
-                ),
-                CollapsedMetric(
-                    id: "7d",
-                    label: "7d",
-                    value: Formatters.percent(snapshot.secondaryPercent),
-                    color: Color(red: 0.50, green: 0.78, blue: 1.00)
+                    id: window.id,
+                    label: window.shortLabel,
+                    value: Formatters.percent(window.remainingPercent),
+                    color: quotaColor(for: window.shortLabel)
                 )
-            ]
+            }
         case .remoteCodex:
             let remote = remoteViewModel.snapshot
             return [
@@ -252,6 +246,12 @@ struct NotchIslandView: View {
             CollapsedMetric(id: "\(snapshot.source.rawValue)-accounts", label: "账", value: "\(snapshot.accounts.count)", color: Color(red: 0.61, green: 0.95, blue: 0.68)),
             CollapsedMetric(id: "\(snapshot.source.rawValue)-amount", label: "余", value: snapshot.totalAmountText, color: Color(red: 0.50, green: 0.78, blue: 1.00))
         ]
+    }
+
+    private func quotaColor(for label: String) -> Color {
+        label == "5h"
+            ? Color(red: 0.61, green: 0.95, blue: 0.68)
+            : Color(red: 0.50, green: 0.78, blue: 1.00)
     }
 }
 
@@ -557,16 +557,13 @@ struct DetailPanelView: View {
     private var quotaResetStrip: some View {
         if selectedPage == .codex {
             HStack(spacing: 12) {
-                quotaResetItem(
-                    label: "5h",
-                    date: snapshot.primaryResetsAt,
-                    color: Color(red: 0.61, green: 0.95, blue: 0.68)
-                )
-                quotaResetItem(
-                    label: "7d",
-                    date: snapshot.secondaryResetsAt,
-                    color: Color(red: 0.50, green: 0.78, blue: 1.00)
-                )
+                ForEach(snapshot.displayRateLimitWindows) { window in
+                    quotaResetItem(
+                        label: window.shortLabel,
+                        date: window.resetsAt,
+                        color: quotaColor(for: window.shortLabel)
+                    )
+                }
             }
             .padding(
                 .top,
@@ -593,6 +590,12 @@ struct DetailPanelView: View {
         .font(.system(size: 8.8, weight: .bold, design: .rounded))
         .lineLimit(1)
         .minimumScaleFactor(0.76)
+    }
+
+    private func quotaColor(for label: String) -> Color {
+        label == "5h"
+            ? Color(red: 0.61, green: 0.95, blue: 0.68)
+            : Color(red: 0.50, green: 0.78, blue: 1.00)
     }
 
     private func refreshCurrentPage() {

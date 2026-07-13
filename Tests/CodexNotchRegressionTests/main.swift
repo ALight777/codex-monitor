@@ -24,8 +24,8 @@ final class TestRunner {
 
 let runner = TestRunner()
 
-runner.check(AppInfo.version == "0.1.4", "app info should expose version 0.1.4")
-runner.check(AppInfo.displayVersion == "0.1.4", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.1.5", "app info should expose version 0.1.5")
+runner.check(AppInfo.displayVersion == "0.1.5", "app info should fall back to source version when bundle version is unavailable")
 
 let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",
@@ -115,6 +115,29 @@ let expiredRateLimitSnapshot = RateLimitSnapshot(
 runner.check(expiredRateLimitSnapshot.primaryDisplayPercent(now: rateLimitNow) == 100, "expired 5h quota should display as restored")
 runner.check(expiredRateLimitSnapshot.primaryDisplayResetDate(now: rateLimitNow) == nil, "expired 5h reset time should be hidden")
 runner.check(expiredRateLimitSnapshot.secondaryDisplayResetDate(now: rateLimitNow) == Date(timeIntervalSince1970: 2_500), "future 7d reset time should be preserved")
+let weeklyOnlyQuotaWindow = UsageQuotaWindow(
+    id: "codex-weekly",
+    shortLabel: "7d",
+    remainingPercent: 93,
+    resetsAt: Date(timeIntervalSince1970: 1784488110)
+)
+let weeklyOnlyRateLimitSnapshot = UsageSnapshot(
+    primaryPercent: nil,
+    secondaryPercent: 93,
+    primaryResetsAt: nil,
+    secondaryResetsAt: Date(timeIntervalSince1970: 1784488110),
+    rateLimitWindows: [weeklyOnlyQuotaWindow],
+    usage24h: 4,
+    usage7d: 5,
+    usage30d: 6,
+    tasks: [],
+    isRunning: false,
+    lastUpdated: Date(timeIntervalSince1970: 1_200),
+    errorMessage: nil
+)
+let stabilizedWeeklyOnlySnapshot = weeklyOnlyRateLimitSnapshot.stabilizedRateLimits(against: previousRateLimitSnapshot)
+runner.check(stabilizedWeeklyOnlySnapshot.primaryPercent == nil, "weekly-only Codex quota should not preserve stale 5h percent")
+runner.check(stabilizedWeeklyOnlySnapshot.displayRateLimitWindows.map(\.shortLabel) == ["7d"], "weekly-only Codex quota should only display the weekly window")
 var fixedCalendar = Calendar(identifier: .gregorian)
 fixedCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
 let formatterNow = fixedCalendar.date(from: DateComponents(year: 2030, month: 1, day: 1, hour: 23, minute: 0))!

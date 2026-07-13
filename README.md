@@ -30,8 +30,8 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 可显示：
 
 - Codex 是否正在执行任务。
-- 5 小时和 7 天额度剩余百分比。
-- 5 小时和 7 天额度刷新时间。
+- Codex 当前可用额度窗口的剩余百分比，例如新版 Codex 的周限额。
+- 对应额度窗口的刷新时间。
 - 正在运行和最近活动的对话列表。
 - 当前活跃任务的活跃子代理数量。
 - 每个对话的 token 用量，包含该对话下的子代理用量。
@@ -134,8 +134,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.4-arm64.dmg
-dist/codex-monitor-0.1.4-amd64.dmg
+dist/codex-monitor-0.1.5-arm64.dmg
+dist/codex-monitor-0.1.5-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -231,8 +231,8 @@ The Codex tab monitors the Codex installation on the current Mac.
 It can show:
 
 - Whether Codex is currently running a task.
-- Remaining 5-hour and 7-day quota percentages.
-- 5-hour and 7-day quota refresh times.
+- Remaining percentages for currently available Codex quota windows, such as the weekly quota in newer Codex builds.
+- Refresh times for the displayed quota windows.
 - Running and recent conversations.
 - Active subagent count for currently running tasks.
 - Token usage per conversation, including subagent usage under the same conversation.
@@ -335,8 +335,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.4-arm64.dmg
-dist/codex-monitor-0.1.4-amd64.dmg
+dist/codex-monitor-0.1.5-arm64.dmg
+dist/codex-monitor-0.1.5-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

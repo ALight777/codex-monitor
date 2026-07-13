@@ -17,6 +17,9 @@ mkdir -p "$INSTALL_DIR"
 rm -rf "$TARGET_APP"
 ditto "$SOURCE_APP" "$TARGET_APP"
 xattr -dr com.apple.quarantine "$TARGET_APP" 2>/dev/null || true
-open "$TARGET_APP"
+if ! open "$TARGET_APP"; then
+  sleep 1
+  open "$TARGET_APP"
+fi
 
 echo "Installed $TARGET_APP"

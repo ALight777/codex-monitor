@@ -26,7 +26,7 @@ final class CodexUsageStore: @unchecked Sendable {
     private let stateDatabase: String
     private let logsDatabase: String
     private let sessionIndexPath: String
-    private let appServerExecutable = "/Applications/Codex.app/Contents/Resources/codex"
+    private let appServerExecutable: String?
     private let ripgrepCandidates: [String]
     private let sessionDecoder = CodexSessionEventDecoder()
     private let tokenPattern = /tool_token_count=([0-9]+)/
@@ -45,10 +45,12 @@ final class CodexUsageStore: @unchecked Sendable {
 
     init(
         codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"),
-        ripgrepCandidates: [String] = UsageScanPolicy.ripgrepCandidates
+        ripgrepCandidates: [String] = UsageScanPolicy.ripgrepCandidates,
+        appServerExecutable: String? = nil
     ) {
         self.codexDirectory = codexDirectory
         self.ripgrepCandidates = ripgrepCandidates
+        self.appServerExecutable = appServerExecutable ?? Self.resolveAppServerExecutable()
         self.stateDatabase = Self.latestSQLiteDatabase(
             in: codexDirectory,
             prefix: "state_",
@@ -87,6 +89,27 @@ final class CodexUsageStore: @unchecked Sendable {
         }
 
         return candidates.max { $0.version < $1.version }?.path ?? fallbackPath
+    }
+
+    private static func resolveAppServerExecutable() -> String? {
+        let knownPaths = [
+            "/Applications/Codex.app/Contents/Resources/codex",
+            "/Applications/ChatGPT.app/Contents/Resources/codex"
+        ]
+        if let existing = knownPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return existing
+        }
+
+        let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        for directory in pathEntries {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("codex").path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     func loadSnapshot(
@@ -154,6 +177,7 @@ final class CodexUsageStore: @unchecked Sendable {
                 secondaryPercent: rateLimits.secondaryDisplayPercent(now: now),
                 primaryResetsAt: rateLimits.primaryDisplayResetDate(now: now),
                 secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
+                rateLimitWindows: rateLimits.displayWindows(now: now),
                 usage24h: usage.day,
                 usage7d: usage.week,
                 usage30d: usage.month,
@@ -252,6 +276,7 @@ final class CodexUsageStore: @unchecked Sendable {
             secondaryPercent: cache.rateLimits.secondaryDisplayPercent(now: now),
             primaryResetsAt: cache.rateLimits.primaryDisplayResetDate(now: now),
             secondaryResetsAt: cache.rateLimits.secondaryDisplayResetDate(now: now),
+            rateLimitWindows: cache.rateLimits.displayWindows(now: now),
             usage24h: usage.day,
             usage7d: usage.week,
             usage30d: usage.month,
@@ -1719,12 +1744,13 @@ final class CodexUsageStore: @unchecked Sendable {
             }
         }
 
-        guard FileManager.default.fileExists(atPath: appServerExecutable) else {
+        guard let appServerExecutable,
+              FileManager.default.fileExists(atPath: appServerExecutable) else {
             cacheAppServerRateLimits(.failure, now: now)
             return nil
         }
 
-        let output = try? Shell.run("/bin/zsh", ["-lc", appServerRateLimitScript()], timeout: 4)
+        let output = try? Shell.run("/bin/zsh", ["-lc", appServerRateLimitScript(executable: appServerExecutable)], timeout: 4)
         guard let output,
               let snapshot = parseAppServerRateLimits(output: output, now: now) else {
             cacheAppServerRateLimits(.failure, now: now)
@@ -1741,7 +1767,7 @@ final class CodexUsageStore: @unchecked Sendable {
         cacheLock.unlock()
     }
 
-    private func appServerRateLimitScript() -> String {
+    private func appServerRateLimitScript(executable: String) -> String {
         let initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"codex-notch\",\"version\":\"\(AppInfo.version)\"},\"capabilities\":{\"experimentalApi\":true}}}"
         let initialized = #"{"jsonrpc":"2.0","method":"initialized"}"#
         let readRateLimits = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":null}"#
@@ -1750,7 +1776,7 @@ final class CodexUsageStore: @unchecked Sendable {
         {
           printf '%s\\n' '\(initialize)' '\(initialized)' '\(readRateLimits)'
           sleep 2.2
-        } | '\(appServerExecutable)' app-server --stdio
+        } | '\(executable)' app-server --stdio
         """
     }
 
@@ -1768,13 +1794,22 @@ final class CodexUsageStore: @unchecked Sendable {
                 continue
             }
 
+            let windows = rateLimitWindows(
+                primary: rateLimitWindow(
+                    snapshot.primary,
+                    fallbackID: "primary",
+                    fallbackLabel: snapshot.secondary == nil ? "7d" : "5h"
+                ),
+                secondary: rateLimitWindow(snapshot.secondary, fallbackID: "secondary", fallbackLabel: "7d")
+            )
             return RateLimitSnapshot(
-                primaryPercent: remainingPercent(fromUsedPercent: snapshot.primary?.usedPercent),
-                secondaryPercent: remainingPercent(fromUsedPercent: snapshot.secondary?.usedPercent),
-                primaryResetsAt: snapshot.primary?.resetsAt,
-                secondaryResetsAt: snapshot.secondary?.resetsAt,
+                primaryPercent: percent(for: "5h", in: windows),
+                secondaryPercent: percent(for: "7d", in: windows),
+                primaryResetsAt: resetTimestamp(for: "5h", in: windows),
+                secondaryResetsAt: resetTimestamp(for: "7d", in: windows),
                 capturedAt: now,
-                isPrimaryCodexLimit: true
+                isPrimaryCodexLimit: true,
+                windows: windows
             )
         }
 
@@ -1802,24 +1837,147 @@ final class CodexUsageStore: @unchecked Sendable {
             let limitID = rateLimits["limit_id"] as? String
             let primary = rateLimits["primary"] as? [String: Any]
             let secondary = rateLimits["secondary"] as? [String: Any]
-            let primaryPercent = remainingPercent(fromUsedPercent: primary?["used_percent"])
-            let secondaryPercent = remainingPercent(fromUsedPercent: secondary?["used_percent"])
-            let primaryResetsAt = intValue(primary?["resets_at"])
-            let secondaryResetsAt = intValue(secondary?["resets_at"])
+            let windows = rateLimitWindows(
+                primary: rateLimitWindow(
+                    primary,
+                    fallbackID: "primary",
+                    fallbackLabel: secondary == nil ? "7d" : "5h"
+                ),
+                secondary: rateLimitWindow(secondary, fallbackID: "secondary", fallbackLabel: "7d")
+            )
+            let primaryPercent = percent(for: "5h", in: windows)
+            let secondaryPercent = percent(for: "7d", in: windows)
+            let primaryResetsAt = resetTimestamp(for: "5h", in: windows)
+            let secondaryResetsAt = resetTimestamp(for: "7d", in: windows)
 
-            if primaryPercent != nil || secondaryPercent != nil {
+            if primaryPercent != nil || secondaryPercent != nil || !windows.isEmpty {
                 return RateLimitSnapshot(
                     primaryPercent: primaryPercent,
                     secondaryPercent: secondaryPercent,
                     primaryResetsAt: primaryResetsAt,
                     secondaryResetsAt: secondaryResetsAt,
                     capturedAt: capturedAt,
-                    isPrimaryCodexLimit: limitID == "codex"
+                    isPrimaryCodexLimit: limitID == "codex",
+                    windows: windows
                 )
             }
         }
 
         return nil
+    }
+
+    private func rateLimitWindow(
+        _ window: AppServerRateLimitWindow?,
+        fallbackID: String,
+        fallbackLabel: String
+    ) -> UsageQuotaWindow? {
+        guard let window else {
+            return nil
+        }
+        return makeRateLimitWindow(
+            usedPercent: window.usedPercent,
+            resetsAt: window.resetsAt,
+            durationMinutes: window.windowDurationMins,
+            fallbackID: fallbackID,
+            fallbackLabel: fallbackLabel
+        )
+    }
+
+    private func rateLimitWindow(
+        _ window: [String: Any]?,
+        fallbackID: String,
+        fallbackLabel: String
+    ) -> UsageQuotaWindow? {
+        guard let window else {
+            return nil
+        }
+        return makeRateLimitWindow(
+            usedPercent: intValue(window["used_percent"] ?? window["usedPercent"]),
+            resetsAt: intValue(window["resets_at"] ?? window["resetsAt"]),
+            durationMinutes: intValue(
+                window["window_duration_mins"]
+                    ?? window["windowDurationMins"]
+                    ?? window["window_minutes"]
+                    ?? window["windowMinutes"]
+                    ?? window["limit_window_minutes"]
+                    ?? window["limitWindowMinutes"]
+            ),
+            fallbackID: fallbackID,
+            fallbackLabel: fallbackLabel
+        )
+    }
+
+    private func makeRateLimitWindow(
+        usedPercent: Int?,
+        resetsAt: Int?,
+        durationMinutes: Int?,
+        fallbackID: String,
+        fallbackLabel: String
+    ) -> UsageQuotaWindow? {
+        guard usedPercent != nil || resetsAt != nil || durationMinutes != nil else {
+            return nil
+        }
+
+        let label = rateLimitLabel(durationMinutes: durationMinutes) ?? fallbackLabel
+        return UsageQuotaWindow(
+            id: "\(fallbackID)-\(label)",
+            shortLabel: label,
+            remainingPercent: remainingPercent(fromUsedPercent: usedPercent),
+            resetsAt: resetsAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        )
+    }
+
+    private func rateLimitWindows(
+        primary: UsageQuotaWindow?,
+        secondary: UsageQuotaWindow?
+    ) -> [UsageQuotaWindow] {
+        [primary, secondary]
+            .compactMap { $0 }
+            .sorted { lhs, rhs in
+                rateLimitSortOrder(lhs.shortLabel) < rateLimitSortOrder(rhs.shortLabel)
+            }
+    }
+
+    private func rateLimitLabel(durationMinutes: Int?) -> String? {
+        guard let durationMinutes else {
+            return nil
+        }
+        switch durationMinutes {
+        case 300:
+            return "5h"
+        case 10_080:
+            return "7d"
+        default:
+            if durationMinutes % 1_440 == 0 {
+                return "\(durationMinutes / 1_440)d"
+            }
+            if durationMinutes % 60 == 0 {
+                return "\(durationMinutes / 60)h"
+            }
+            return "\(durationMinutes)m"
+        }
+    }
+
+    private func rateLimitSortOrder(_ label: String) -> Int {
+        switch label {
+        case "5h":
+            return 0
+        case "7d":
+            return 1
+        default:
+            return 2
+        }
+    }
+
+    private func percent(for label: String, in windows: [UsageQuotaWindow]) -> Int? {
+        windows.first { $0.shortLabel == label }?.remainingPercent
+    }
+
+    private func resetTimestamp(for label: String, in windows: [UsageQuotaWindow]) -> Int? {
+        guard let date = windows.first(where: { $0.shortLabel == label })?.resetsAt else {
+            return nil
+        }
+        return Int(date.timeIntervalSince1970)
     }
 
     private func extractTokenCount(from text: String) -> Int? {
@@ -1922,6 +2080,9 @@ final class CodexUsageStore: @unchecked Sendable {
         if let int = value as? Int {
             return int
         }
+        if let string = value as? String {
+            return Int(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
         if let double = value as? Double {
             return Int(double.rounded())
         }
@@ -2016,8 +2177,48 @@ private struct AppServerRateLimitSnapshot: Decodable {
 }
 
 private struct AppServerRateLimitWindow: Decodable {
-    let usedPercent: Int
+    let usedPercent: Int?
     let resetsAt: Int?
+    let windowDurationMins: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case usedPercent
+        case usedPercentSnake = "used_percent"
+        case resetsAt
+        case resetsAtSnake = "resets_at"
+        case windowDurationMins
+        case windowDurationMinsSnake = "window_duration_mins"
+        case windowMinutes = "window_minutes"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        usedPercent = try Self.decodeInt(from: container, keys: [.usedPercent, .usedPercentSnake])
+        resetsAt = try Self.decodeInt(from: container, keys: [.resetsAt, .resetsAtSnake])
+        windowDurationMins = try Self.decodeInt(
+            from: container,
+            keys: [.windowDurationMins, .windowDurationMinsSnake, .windowMinutes]
+        )
+    }
+
+    private static func decodeInt(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        keys: [CodingKeys]
+    ) throws -> Int? {
+        for key in keys {
+            if let int = try? container.decodeIfPresent(Int.self, forKey: key) {
+                return int
+            }
+            if let double = try? container.decodeIfPresent(Double.self, forKey: key) {
+                return Int(double.rounded())
+            }
+            if let string = try? container.decodeIfPresent(String.self, forKey: key),
+               let int = Int(string.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return int
+            }
+        }
+        return nil
+    }
 }
 
 private struct StoreSignature: Equatable {

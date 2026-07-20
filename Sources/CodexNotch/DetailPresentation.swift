@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 enum DetailPresentationPhase: Equatable {
     case hidden
@@ -39,6 +40,39 @@ struct DetailTransitionState {
         }
         phase = .hidden
         return true
+    }
+}
+
+struct DetailWindowFrames: Equatable {
+    let collapsed: CGRect
+    let expanded: CGRect
+}
+
+enum DetailWindowFrameCalculator {
+    static func calculate(
+        screenFrame: CGRect,
+        layoutWidth: CGFloat,
+        collapsedHeight: CGFloat,
+        detailHeight: CGFloat,
+        overlap: CGFloat
+    ) -> DetailWindowFrames {
+        let maxY = screenFrame.maxY - collapsedHeight + overlap
+        let x = screenFrame.midX - layoutWidth / 2
+
+        return DetailWindowFrames(
+            collapsed: CGRect(
+                x: x,
+                y: maxY - overlap,
+                width: layoutWidth,
+                height: overlap
+            ),
+            expanded: CGRect(
+                x: x,
+                y: maxY - detailHeight,
+                width: layoutWidth,
+                height: detailHeight
+            )
+        )
     }
 }
 

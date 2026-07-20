@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import QuartzCore
 import SwiftUI
 
 @main
@@ -82,6 +83,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+private final class TopAnchoredClippingView: NSView {
+    private let hostedView: NSView
+    private var targetContentSize: NSSize
+
+    init(hostedView: NSView, contentSize: NSSize) {
+        self.hostedView = hostedView
+        targetContentSize = contentSize
+        super.init(frame: NSRect(origin: .zero, size: contentSize))
+
+        wantsLayer = true
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        hostedView.autoresizingMask = []
+        addSubview(hostedView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func updateContentSize(_ size: NSSize) {
+        targetContentSize = size
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+    }
+
+    override func layout() {
+        super.layout()
+        hostedView.frame = NSRect(
+            x: bounds.minX,
+            y: bounds.maxY - targetContentSize.height,
+            width: targetContentSize.width,
+            height: targetContentSize.height
+        )
+    }
+}
+
 @MainActor
 final class NotchOverlayController {
     private let settings = CodexNotchSettings(loadSecretsSynchronously: false)
@@ -92,6 +131,7 @@ final class NotchOverlayController {
     private let overlayState = OverlayState()
     private let window: NSPanel
     private let detailWindow: NSPanel
+    private var detailContentContainer: TopAnchoredClippingView?
     private lazy var settingsController = SettingsWindowController(
         settings: settings,
         remoteViewModel: remoteViewModel,
@@ -103,6 +143,11 @@ final class NotchOverlayController {
     )
     private var cancellables: Set<AnyCancellable> = []
     private var eventMonitors: [Any] = []
+    private var detailTransition = DetailTransitionState()
+    private var pendingDetailWorkItems: [DispatchWorkItem] = []
+    private var latestDetailExpandedFrame: NSRect?
+
+    private static let detailSettleDuration: TimeInterval = 0.12
 
     init() {
         window = NSPanel(
@@ -123,7 +168,7 @@ final class NotchOverlayController {
         observeState()
         observeScreenChanges()
         installEventMonitors()
-        updateFrames()
+        synchronizeFramesForGeometryChange()
     }
 
     func show() {
@@ -181,6 +226,7 @@ final class NotchOverlayController {
             remoteViewModel: remoteViewModel,
             newAPIViewModel: newAPIViewModel,
             subAPIViewModel: subAPIViewModel,
+            overlayState: overlayState,
             settings: settings,
             onSettings: { [weak self] in
                 self?.showSettings()
@@ -199,10 +245,16 @@ final class NotchOverlayController {
             }
         )
         let detailHostingView = NSHostingView(rootView: detailView)
-        detailHostingView.frame = NSRect(x: 0, y: 0, width: IslandMetrics.width, height: currentDetailHeight())
+        let detailContentSize = NSSize(width: IslandMetrics.width, height: currentDetailHeight())
+        detailHostingView.frame = NSRect(origin: .zero, size: detailContentSize)
         detailHostingView.wantsLayer = true
         detailHostingView.layer?.backgroundColor = NSColor.clear.cgColor
-        detailWindow.contentView = detailHostingView
+        let detailContentContainer = TopAnchoredClippingView(
+            hostedView: detailHostingView,
+            contentSize: detailContentSize
+        )
+        self.detailContentContainer = detailContentContainer
+        detailWindow.contentView = detailContentContainer
     }
 
     private func observeState() {
@@ -244,7 +296,7 @@ final class NotchOverlayController {
             .removeDuplicates()
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.updateFrames()
+                    self?.synchronizeFramesForGeometryChange()
                 }
             }
             .store(in: &cancellables)
@@ -288,7 +340,7 @@ final class NotchOverlayController {
                 guard let self else {
                     return
                 }
-                self.updateFrames()
+                self.synchronizeFramesForGeometryChange()
             }
             .store(in: &cancellables)
     }
@@ -341,17 +393,167 @@ final class NotchOverlayController {
     }
 
     private func setDetailVisible(_ visible: Bool) {
-        updateFrames()
-        if visible {
-            if window.childWindows?.contains(detailWindow) != true {
-                window.addChildWindow(detailWindow, ordered: .below)
-            }
-            detailWindow.order(.below, relativeTo: window.windowNumber)
-            window.orderFrontRegardless()
-        } else {
-            window.removeChildWindow(detailWindow)
-            detailWindow.orderOut(nil)
+        cancelPendingDetailWorkItems()
+
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+            return
         }
+
+        let previousPhase = detailTransition.phase
+        let generation = detailTransition.begin(expanded: visible)
+        if visible {
+            showDetail(on: screen, previousPhase: previousPhase, generation: generation)
+        } else {
+            hideDetail(on: screen, generation: generation)
+        }
+    }
+
+    private func showDetail(
+        on screen: NSScreen,
+        previousPhase: DetailPresentationPhase,
+        generation: UInt
+    ) {
+        let frames = detailFrames(for: screen)
+        latestDetailExpandedFrame = frames.expanded
+        if previousPhase == .hidden || !detailWindow.isVisible {
+            updateDetailContentSize(for: frames.expanded)
+        }
+        overlayState.setDetailPresentationPhase(.revealing)
+
+        if window.childWindows?.contains(detailWindow) != true {
+            window.addChildWindow(detailWindow, ordered: .below)
+        }
+        if previousPhase == .hidden || !detailWindow.isVisible {
+            detailWindow.setFrame(frames.collapsed, display: false)
+        }
+        detailWindow.order(.below, relativeTo: window.windowNumber)
+        window.orderFrontRegardless()
+
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            detailWindow.setFrame(frames.expanded, display: true)
+            guard detailTransition.completeShow(generation: generation) else {
+                return
+            }
+            overlayState.setDetailPresentationPhase(.visible)
+            updateFrames()
+            return
+        }
+
+        scheduleDetailWork(after: DetailAnimationTiming.contentDelay, generation: generation) { [weak self] in
+            self?.overlayState.setDetailPresentationPhase(.visible)
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = DetailAnimationTiming.revealDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            detailWindow.animator().setFrame(frames.expanded, display: true)
+        } completionHandler: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.detailTransition.isCurrent(generation) else {
+                    return
+                }
+                self.settleDetailAfterReveal(
+                    generation: generation,
+                    currentTarget: frames.expanded
+                )
+            }
+        }
+    }
+
+    private func hideDetail(on screen: NSScreen, generation: UInt) {
+        overlayState.setDetailPresentationPhase(.hiding)
+        let frames = detailFrames(for: screen)
+        latestDetailExpandedFrame = frames.expanded
+
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            detailWindow.setFrame(frames.collapsed, display: false)
+            guard detailTransition.completeHide(generation: generation) else {
+                return
+            }
+            finishHidingDetail()
+            return
+        }
+
+        scheduleDetailWork(after: DetailAnimationTiming.hideShellDelay, generation: generation) { [weak self] in
+            guard let self else {
+                return
+            }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = DetailAnimationTiming.hideDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                self.detailWindow.animator().setFrame(frames.collapsed, display: true)
+            } completionHandler: { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.detailTransition.completeHide(generation: generation) else {
+                        return
+                    }
+                    self.finishHidingDetail()
+                }
+            }
+        }
+    }
+
+    private func settleDetailAfterReveal(generation: UInt, currentTarget: NSRect) {
+        guard detailTransition.isCurrent(generation), detailTransition.phase == .revealing else {
+            return
+        }
+
+        let latestTarget = latestDetailExpandedFrame ?? currentTarget
+        guard latestTarget != currentTarget else {
+            updateDetailContentSize(for: latestTarget)
+            guard detailTransition.completeShow(generation: generation) else {
+                return
+            }
+            overlayState.setDetailPresentationPhase(.visible)
+            return
+        }
+
+        updateDetailContentSize(for: latestTarget)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.detailSettleDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            detailWindow.animator().setFrame(latestTarget, display: true)
+        } completionHandler: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.detailTransition.isCurrent(generation) else {
+                    return
+                }
+                self.settleDetailAfterReveal(
+                    generation: generation,
+                    currentTarget: latestTarget
+                )
+            }
+        }
+    }
+
+    private func finishHidingDetail() {
+        overlayState.setDetailPresentationPhase(.hidden)
+        window.removeChildWindow(detailWindow)
+        detailWindow.orderOut(nil)
+        updateFrames()
+    }
+
+    private func scheduleDetailWork(
+        after delay: TimeInterval,
+        generation: UInt,
+        action: @escaping @MainActor () -> Void
+    ) {
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                guard let self,
+                      self.detailTransition.isCurrent(generation) else {
+                    return
+                }
+                action()
+            }
+        }
+        pendingDetailWorkItems.append(workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func cancelPendingDetailWorkItems() {
+        pendingDetailWorkItems.forEach { $0.cancel() }
+        pendingDetailWorkItems.removeAll()
     }
 
     private func restorePanelOrdering() {
@@ -372,21 +574,86 @@ final class NotchOverlayController {
         }
 
         let layout = currentIslandLayout(for: screen)
-        let detailHeight = currentDetailHeight(for: screen, layout: layout)
         let x = screen.frame.midX - layout.width / 2
         let islandY = screen.frame.maxY - layout.collapsedHeight
         let islandFrame = NSRect(x: x, y: islandY, width: layout.width, height: layout.collapsedHeight)
-        let detailFrame = NSRect(
-            x: x,
-            y: islandY - detailHeight + IslandMetrics.detailOverlap,
-            width: layout.width,
-            height: detailHeight
-        )
+        let detailFrames = detailFrames(for: screen, layout: layout)
 
         window.setFrame(islandFrame, display: true, animate: false)
         window.contentView?.frame = NSRect(x: 0, y: 0, width: layout.width, height: layout.collapsedHeight)
-        detailWindow.setFrame(detailFrame, display: true, animate: false)
-        detailWindow.contentView?.frame = NSRect(x: 0, y: 0, width: layout.width, height: detailHeight)
+        latestDetailExpandedFrame = detailFrames.expanded
+        switch detailTransition.phase {
+        case .hidden:
+            updateDetailContentSize(for: detailFrames.expanded)
+            detailWindow.setFrame(detailFrames.collapsed, display: false)
+        case .visible:
+            updateDetailContentSize(for: detailFrames.expanded)
+            detailWindow.setFrame(detailFrames.expanded, display: true)
+        case .revealing, .hiding:
+            break
+        }
+    }
+
+    private func synchronizeFramesForGeometryChange() {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+            return
+        }
+
+        cancelPendingDetailWorkItems()
+        let layout = currentIslandLayout(for: screen)
+        let frames = detailFrames(for: screen, layout: layout)
+        let islandFrame = NSRect(
+            x: screen.frame.midX - layout.width / 2,
+            y: screen.frame.maxY - layout.collapsedHeight,
+            width: layout.width,
+            height: layout.collapsedHeight
+        )
+
+        window.setFrame(islandFrame, display: true, animate: false)
+        window.contentView?.frame = NSRect(origin: .zero, size: islandFrame.size)
+        latestDetailExpandedFrame = frames.expanded
+        updateDetailContentSize(for: frames.expanded)
+
+        let generation = detailTransition.begin(expanded: overlayState.isExpanded)
+        if overlayState.isExpanded {
+            if window.childWindows?.contains(detailWindow) != true {
+                window.addChildWindow(detailWindow, ordered: .below)
+            }
+            detailWindow.setFrame(frames.expanded, display: true)
+            detailWindow.order(.below, relativeTo: window.windowNumber)
+            window.orderFrontRegardless()
+            guard detailTransition.completeShow(generation: generation) else {
+                return
+            }
+            overlayState.setDetailPresentationPhase(.visible)
+        } else {
+            detailWindow.setFrame(frames.collapsed, display: false)
+            guard detailTransition.completeHide(generation: generation) else {
+                return
+            }
+            overlayState.setDetailPresentationPhase(.hidden)
+            window.removeChildWindow(detailWindow)
+            detailWindow.orderOut(nil)
+        }
+    }
+
+    private func detailFrames(
+        for screen: NSScreen,
+        layout: IslandLayout? = nil
+    ) -> DetailWindowFrames {
+        let layout = layout ?? currentIslandLayout(for: screen)
+        let detailHeight = currentDetailHeight(for: screen, layout: layout)
+        return DetailWindowFrameCalculator.calculate(
+            screenFrame: screen.frame,
+            layoutWidth: layout.width,
+            collapsedHeight: layout.collapsedHeight,
+            detailHeight: detailHeight,
+            overlap: IslandMetrics.detailOverlap
+        )
+    }
+
+    private func updateDetailContentSize(for expandedFrame: NSRect) {
+        detailContentContainer?.updateContentSize(expandedFrame.size)
     }
 
     private func currentIslandLayout(for screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first) -> IslandLayout {

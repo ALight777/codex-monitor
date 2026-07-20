@@ -284,6 +284,7 @@ struct DetailPanelView: View {
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
     @ObservedObject var subAPIViewModel: BalanceMonitorViewModel
+    @ObservedObject var overlayState: OverlayState
     @ObservedObject var settings: CodexNotchSettings
     let onSettings: () -> Void
     let onLocalRefresh: () -> Void
@@ -319,33 +320,52 @@ struct DetailPanelView: View {
             BottomRoundedRectangle(radius: 24)
                 .fill(Color.black.opacity(0.985))
 
-            VStack(spacing: 10) {
-                header
-                pageSwitcher
+            ZStack(alignment: .top) {
+                VStack(spacing: 10) {
+                    header
+                    pageSwitcher
 
-                Group {
-                    switch selectedPage {
-                    case .codex:
-                        localContent
-                    case .remoteCodex:
-                        remoteContent
-                    case .newAPI:
-                        balanceContent(newAPIViewModel)
-                    case .subAPI:
-                        balanceContent(subAPIViewModel)
+                    Group {
+                        switch selectedPage {
+                        case .codex:
+                            localContent
+                        case .remoteCodex:
+                            remoteContent
+                        case .newAPI:
+                            balanceContent(newAPIViewModel)
+                        case .subAPI:
+                            balanceContent(subAPIViewModel)
+                        }
                     }
+                    .frame(maxHeight: .infinity, alignment: .top)
                 }
+                .padding(.horizontal, 14)
+                .padding(.top, detailTopPadding)
+                .padding(.bottom, IslandMetrics.detailBottomPadding)
                 .frame(maxHeight: .infinity, alignment: .top)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, detailTopPadding)
-            .padding(.bottom, IslandMetrics.detailBottomPadding)
-            .frame(maxHeight: .infinity, alignment: .top)
 
-            quotaResetStrip
+                quotaResetStrip
+            }
+            .opacity(showsDetailContent ? 1 : 0)
+            .offset(y: showsDetailContent ? 0 : -6)
+            .animation(detailContentAnimation, value: overlayState.detailPresentationPhase)
+            .allowsHitTesting(showsDetailContent)
         }
         .frame(width: islandLayout.width, height: detailHeight)
         .clipShape(BottomRoundedRectangle(radius: 24))
+    }
+
+    private var showsDetailContent: Bool {
+        overlayState.detailPresentationPhase.showsContent
+    }
+
+    private var detailContentAnimation: Animation? {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            return nil
+        }
+        return overlayState.detailPresentationPhase == .hiding
+            ? .easeIn(duration: DetailAnimationTiming.hideContentDuration)
+            : .easeOut(duration: DetailAnimationTiming.contentDuration)
     }
 
     private var displayedTasks: [CodexTask] {

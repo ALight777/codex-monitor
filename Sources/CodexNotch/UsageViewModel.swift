@@ -440,4 +440,9 @@ private struct LocalUsageSettingsSnapshot: Equatable {
 @MainActor
 final class OverlayState: ObservableObject {
     @Published var isExpanded = false
+    @Published private(set) var detailPresentationPhase: DetailPresentationPhase = .hidden
+
+    func setDetailPresentationPhase(_ phase: DetailPresentationPhase) {
+        detailPresentationPhase = phase
+    }
 }

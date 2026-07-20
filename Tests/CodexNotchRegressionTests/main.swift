@@ -43,6 +43,60 @@ let finalShow = detailTransition.begin(expanded: true)
 runner.check(detailTransition.completeShow(generation: finalShow), "current show completion should succeed")
 runner.check(detailTransition.phase == .visible, "show completion should end visible")
 
+var rapidDetailTransition = DetailTransitionState()
+let rapidFirstShow = rapidDetailTransition.begin(expanded: true)
+let rapidHide = rapidDetailTransition.begin(expanded: false)
+let rapidFinalShow = rapidDetailTransition.begin(expanded: true)
+runner.check(
+    !rapidDetailTransition.completeShow(generation: rapidFirstShow),
+    "rapid transition should ignore the first show completion"
+)
+runner.check(
+    !rapidDetailTransition.completeHide(generation: rapidHide),
+    "rapid transition should ignore the interrupted hide completion"
+)
+runner.check(
+    rapidDetailTransition.phase == .revealing,
+    "stale rapid completions should preserve the final revealing phase"
+)
+runner.check(
+    rapidDetailTransition.completeShow(generation: rapidFinalShow),
+    "rapid transition should accept the final show completion"
+)
+runner.check(
+    rapidDetailTransition.phase == .visible,
+    "rapid show-hide-show should end visible"
+)
+
+let detailFrames = DetailWindowFrameCalculator.calculate(
+    screenFrame: CGRect(x: 100, y: 50, width: 1_440, height: 900),
+    layoutWidth: 720,
+    collapsedHeight: 38,
+    detailHeight: 620,
+    overlap: 4
+)
+let expectedDetailMaxY: CGFloat = 50 + 900 - 38 + 4
+runner.check(
+    detailFrames.collapsed.maxY == expectedDetailMaxY,
+    "collapsed detail frame should preserve the shared top anchor"
+)
+runner.check(
+    detailFrames.expanded.maxY == expectedDetailMaxY,
+    "expanded detail frame should preserve the shared top anchor"
+)
+runner.check(
+    detailFrames.collapsed.maxY == detailFrames.expanded.maxY,
+    "detail frames should share the same maxY"
+)
+runner.check(
+    detailFrames.collapsed.height == 4,
+    "collapsed detail frame height should equal overlap"
+)
+runner.check(
+    detailFrames.expanded.height == 620,
+    "expanded detail frame height should equal detail height"
+)
+
 runner.check(AppInfo.version == "0.1.5", "app info should expose version 0.1.5")
 runner.check(AppInfo.displayVersion == "0.1.5", "app info should fall back to source version when bundle version is unavailable")
 

@@ -32,6 +32,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - Codex 是否正在执行任务。
 - Codex 当前可用额度窗口的剩余百分比，例如新版 Codex 的周限额。
 - 对应额度窗口的刷新时间。
+- 周额度行显示剩余重置次数；点击旁边的信息图标，可以查看每次重置次数的到期时间。
 - 正在运行和最近活动的对话列表。
 - 当前活跃任务的活跃子代理数量。
 - 每个对话的 token 用量，包含该对话下的子代理用量。
@@ -61,8 +62,11 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 账号正常、配额耗尽、异常数量。
 - 每个账号的套餐、索引、成功/失败次数。
 - Codex 账号 5h / 7d 剩余额度。
+- CPA Manager Plus 模式会在账号周额度后显示剩余重置次数，并可通过信息图标查看每次到期时间。
 - 账号异常原因，例如登录过期、账号不可用、请求失败、5 小时额度已满、周额度已满等。
 - CPA Manager Plus 的 24 小时、7 天、30 天总 token 用量。
+
+账号重置次数仅在 `CPA Manager Plus` 模式下提供。应用通过 CPA Manager Plus 的 `/v0/management/api-call` 管理代理读取结果，不会从 Mac 直接查询 OpenAI。结果按账号缓存 60 分钟，手动刷新会绕过缓存；单个账号获取失败时会沿用已有旧值，并且不会因此改变账号健康状态。`CLIProxyAPI` 直连模式不提供重置次数数据。
 
 ### NewAPI 和 Sub2API 余额监测
 
@@ -192,6 +196,7 @@ dist/codex-monitor-0.1.5-amd64.dmg
 - 刘海尺寸会优先根据 macOS 暴露的顶部安全区和辅助菜单区自动推断。如果系统、缩放模式或机型导致识别偏宽或偏窄，可以在设置页使用“物理刘海微调”校准。
 - 本机 Codex 的额度和任务状态依赖 Codex 本地数据文件。如果 Codex 改变文件结构，可能需要同步适配。
 - CPA Manager Plus 模式读取的是服务端巡检结果。服务端巡检频率由 CPA Manager Plus 自身配置决定，客户端刷新只是读取最新结果。
+- 账号重置次数只在 CPA Manager Plus 数据源下显示；CLIProxyAPI 直连模式不会查询或展示该数据。
 - `允许不安全 TLS` 会信任自签名或证书不完整的面板证书。请只在你控制的测试环境中启用。
 - 当前构建脚本使用 ad-hoc 签名，适合本机使用。如果要公开发布给其他用户，建议使用 Apple Developer ID 签名并进行 notarization。
 - 请不要把任何真实面板地址、管理密钥、账号密码或本机密钥数据库提交到公开仓库。
@@ -233,6 +238,7 @@ It can show:
 - Whether Codex is currently running a task.
 - Remaining percentages for currently available Codex quota windows, such as the weekly quota in newer Codex builds.
 - Refresh times for the displayed quota windows.
+- Remaining reset-credit count on the weekly quota row; click the adjacent information icon to view each credit's expiry time.
 - Running and recent conversations.
 - Active subagent count for currently running tasks.
 - Token usage per conversation, including subagent usage under the same conversation.
@@ -262,8 +268,11 @@ The remote tab can show:
 - Healthy, quota-exhausted, and abnormal account counts.
 - Plan, account index, success count, and failure count.
 - 5h / 7d remaining quota for each Codex account.
+- In CPA Manager Plus mode, remaining reset credits after each account's weekly quota, with an information popover listing their expiry times.
 - Clear status reasons such as expired login, unavailable account, request failures, 5-hour quota exhausted, and weekly quota exhausted.
 - CPA Manager Plus total token usage for 24 hours, 7 days, and 30 days.
+
+Account reset-credit data is available only in `CPA Manager Plus` mode. The app retrieves it through CPA Manager Plus's `/v0/management/api-call` management proxy and does not query OpenAI directly from the Mac. Results are cached per account for 60 minutes, while manual refresh bypasses the cache. If one account fails to refresh, the last known value is retained and the failure does not change that account's health status. Direct `CLIProxyAPI` mode does not provide reset-credit data.
 
 ### NewAPI and Sub2API Balance Monitoring
 
@@ -393,6 +402,7 @@ Run regression tests:
 - Notch dimensions are inferred from macOS safe-area and auxiliary menu-bar geometry. If a macOS version, display scaling mode, or MacBook model reports imperfect geometry, use the physical notch adjustment setting to fine-tune the center mask.
 - Local Codex monitoring depends on Codex's local data files. If Codex changes its file format, the app may need an update.
 - CPA Manager Plus mode reads server-side inspection results. The inspection frequency is controlled by CPA Manager Plus, while this app only controls how often it reads the latest result.
+- Account reset credits are shown only with the CPA Manager Plus data source; direct CLIProxyAPI mode does not query or display them.
 - `Allow insecure TLS` trusts self-signed or incomplete certificates for the configured panel request. Use it only for testing environments you control.
 - The current build script uses ad-hoc signing, which is suitable for local use. For public distribution, use Apple Developer ID signing and notarization.
 - Never commit real panel URLs, management keys, account passwords, or local secret database files to a public repository.

@@ -165,6 +165,14 @@ let snapshotFormatterTask = CodexTask(
 let snapshotFormatterSnapshot = UsageSnapshot(
     primaryPercent: 88,
     secondaryPercent: 66,
+    resetCredits: RateLimitResetCredits(
+        availableCount: 2,
+        credits: [
+            RateLimitResetCredit(id: "later", expiresAt: Date(timeIntervalSince1970: 4_100)),
+            RateLimitResetCredit(id: "earlier", expiresAt: Date(timeIntervalSince1970: 4_000))
+        ],
+        fetchedAt: Date(timeIntervalSince1970: 3_900)
+    ),
     usage24h: 111,
     usage7d: 222,
     usage30d: 333,
@@ -190,6 +198,33 @@ runner.check(
     jsonSnapshotTasks?.first?["subagents"] as? Int == 3,
     "JSON snapshot output should expose active subagent counts"
 )
+let jsonResetCredits = jsonSnapshot?["reset_credits"] as? [String: Any]
+runner.check(
+    jsonResetCredits?["available_count"] as? Int == 2,
+    "JSON snapshot output should expose the available reset-credit count"
+)
+runner.check(
+    jsonResetCredits?["expires_at"] as? [Int64] == [4_000, 4_100],
+    "JSON snapshot output should expose sorted reset-credit expiry epoch seconds"
+)
+let snapshotWithoutResetCredits = UsageSnapshot(
+    primaryPercent: nil,
+    secondaryPercent: nil,
+    usage24h: 0,
+    usage7d: 0,
+    usage30d: 0,
+    tasks: [],
+    isRunning: false,
+    lastUpdated: Date(timeIntervalSince1970: 0),
+    errorMessage: nil
+)
+let jsonWithoutResetCredits = try JSONSerialization.jsonObject(
+    with: SnapshotOutputFormatter.jsonData(for: snapshotWithoutResetCredits)
+) as? [String: Any]
+runner.check(
+    jsonWithoutResetCredits?["reset_credits"] == nil,
+    "JSON snapshot output should omit reset_credits when data is unavailable"
+)
 runner.check(
     TaskBadgeFormatter.subagentBadgeText(for: 3) == "子代理 3",
     "task row subagent badge should use compact text"
@@ -203,6 +238,11 @@ let previousRateLimitSnapshot = UsageSnapshot(
     secondaryPercent: 66,
     primaryResetsAt: Date(timeIntervalSince1970: 2_000),
     secondaryResetsAt: Date(timeIntervalSince1970: 3_000),
+    resetCredits: RateLimitResetCredits(
+        availableCount: 3,
+        credits: [RateLimitResetCredit(id: "previous", expiresAt: Date(timeIntervalSince1970: 4_000))],
+        fetchedAt: Date(timeIntervalSince1970: 900)
+    ),
     usage24h: 1,
     usage7d: 2,
     usage30d: 3,
@@ -229,6 +269,31 @@ runner.check(stabilizedRateLimitSnapshot.primaryPercent == 88, "stabilized snaps
 runner.check(stabilizedRateLimitSnapshot.primaryResetsAt == previousRateLimitSnapshot.primaryResetsAt, "stabilized snapshot should preserve missing 5h reset time")
 runner.check(stabilizedRateLimitSnapshot.secondaryPercent == 66, "stabilized snapshot should preserve missing 7d percent")
 runner.check(stabilizedRateLimitSnapshot.secondaryResetsAt == previousRateLimitSnapshot.secondaryResetsAt, "stabilized snapshot should preserve missing 7d reset time")
+runner.check(
+    stabilizedRateLimitSnapshot.resetCredits == previousRateLimitSnapshot.resetCredits,
+    "stabilized snapshot should preserve reset credits when the current refresh omits them"
+)
+let zeroCreditRateLimitSnapshot = UsageSnapshot(
+    primaryPercent: nil,
+    secondaryPercent: nil,
+    resetCredits: RateLimitResetCredits(
+        availableCount: 0,
+        credits: [],
+        fetchedAt: Date(timeIntervalSince1970: 1_100)
+    ),
+    usage24h: 4,
+    usage7d: 5,
+    usage30d: 6,
+    tasks: [],
+    isRunning: false,
+    lastUpdated: Date(timeIntervalSince1970: 1_100),
+    errorMessage: nil
+)
+let stabilizedZeroCreditSnapshot = zeroCreditRateLimitSnapshot.stabilizedRateLimits(against: previousRateLimitSnapshot)
+runner.check(
+    stabilizedZeroCreditSnapshot.resetCredits?.availableCount == 0,
+    "an explicit zero reset-credit count should replace stale nonzero data"
+)
 let rateLimitNow = Date(timeIntervalSince1970: 2_000)
 let expiredRateLimitSnapshot = RateLimitSnapshot(
     primaryPercent: 42,
@@ -264,6 +329,29 @@ let weeklyOnlyRateLimitSnapshot = UsageSnapshot(
 let stabilizedWeeklyOnlySnapshot = weeklyOnlyRateLimitSnapshot.stabilizedRateLimits(against: previousRateLimitSnapshot)
 runner.check(stabilizedWeeklyOnlySnapshot.primaryPercent == nil, "weekly-only Codex quota should not preserve stale 5h percent")
 runner.check(stabilizedWeeklyOnlySnapshot.displayRateLimitWindows.map(\.shortLabel) == ["7d"], "weekly-only Codex quota should only display the weekly window")
+let appServerParserStore = CodexUsageStore(
+    codexDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("codex-notch-reset-credit-parser"),
+    ripgrepCandidates: [],
+    appServerExecutable: "/missing/codex"
+)
+let appServerParserNow = Date(timeIntervalSince1970: 1_784_500_000)
+let appServerRateLimitOutput = #"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":12,"resetsAt":1786557546,"windowDurationMins":10080}},"rateLimitResetCredits":{"available_count":"2","credits":[{"id":"later","reset_type":"codex_rate_limits","status":"available","expires_at":1786557546000},{"id":"earlier","reset_type":"codex_rate_limits","status":"available","expires_at":1785110188}]}}}"#
+let parsedAppServerRateLimits = appServerParserStore.parseAppServerRateLimits(
+    output: appServerRateLimitOutput,
+    now: appServerParserNow
+)
+runner.check(
+    parsedAppServerRateLimits?.displayWindows(now: appServerParserNow).map(\.shortLabel) == ["7d"],
+    "app-server parsing should preserve a weekly-only Codex quota response"
+)
+runner.check(
+    parsedAppServerRateLimits?.resetCredits?.availableCount == 2,
+    "app-server parsing should attach reset credits from account/rateLimits/read"
+)
+runner.check(
+    parsedAppServerRateLimits?.resetCredits?.credits.map(\.id) == ["earlier", "later"],
+    "app-server parsing should use the shared reset-credit decoder and expiry ordering"
+)
 var fixedCalendar = Calendar(identifier: .gregorian)
 fixedCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
 let formatterNow = fixedCalendar.date(from: DateComponents(year: 2030, month: 1, day: 1, hour: 23, minute: 0))!

@@ -32,6 +32,7 @@ enum SnapshotOutputFormatter {
             primaryPercent: snapshot.primaryPercent,
             secondaryPercent: snapshot.secondaryPercent,
             quotaWindows: snapshot.displayRateLimitWindows.map(SnapshotQuotaWindowJSON.init(window:)),
+            resetCredits: snapshot.resetCredits.map(SnapshotResetCreditsJSON.init(resetCredits:)),
             running: snapshot.isRunning,
             usage24h: snapshot.usage24h,
             usage7d: snapshot.usage7d,
@@ -51,6 +52,7 @@ private struct SnapshotJSON: Encodable {
     let primaryPercent: Int?
     let secondaryPercent: Int?
     let quotaWindows: [SnapshotQuotaWindowJSON]
+    let resetCredits: SnapshotResetCreditsJSON?
     let running: Bool
     let usage24h: Int
     let usage7d: Int
@@ -63,6 +65,7 @@ private struct SnapshotJSON: Encodable {
         case primaryPercent = "primary_percent"
         case secondaryPercent = "secondary_percent"
         case quotaWindows = "quota_windows"
+        case resetCredits = "reset_credits"
         case running
         case usage24h = "usage_24h"
         case usage7d = "usage_7d"
@@ -70,6 +73,23 @@ private struct SnapshotJSON: Encodable {
         case lastUpdated = "last_updated"
         case error
         case tasks
+    }
+}
+
+private struct SnapshotResetCreditsJSON: Encodable {
+    let availableCount: Int
+    let expiresAt: [Int64]
+
+    init(resetCredits: RateLimitResetCredits) {
+        availableCount = resetCredits.availableCount
+        expiresAt = resetCredits.credits
+            .map { Int64($0.expiresAt.timeIntervalSince1970.rounded(.down)) }
+            .sorted()
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case availableCount = "available_count"
+        case expiresAt = "expires_at"
     }
 }
 

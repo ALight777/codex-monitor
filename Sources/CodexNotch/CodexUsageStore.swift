@@ -178,6 +178,7 @@ final class CodexUsageStore: @unchecked Sendable {
                 primaryResetsAt: rateLimits.primaryDisplayResetDate(now: now),
                 secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
                 rateLimitWindows: rateLimits.displayWindows(now: now),
+                resetCredits: rateLimits.resetCredits,
                 usage24h: usage.day,
                 usage7d: usage.week,
                 usage30d: usage.month,
@@ -277,6 +278,7 @@ final class CodexUsageStore: @unchecked Sendable {
             primaryResetsAt: cache.rateLimits.primaryDisplayResetDate(now: now),
             secondaryResetsAt: cache.rateLimits.secondaryDisplayResetDate(now: now),
             rateLimitWindows: cache.rateLimits.displayWindows(now: now),
+            resetCredits: cache.rateLimits.resetCredits,
             usage24h: usage.day,
             usage7d: usage.week,
             usage30d: usage.month,
@@ -1780,7 +1782,7 @@ final class CodexUsageStore: @unchecked Sendable {
         """
     }
 
-    private func parseAppServerRateLimits(output: String, now: Date) -> RateLimitSnapshot? {
+    func parseAppServerRateLimits(output: String, now: Date) -> RateLimitSnapshot? {
         for line in output.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
             guard line.contains(#""id":2"#),
                   let data = line.data(using: .utf8),
@@ -1802,6 +1804,7 @@ final class CodexUsageStore: @unchecked Sendable {
                 ),
                 secondary: rateLimitWindow(snapshot.secondary, fallbackID: "secondary", fallbackLabel: "7d")
             )
+            let resetCredits = appServerResetCredits(from: data, now: now)
             return RateLimitSnapshot(
                 primaryPercent: percent(for: "5h", in: windows),
                 secondaryPercent: percent(for: "7d", in: windows),
@@ -1809,11 +1812,23 @@ final class CodexUsageStore: @unchecked Sendable {
                 secondaryResetsAt: resetTimestamp(for: "7d", in: windows),
                 capturedAt: now,
                 isPrimaryCodexLimit: true,
-                windows: windows
+                windows: windows,
+                resetCredits: resetCredits
             )
         }
 
         return nil
+    }
+
+    private func appServerResetCredits(from responseData: Data, now: Date) -> RateLimitResetCredits? {
+        guard let response = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+              let result = response["result"] as? [String: Any],
+              let payload = result["rateLimitResetCredits"] ?? result["rate_limit_reset_credits"],
+              JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            return nil
+        }
+        return try? RateLimitResetCreditsDecoder.decode(data, now: now)
     }
 
     private func readRateLimitSnapshot(from rolloutPath: String) -> RateLimitSnapshot? {

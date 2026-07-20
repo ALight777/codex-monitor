@@ -44,6 +44,7 @@ struct UsageSnapshot: Equatable {
     var primaryResetsAt: Date? = nil
     var secondaryResetsAt: Date? = nil
     var rateLimitWindows: [UsageQuotaWindow] = []
+    var resetCredits: RateLimitResetCredits? = nil
     var usage24h: Int
     var usage7d: Int
     var usage30d: Int
@@ -68,6 +69,10 @@ struct UsageSnapshot: Equatable {
 
     func stabilizedRateLimits(against previous: UsageSnapshot) -> UsageSnapshot {
         var copy = self
+        if copy.resetCredits == nil {
+            copy.resetCredits = previous.resetCredits
+        }
+
         if !copy.rateLimitWindows.isEmpty {
             return copy
         }
@@ -469,6 +474,7 @@ struct RateLimitSnapshot: Equatable {
     let capturedAt: Date?
     let isPrimaryCodexLimit: Bool
     var windows: [UsageQuotaWindow] = []
+    var resetCredits: RateLimitResetCredits? = nil
 
     var primaryResetDate: Date? {
         resetDate(from: primaryResetsAt)

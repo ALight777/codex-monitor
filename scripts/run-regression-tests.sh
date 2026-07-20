@@ -19,6 +19,7 @@ swiftc \
   "${ROOT_DIR}/Sources/CodexNotch/ScreenNotchGeometry.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/AppInfo.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/Formatters.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/RateLimitResetCredits.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/SnapshotOutputFormatter.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/DisplayRedactor.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/Shell.swift" \

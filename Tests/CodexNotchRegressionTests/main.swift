@@ -27,6 +27,132 @@ let runner = TestRunner()
 runner.check(AppInfo.version == "0.1.5", "app info should expose version 0.1.5")
 runner.check(AppInfo.displayVersion == "0.1.5", "app info should fall back to source version when bundle version is unavailable")
 
+let resetCreditsNow = Date(timeIntervalSince1970: 1_784_500_000)
+let appServerResetCreditsJSON = Data(#"""
+{
+  "availableCount": 3,
+  "credits": [
+    {"id":"late","resetType":"codexRateLimits","status":"available","expiresAt":1786557546000},
+    {"id":"early","resetType":"codexRateLimits","status":"available","expiresAt":1785110188},
+    {"id":"used","resetType":"codexRateLimits","status":"consumed","expiresAt":1785525156},
+    {"id":"other","resetType":"otherRateLimits","status":"available","expiresAt":1785525156},
+    {"id":"expired","resetType":"codexRateLimits","status":"available","expiresAt":1784499999}
+  ]
+}
+"""#.utf8)
+let decodedAppServerResetCredits = try RateLimitResetCreditsDecoder.decode(
+    appServerResetCreditsJSON,
+    now: resetCreditsNow
+)
+runner.check(
+    decodedAppServerResetCredits?.availableCount == 3,
+    "reset credit count should prefer the service value"
+)
+runner.check(
+    decodedAppServerResetCredits?.credits.map(\.id) == ["early", "late"],
+    "reset credits should filter invalid entries and sort Unix second/millisecond expiries"
+)
+runner.check(
+    decodedAppServerResetCredits?.fetchedAt == resetCreditsNow,
+    "reset credit fetch time should use the supplied now value"
+)
+runner.check(
+    decodedAppServerResetCredits?.hasExpiryDetails == true,
+    "reset credits should report available expiry details"
+)
+
+let cpaResetCreditsJSON = Data(#"""
+{
+  "available_count": "1",
+  "credits": [
+    {"id":"cpa","reset_type":"codex_rate_limits","status":"available","expires_at":"2026-08-01T03:12:00.000Z"}
+  ]
+}
+"""#.utf8)
+let decodedCPAResetCredits = try RateLimitResetCreditsDecoder.decode(
+    cpaResetCreditsJSON,
+    now: resetCreditsNow
+)
+runner.check(
+    decodedCPAResetCredits?.availableCount == 1,
+    "CPA reset credit count should decode numeric strings"
+)
+runner.check(
+    decodedCPAResetCredits?.credits.count == 1,
+    "CPA reset credit expiry should decode snake-case ISO-8601 values"
+)
+let decodedCPAExpiry = runner.require(
+    decodedCPAResetCredits?.credits.first?.expiresAt,
+    "CPA reset credit should include an expiry date"
+)
+runner.check(
+    RateLimitResetCreditsFormatter.expiryText(
+        decodedCPAExpiry,
+        timeZone: TimeZone(secondsFromGMT: 0)!
+    ) == "2026/08/01 03:12",
+    "reset credit expiry should use the agreed full date format"
+)
+runner.check(
+    RateLimitResetCreditsFormatter.expiryText(
+        decodedCPAExpiry,
+        timeZone: TimeZone(secondsFromGMT: 8 * 60 * 60)!
+    ) == "2026/08/01 11:12",
+    "reset credit expiry should honor an injected GMT+8 time zone"
+)
+
+let plainISOResetCreditsJSON = Data(#"""
+{
+  "availableCount": 1,
+  "credits": [
+    {"id":"plain-iso","resetType":"codexRateLimits","status":"available","expiresAt":"2026-08-01T03:12:00Z"}
+  ]
+}
+"""#.utf8)
+let decodedPlainISOResetCredits = try RateLimitResetCreditsDecoder.decode(
+    plainISOResetCreditsJSON,
+    now: resetCreditsNow
+)
+runner.check(
+    decodedPlainISOResetCredits?.credits.first?.expiresAt == decodedCPAExpiry,
+    "reset credit expiry should decode ISO-8601 values without fractional seconds"
+)
+
+let fallbackResetCreditsJSON = Data(#"""
+{
+  "credits": [
+    {"id":"z","reset_type":"codex_rate_limits","status":"available","expires_at":"1786557546"},
+    {"id":"a","reset_type":"codex_rate_limits","status":"available","expires_at":1786557546},
+    {"id":"expired","reset_type":"codex_rate_limits","status":"available","expires_at":1784499999}
+  ]
+}
+"""#.utf8)
+let fallbackResetCredits = try RateLimitResetCreditsDecoder.decode(
+    fallbackResetCreditsJSON,
+    now: resetCreditsNow
+)
+runner.check(
+    fallbackResetCredits?.availableCount == 2,
+    "reset credit count should fall back to the valid credit count when omitted"
+)
+runner.check(
+    fallbackResetCredits?.credits.map(\.id) == ["a", "z"],
+    "reset credits with equal expiries should sort by identifier"
+)
+
+let zeroResetCredits = try RateLimitResetCreditsDecoder.decode(
+    Data(#"{"available_count":-2,"credits":[]}"#.utf8),
+    now: resetCreditsNow
+)
+runner.check(zeroResetCredits?.availableCount == 0, "negative service counts should clamp to zero")
+let unrelatedResetCredits = try RateLimitResetCreditsDecoder.decode(
+    Data(#"{"unrelated":true}"#.utf8),
+    now: resetCreditsNow
+)
+runner.check(
+    unrelatedResetCredits == nil,
+    "payloads without a count or credits field should not create reset-credit data"
+)
+
 let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",
     title: "父任务",

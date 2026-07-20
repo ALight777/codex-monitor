@@ -1899,6 +1899,186 @@ runner.check(proxyStringBodyQuota.windows.count == 2, "proxy string body should 
 runner.check(proxyStringBodyQuota.windows[0].remainingPercent == 88, "proxy string body should decode primary remaining percent")
 runner.check(proxyStringBodyQuota.windows[1].remainingPercent == 66, "proxy string body should decode secondary remaining percent")
 
+let resetCreditsManagementBaseURL = URL(string: "https://panel.example.com/v0/management")!
+let resetCreditsRequestWithoutAccount = try CLIProxyAPIClient.resetCreditsProxyRequest(
+    managementBaseURL: resetCreditsManagementBaseURL,
+    managementKey: "management-secret",
+    authIndex: "auth-7",
+    accountID: nil,
+    timeout: 8
+)
+runner.check(
+    resetCreditsRequestWithoutAccount.url?.absoluteString == "https://panel.example.com/v0/management/api-call",
+    "reset-credit request should target the CPA Manager Plus api-call endpoint"
+)
+runner.check(resetCreditsRequestWithoutAccount.httpMethod == "POST", "reset-credit proxy request should use POST")
+runner.check(
+    resetCreditsRequestWithoutAccount.value(forHTTPHeaderField: "Authorization") == "Bearer management-secret",
+    "reset-credit proxy request should authenticate with the management key"
+)
+runner.check(
+    resetCreditsRequestWithoutAccount.value(forHTTPHeaderField: "Content-Type") == "application/json",
+    "reset-credit proxy request should send JSON"
+)
+runner.check(
+    resetCreditsRequestWithoutAccount.value(forHTTPHeaderField: "Accept") == "application/json",
+    "reset-credit proxy request should accept JSON"
+)
+runner.check(
+    resetCreditsRequestWithoutAccount.timeoutInterval == 8,
+    "reset-credit proxy request should use the configured timeout"
+)
+let resetCreditsRequestBodyWithoutAccount = runner.require(
+    resetCreditsRequestWithoutAccount.httpBody,
+    "reset-credit proxy request should include a request body"
+)
+let resetCreditsRequestJSONWithoutAccount = runner.require(
+    try JSONSerialization.jsonObject(with: resetCreditsRequestBodyWithoutAccount) as? [String: Any],
+    "reset-credit proxy request body should be a JSON object"
+)
+let resetCreditsHeadersWithoutAccount = runner.require(
+    resetCreditsRequestJSONWithoutAccount["header"] as? [String: Any],
+    "reset-credit proxy request should include upstream headers"
+)
+runner.check(resetCreditsRequestJSONWithoutAccount["authIndex"] as? String == "auth-7", "reset-credit request should preserve authIndex")
+runner.check(resetCreditsRequestJSONWithoutAccount["method"] as? String == "GET", "reset-credit upstream request should use GET")
+runner.check(
+    resetCreditsRequestJSONWithoutAccount["url"] as? String == "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+    "reset-credit request should preserve the CPA Manager Plus upstream target"
+)
+runner.check(
+    resetCreditsHeadersWithoutAccount["Authorization"] as? String == "Bearer $TOKEN$",
+    "reset-credit upstream request should use the CPA token placeholder"
+)
+runner.check(resetCreditsHeadersWithoutAccount["Content-Type"] as? String == "application/json", "reset-credit upstream request should send JSON")
+runner.check(resetCreditsHeadersWithoutAccount["Accept"] as? String == "application/json", "reset-credit upstream request should accept JSON")
+runner.check(
+    resetCreditsHeadersWithoutAccount["User-Agent"] as? String == "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal",
+    "reset-credit upstream request should match the current CPA Manager Plus User-Agent"
+)
+runner.check(resetCreditsHeadersWithoutAccount["OpenAI-Beta"] as? String == "codex-1", "reset-credit upstream request should enable codex-1")
+runner.check(resetCreditsHeadersWithoutAccount["Originator"] as? String == "Codex Desktop", "reset-credit upstream request should identify Codex Desktop")
+runner.check(
+    resetCreditsHeadersWithoutAccount["Chatgpt-Account-Id"] == nil,
+    "reset-credit upstream request should omit an empty account ID"
+)
+
+let resetCreditsRequestWithAccount = try CLIProxyAPIClient.resetCreditsProxyRequest(
+    managementBaseURL: resetCreditsManagementBaseURL,
+    managementKey: "management-secret",
+    authIndex: "auth-8",
+    accountID: "  account-42  ",
+    timeout: 8
+)
+let resetCreditsRequestBodyWithAccount = runner.require(
+    resetCreditsRequestWithAccount.httpBody,
+    "reset-credit proxy request with an account should include a body"
+)
+let resetCreditsRequestJSONWithAccount = runner.require(
+    try JSONSerialization.jsonObject(with: resetCreditsRequestBodyWithAccount) as? [String: Any],
+    "reset-credit proxy request with an account should be JSON"
+)
+let resetCreditsHeadersWithAccount = runner.require(
+    resetCreditsRequestJSONWithAccount["header"] as? [String: Any],
+    "reset-credit proxy request with an account should include upstream headers"
+)
+runner.check(
+    resetCreditsHeadersWithAccount["Chatgpt-Account-Id"] as? String == "account-42",
+    "reset-credit upstream request should include a trimmed account ID"
+)
+
+let resetCreditsObjectEnvelope = Data(#"""
+{
+  "status_code": 200,
+  "body": {
+    "available_count": 2,
+    "credits": [
+      {"id":"object","reset_type":"codex_rate_limits","status":"available","expires_at":1785110188}
+    ]
+  }
+}
+"""#.utf8)
+let objectEnvelopeResetCredits = try CLIProxyAPIClient.decodeResetCreditsProxyResponse(
+    resetCreditsObjectEnvelope,
+    now: resetCreditsNow
+)
+runner.check(
+    objectEnvelopeResetCredits?.availableCount == 2 && objectEnvelopeResetCredits?.credits.first?.id == "object",
+    "reset-credit proxy should decode a snake-case status with an object body"
+)
+runner.check(
+    objectEnvelopeResetCredits?.fetchedAt == resetCreditsNow,
+    "reset-credit proxy should pass the supplied fetch time to the shared decoder"
+)
+
+let resetCreditsStringEnvelope = Data(#"""
+{
+  "statusCode": 200,
+  "body": "{\"availableCount\":1,\"credits\":[{\"id\":\"string\",\"resetType\":\"codexRateLimits\",\"status\":\"available\",\"expiresAt\":1785110188}]}"
+}
+"""#.utf8)
+let stringEnvelopeResetCredits = try CLIProxyAPIClient.decodeResetCreditsProxyResponse(
+    resetCreditsStringEnvelope,
+    now: resetCreditsNow
+)
+runner.check(
+    stringEnvelopeResetCredits?.credits.first?.id == "string",
+    "reset-credit proxy should decode a camel-case status with a JSON string body"
+)
+
+let resetCreditsBodyTextSnakeEnvelope = Data(#"""
+{
+  "status_code": 200,
+  "body_text": "{\"available_count\":1,\"credits\":[{\"id\":\"body-text-snake\",\"reset_type\":\"codex_rate_limits\",\"status\":\"available\",\"expires_at\":1785110188}]}"
+}
+"""#.utf8)
+let bodyTextSnakeResetCredits = try CLIProxyAPIClient.decodeResetCreditsProxyResponse(
+    resetCreditsBodyTextSnakeEnvelope,
+    now: resetCreditsNow
+)
+runner.check(
+    bodyTextSnakeResetCredits?.credits.first?.id == "body-text-snake",
+    "reset-credit proxy should decode body_text"
+)
+
+let resetCreditsBodyTextCamelEnvelope = Data(#"""
+{
+  "statusCode": 200,
+  "body": null,
+  "bodyText": "{\"availableCount\":1,\"credits\":[{\"id\":\"body-text-camel\",\"resetType\":\"codexRateLimits\",\"status\":\"available\",\"expiresAt\":1785110188}]}"
+}
+"""#.utf8)
+let bodyTextCamelResetCredits = try CLIProxyAPIClient.decodeResetCreditsProxyResponse(
+    resetCreditsBodyTextCamelEnvelope,
+    now: resetCreditsNow
+)
+runner.check(
+    bodyTextCamelResetCredits?.credits.first?.id == "body-text-camel",
+    "reset-credit proxy should decode bodyText when body is absent"
+)
+
+let resetCreditsMissingPayload = try CLIProxyAPIClient.decodeResetCreditsProxyResponse(
+    Data(#"{"status_code":200}"#.utf8),
+    now: resetCreditsNow
+)
+runner.check(
+    resetCreditsMissingPayload == nil,
+    "reset-credit proxy should keep a missing payload unavailable instead of reporting zero"
+)
+
+do {
+    _ = try CLIProxyAPIClient.decodeResetCreditsProxyResponse(
+        Data(#"{"status_code":429,"body":{"error":{"type":"rate_limit","message":"Too many requests"}}}"#.utf8),
+        now: resetCreditsNow
+    )
+    runner.check(false, "reset-credit proxy should reject non-2xx upstream responses")
+} catch {
+    runner.check(
+        error.localizedDescription.contains("429") && error.localizedDescription.contains("Too many requests"),
+        "reset-credit proxy should expose the upstream status and error message"
+    )
+}
+
 let stringBoolLimitPayload = """
 {
   "rate_limit": {

@@ -10,6 +10,7 @@ struct CLIProxyAPIConfiguration: Equatable {
 enum CLIProxyAPIError: LocalizedError {
     case invalidURL
     case missingKey
+    case missingAuthIndex
     case httpStatus(Int)
     case emptyResponse
 
@@ -19,6 +20,8 @@ enum CLIProxyAPIError: LocalizedError {
             "面板地址无效"
         case .missingKey:
             "缺少管理密钥"
+        case .missingAuthIndex:
+            "账号缺少 auth_index"
         case .httpStatus(let status):
             status == 401 || status == 403 ? "管理密钥无效或无权限" : "面板返回 HTTP \(status)"
         case .emptyResponse:
@@ -70,6 +73,68 @@ final class CLIProxyAPIClient: NSObject, URLSessionDelegate {
         }
     }
 
+    func fetchResetCredits(
+        authIndex: String,
+        accountID: String?,
+        now: Date = Date()
+    ) async throws -> RateLimitResetCredits? {
+        guard !configuration.managementKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CLIProxyAPIError.missingKey
+        }
+        let normalizedAuthIndex = authIndex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedAuthIndex.isEmpty else {
+            throw CLIProxyAPIError.missingAuthIndex
+        }
+
+        let baseURL = try managementBaseURL()
+        let request = try Self.resetCreditsProxyRequest(
+            managementBaseURL: baseURL,
+            managementKey: configuration.managementKey,
+            authIndex: normalizedAuthIndex,
+            accountID: accountID,
+            timeout: configuration.timeout
+        )
+        let data = try await authenticatedData(for: request, timeout: configuration.timeout)
+        return try Self.decodeResetCreditsProxyResponse(data, now: now)
+    }
+
+    static func resetCreditsProxyRequest(
+        managementBaseURL: URL,
+        managementKey: String,
+        authIndex: String,
+        accountID: String?,
+        timeout: TimeInterval
+    ) throws -> URLRequest {
+        var headers = [
+            "Authorization": "Bearer $TOKEN$",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal",
+            "OpenAI-Beta": "codex-1",
+            "Originator": "Codex Desktop"
+        ]
+        if let accountID = accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !accountID.isEmpty {
+            headers["Chatgpt-Account-Id"] = accountID
+        }
+
+        var request = URLRequest(url: managementBaseURL.appendingPathComponent("api-call"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("Bearer \(managementKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONEncoder().encode(
+            CLIProxyAPICallRequest(
+                authIndex: authIndex,
+                method: "GET",
+                url: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+                header: headers
+            )
+        )
+        return request
+    }
+
     private func authenticatedGET(_ endpoint: URL, timeout: TimeInterval) async throws -> Data {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "GET"
@@ -77,6 +142,10 @@ final class CLIProxyAPIClient: NSObject, URLSessionDelegate {
         request.setValue("Bearer \(configuration.managementKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
+        return try await authenticatedData(for: request, timeout: timeout)
+    }
+
+    private func authenticatedData(for request: URLRequest, timeout: TimeInterval) async throws -> Data {
         let sessionConfig = URLSessionConfiguration.ephemeral
         sessionConfig.timeoutIntervalForRequest = timeout
         sessionConfig.timeoutIntervalForResource = timeout
@@ -578,10 +647,27 @@ final class CLIProxyAPIClient: NSObject, URLSessionDelegate {
         guard (200...299).contains(decoded.statusCode) else {
             throw CLIProxyQuotaResponseError.upstream(decoded.errorText ?? "上游 HTTP \(decoded.statusCode)")
         }
-        guard let quotaBodyData = decoded.quotaBodyData else {
+        guard let quotaBodyData = decoded.bodyData else {
             throw CLIProxyQuotaResponseError.missingBody(decoded.errorText)
         }
         return try decodeQuotaBody(quotaBodyData, fallbackPlanType: fallbackPlanType)
+    }
+
+    static func decodeResetCreditsProxyResponse(
+        _ data: Data,
+        now: Date = Date()
+    ) throws -> RateLimitResetCredits? {
+        let decoded = try JSONDecoder().decode(CLIProxyAPICallResponse.self, from: data)
+        guard (200...299).contains(decoded.statusCode) else {
+            throw CLIProxyResetCreditsResponseError.upstream(
+                status: decoded.statusCode,
+                message: decoded.errorText
+            )
+        }
+        guard let bodyData = decoded.bodyData else {
+            return nil
+        }
+        return try RateLimitResetCreditsDecoder.decode(bodyData, now: now)
     }
 
     private static func quotaPayloadErrorText(from data: Data) -> String? {
@@ -869,6 +955,13 @@ private struct ManagerPlusAnalyticsResponse: Decodable {
     let summary: ManagerPlusAnalyticsSummary?
 }
 
+private struct CLIProxyAPICallRequest: Encodable {
+    let authIndex: String
+    let method: String
+    let url: String
+    let header: [String: String]
+}
+
 private struct ManagerPlusAnalyticsSummary: Decodable {
     let totalTokens: Int
 
@@ -897,39 +990,113 @@ private struct ManagerPlusAnalyticsSummary: Decodable {
 
 private struct CLIProxyAPICallResponse: Decodable {
     let statusCode: Int
-    let quotaBodyData: Data?
+    let bodyData: Data?
     let errorText: String?
 
     enum CodingKeys: String, CodingKey {
-        case statusCode = "status_code"
+        case statusCodeSnake = "status_code"
+        case statusCodeCamel = "statusCode"
         case body
+        case bodyTextSnake = "body_text"
+        case bodyTextCamel = "bodyText"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        statusCode = try container.decodeIfPresent(Int.self, forKey: .statusCode) ?? 0
+        statusCode = Self.flexibleStatusCode(from: container)
 
-        if let bodyText = try? container.decode(String.self, forKey: .body) {
-            let trimmed = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let data = trimmed.data(using: .utf8),
-               (try? JSONSerialization.jsonObject(with: data)) != nil {
-                quotaBodyData = data
-                errorText = trimmed
-            } else {
-                quotaBodyData = nil
-                errorText = trimmed
+        for key in [CodingKeys.body, .bodyTextSnake, .bodyTextCamel] {
+            if let payload = Self.payload(from: container, key: key),
+               payload.data != nil || payload.errorText != nil {
+                bodyData = payload.data
+                errorText = payload.errorText
+                return
             }
-            return
         }
 
-        if let object = try? container.decode(JSONValue.self, forKey: .body) {
-            quotaBodyData = try? JSONEncoder().encode(object)
-            errorText = nil
-            return
-        }
-
-        quotaBodyData = nil
+        bodyData = nil
         errorText = nil
+    }
+
+    private static func flexibleStatusCode(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) -> Int {
+        for key in [CodingKeys.statusCodeSnake, .statusCodeCamel] {
+            if let value = try? container.decodeIfPresent(Int.self, forKey: key) {
+                return value
+            }
+            if let value = try? container.decodeIfPresent(String.self, forKey: key),
+               let status = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return status
+            }
+        }
+        return 0
+    }
+
+    private static func payload(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) -> (data: Data?, errorText: String?)? {
+        guard container.contains(key), (try? container.decodeNil(forKey: key)) != true else {
+            return nil
+        }
+
+        if let bodyText = try? container.decode(String.self, forKey: key) {
+            let trimmed = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return nil
+            }
+            guard let data = trimmed.data(using: .utf8),
+                  (try? JSONSerialization.jsonObject(with: data)) != nil else {
+                return (nil, trimmed)
+            }
+            return (data, readableErrorText(from: data))
+        }
+
+        if let object = try? container.decode(JSONValue.self, forKey: key),
+           let data = try? JSONEncoder().encode(object) {
+            return (data, readableErrorText(from: data))
+        }
+
+        return nil
+    }
+
+    private static func readableErrorText(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let error = object["error"] as? [String: Any] {
+            if let message = error["message"] as? String, !message.isEmpty {
+                return message
+            }
+            if let type = error["type"] as? String, !type.isEmpty {
+                return type
+            }
+        }
+        if let error = object["error"] as? String, !error.isEmpty {
+            return error
+        }
+        if let message = object["message"] as? String, !message.isEmpty {
+            return message
+        }
+        return nil
+    }
+}
+
+private enum CLIProxyResetCreditsResponseError: LocalizedError {
+    case upstream(status: Int, message: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .upstream(let status, let message):
+            let prefix = status > 0
+                ? "重置次数上游返回 HTTP \(status)"
+                : "重置次数代理响应缺少上游状态码"
+            guard let message, !message.isEmpty else {
+                return prefix
+            }
+            return "\(prefix)：\(message)"
+        }
     }
 }
 

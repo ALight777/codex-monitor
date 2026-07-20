@@ -25,6 +25,24 @@ final class TestRunner {
 
 let runner = TestRunner()
 
+var detailTransition = DetailTransitionState()
+runner.check(detailTransition.phase == .hidden, "detail transition should start hidden")
+
+let firstShow = detailTransition.begin(expanded: true)
+runner.check(detailTransition.phase == .revealing, "show should enter revealing phase")
+
+let interruptedHide = detailTransition.begin(expanded: false)
+runner.check(interruptedHide != firstShow, "every transition should receive a new generation")
+runner.check(detailTransition.phase == .hiding, "reverse transition should enter hiding phase")
+runner.check(!detailTransition.completeShow(generation: firstShow), "stale show completion should be ignored")
+runner.check(detailTransition.phase == .hiding, "stale show completion should not replace hiding phase")
+runner.check(detailTransition.completeHide(generation: interruptedHide), "current hide completion should succeed")
+runner.check(detailTransition.phase == .hidden, "hide completion should end hidden")
+
+let finalShow = detailTransition.begin(expanded: true)
+runner.check(detailTransition.completeShow(generation: finalShow), "current show completion should succeed")
+runner.check(detailTransition.phase == .visible, "show completion should end visible")
+
 runner.check(AppInfo.version == "0.1.5", "app info should expose version 0.1.5")
 runner.check(AppInfo.displayVersion == "0.1.5", "app info should fall back to source version when bundle version is unavailable")
 

@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import Darwin
 
 final class TestRunner {
     private(set) var failures = 0
@@ -504,6 +505,666 @@ func remoteAccount(
         unavailable: unavailable
     )
 }
+
+final class LockedTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Date
+
+    init(_ value: Date) {
+        self.value = value
+    }
+
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.lock()
+        value = value.addingTimeInterval(interval)
+        lock.unlock()
+    }
+}
+
+final class AsyncResultBox<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value?
+
+    func store(_ value: Value) {
+        lock.lock()
+        self.value = value
+        lock.unlock()
+    }
+
+    func load() -> Value? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
+func waitForAsync<Value: Sendable>(
+    _ operation: @escaping @Sendable () async -> Value
+) -> Value {
+    let semaphore = DispatchSemaphore(value: 0)
+    let box = AsyncResultBox<Value>()
+    Task.detached {
+        box.store(await operation())
+        semaphore.signal()
+    }
+    semaphore.wait()
+    guard let value = box.load() else {
+        fatalError("Async test operation completed without a value")
+    }
+    return value
+}
+
+actor ResetCreditsFetchProbe {
+    private var activeRequests = 0
+    private var maximumActiveRequests = 0
+    private var callsByAuthIndex: [String: Int] = [:]
+
+    func begin(_ authIndex: String) {
+        activeRequests += 1
+        maximumActiveRequests = max(maximumActiveRequests, activeRequests)
+        callsByAuthIndex[authIndex, default: 0] += 1
+    }
+
+    func end() {
+        activeRequests -= 1
+    }
+
+    func snapshot() -> (maximumActiveRequests: Int, totalCalls: Int, authIndexes: Set<String>) {
+        (
+            maximumActiveRequests,
+            callsByAuthIndex.values.reduce(0, +),
+            Set(callsByAuthIndex.keys)
+        )
+    }
+}
+
+final class ResetCreditsWorkerProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private var slowWorkerFinished = false
+    private var laterCandidateStartedWhileSlow = false
+
+    func markLaterCandidateStarted() {
+        lock.lock()
+        if !slowWorkerFinished {
+            laterCandidateStartedWhileSlow = true
+        }
+        lock.unlock()
+    }
+
+    func markSlowWorkerFinished() {
+        lock.lock()
+        slowWorkerFinished = true
+        lock.unlock()
+    }
+
+    func didDynamicallyRefill() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return laterCandidateStartedWhileSlow
+    }
+}
+
+struct ResetCreditsFetchTestError: Error {}
+
+let remoteResetCreditsClock = LockedTestClock(Date(timeIntervalSince1970: 1_800_000_000))
+let cacheBoundaryCredits = RateLimitResetCredits(
+    availableCount: 2,
+    credits: [
+        RateLimitResetCredit(
+            id: "cache-boundary",
+            expiresAt: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+    ],
+    fetchedAt: remoteResetCreditsClock.now()
+)
+let cacheBoundary = RemoteResetCreditsCache(ttl: 3_600, now: remoteResetCreditsClock.now)
+let cacheBoundaryRevision = cacheBoundary.beginRevision(
+    panelURL: " HTTPS://Panel.Example.com:443/management.html?tab=quota "
+)
+cacheBoundary.store(
+    cacheBoundaryCredits,
+    panelURL: " HTTPS://Panel.Example.com:443/management.html?tab=quota ",
+    authIndex: " Auth-A ",
+    revision: cacheBoundaryRevision
+)
+runner.check(
+    cacheBoundary.fresh(panelURL: "https://panel.example.com", authIndex: "Auth-A") == cacheBoundaryCredits,
+    "reset-credit cache should normalize panel identity and authIndex"
+)
+runner.check(
+    cacheBoundary.fresh(panelURL: "https://other.example.com", authIndex: "Auth-A") == nil,
+    "reset-credit cache should isolate panel identities"
+)
+runner.check(
+    cacheBoundary.fresh(panelURL: "https://panel.example.com", authIndex: "Auth-B") == nil,
+    "reset-credit cache should isolate auth indexes"
+)
+remoteResetCreditsClock.advance(by: 3_599)
+runner.check(
+    cacheBoundary.fresh(panelURL: "https://panel.example.com", authIndex: "Auth-A") != nil,
+    "reset-credit cache should remain fresh immediately before the TTL boundary"
+)
+remoteResetCreditsClock.advance(by: 1)
+runner.check(
+    cacheBoundary.fresh(panelURL: "https://panel.example.com", authIndex: "Auth-A") == nil,
+    "reset-credit cache should expire at the TTL boundary"
+)
+runner.check(
+    cacheBoundary.stale(panelURL: "https://panel.example.com", authIndex: "Auth-A") == cacheBoundaryCredits,
+    "reset-credit cache should retain stale data for failure fallback"
+)
+
+let revisionCache = RemoteResetCreditsCache(ttl: 3_600, now: remoteResetCreditsClock.now)
+let oldRevision = revisionCache.beginRevision(panelURL: "https://revision.example.com")
+let newRevision = revisionCache.beginRevision(panelURL: "https://revision.example.com/management.html")
+let oldRevisionCredits = RateLimitResetCredits(
+    availableCount: 1,
+    credits: [],
+    fetchedAt: remoteResetCreditsClock.now()
+)
+let newRevisionCredits = RateLimitResetCredits(
+    availableCount: 9,
+    credits: [],
+    fetchedAt: remoteResetCreditsClock.now()
+)
+runner.check(
+    !revisionCache.invalidate(oldRevision),
+    "a late cancellation from an old revision should not invalidate a newer revision"
+)
+runner.check(
+    !revisionCache.store(
+        oldRevisionCredits,
+        panelURL: "https://revision.example.com",
+        authIndex: "revision-auth",
+        revision: oldRevision
+    ),
+    "an older reset-credit revision should be rejected after a newer refresh begins"
+)
+runner.check(
+    revisionCache.store(
+        newRevisionCredits,
+        panelURL: "https://revision.example.com",
+        authIndex: "revision-auth",
+        revision: newRevision
+    ),
+    "the latest reset-credit revision should be allowed to write"
+)
+runner.check(
+    revisionCache.fresh(
+        panelURL: "https://revision.example.com",
+        authIndex: "revision-auth"
+    ) == newRevisionCredits,
+    "the newer revision should remain fresh after a late old cancellation"
+)
+let panelScopedRevisionCache = RemoteResetCreditsCache(ttl: 3_600, now: remoteResetCreditsClock.now)
+let panelARevision = panelScopedRevisionCache.beginRevision(panelURL: "https://panel-a.example.com")
+_ = panelScopedRevisionCache.beginRevision(panelURL: "https://panel-b.example.com")
+runner.check(
+    panelScopedRevisionCache.store(
+        oldRevisionCredits,
+        panelURL: "https://panel-a.example.com",
+        authIndex: "shared-auth",
+        revision: panelARevision
+    ),
+    "a new revision on another panel should not invalidate the current panel revision"
+)
+
+let loaderClock = LockedTestClock(Date(timeIntervalSince1970: 1_810_000_000))
+let loaderCache = RemoteResetCreditsCache(ttl: 3_600, now: loaderClock.now)
+let loader = RemoteResetCreditsLoader(cache: loaderCache)
+let loaderAccounts = (1...5).map { index in
+    remoteAccount(id: "loader-\(index)", state: .healthy)
+}
+let fetchProbe = ResetCreditsFetchProbe()
+let workerProgress = ResetCreditsWorkerProgress()
+let loadedAccounts = waitForAsync {
+    await loader.load(
+        accounts: loaderAccounts,
+        dataSource: .cpaManagerPlus,
+        panelURL: "https://panel.example.com/management.html"
+    ) { authIndex, _ in
+        await fetchProbe.begin(authIndex)
+        if authIndex == "loader-1" {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            workerProgress.markSlowWorkerFinished()
+        } else {
+            if authIndex == "loader-3" || authIndex == "loader-4" {
+                workerProgress.markLaterCandidateStarted()
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        await fetchProbe.end()
+        return RateLimitResetCredits(
+            availableCount: Int(authIndex.split(separator: "-").last ?? "0") ?? 0,
+            credits: [],
+            fetchedAt: loaderClock.now()
+        )
+    }
+}
+let initialFetchProbeSnapshot = waitForAsync { await fetchProbe.snapshot() }
+runner.check(
+    initialFetchProbeSnapshot.maximumActiveRequests == 2,
+    "remote reset-credit loader should cap concurrent requests at two"
+)
+runner.check(
+    workerProgress.didDynamicallyRefill(),
+    "a slow reset-credit account should not block the other worker from taking later accounts"
+)
+runner.check(
+    initialFetchProbeSnapshot.totalCalls == loaderAccounts.count,
+    "remote reset-credit loader should request each eligible account once"
+)
+runner.check(
+    loadedAccounts.map(\.id) == loaderAccounts.map(\.id),
+    "remote reset-credit loader should preserve account order"
+)
+runner.check(
+    loadedAccounts.map { $0.resetCredits?.availableCount } == [1, 2, 3, 4, 5],
+    "remote reset-credit loader should attach results to the matching accounts"
+)
+
+let cacheHitProbe = ResetCreditsFetchProbe()
+let automaticallyCachedAccounts = waitForAsync {
+    await loader.load(
+        accounts: loaderAccounts,
+        dataSource: .cpaManagerPlus,
+        panelURL: "https://panel.example.com"
+    ) { authIndex, _ in
+        await cacheHitProbe.begin(authIndex)
+        await cacheHitProbe.end()
+        throw ResetCreditsFetchTestError()
+    }
+}
+let automaticFetchProbeSnapshot = waitForAsync { await cacheHitProbe.snapshot() }
+runner.check(
+    automaticFetchProbeSnapshot.totalCalls == 0,
+    "automatic reset-credit refresh should not invoke fetch for fresh cache entries"
+)
+runner.check(
+    automaticallyCachedAccounts.map { $0.resetCredits?.availableCount } == [1, 2, 3, 4, 5],
+    "automatic reset-credit refresh should return cached values"
+)
+
+let forcedProbe = ResetCreditsFetchProbe()
+let forceRefreshedAccounts = waitForAsync {
+    await loader.load(
+        accounts: loaderAccounts,
+        dataSource: .cpaManagerPlus,
+        panelURL: "https://panel.example.com",
+        forceRefresh: true
+    ) { authIndex, _ in
+        await forcedProbe.begin(authIndex)
+        await forcedProbe.end()
+        return RateLimitResetCredits(
+            availableCount: 10 + (Int(authIndex.split(separator: "-").last ?? "0") ?? 0),
+            credits: [],
+            fetchedAt: loaderClock.now()
+        )
+    }
+}
+let forcedFetchProbeSnapshot = waitForAsync { await forcedProbe.snapshot() }
+runner.check(
+    forcedFetchProbeSnapshot.totalCalls == loaderAccounts.count,
+    "manual reset-credit refresh should bypass fresh cache entries"
+)
+runner.check(
+    forceRefreshedAccounts.map { $0.resetCredits?.availableCount } == [11, 12, 13, 14, 15],
+    "manual reset-credit refresh should replace cached values"
+)
+
+loaderClock.advance(by: 3_600)
+let staleFallbackAccounts = waitForAsync {
+    await loader.load(
+        accounts: loaderAccounts,
+        dataSource: .cpaManagerPlus,
+        panelURL: "https://panel.example.com"
+    ) { _, _ in
+        throw ResetCreditsFetchTestError()
+    }
+}
+runner.check(
+    staleFallbackAccounts.map { $0.resetCredits?.availableCount } == [11, 12, 13, 14, 15],
+    "failed reset-credit refresh should fall back to stale values"
+)
+
+let cancellationCache = RemoteResetCreditsCache(ttl: 3_600, now: loaderClock.now)
+let cancellationProbe = ResetCreditsFetchProbe()
+let cancellationAccounts = [
+    remoteAccount(id: "cancel-fast", state: .healthy),
+    remoteAccount(id: "cancel-signal", state: .healthy),
+    remoteAccount(id: "cancel-never-started", state: .healthy)
+]
+let cancelledAccounts = waitForAsync {
+    await RemoteResetCreditsLoader(
+        cache: cancellationCache,
+        maxConcurrentRequests: 1
+    ).load(
+        accounts: cancellationAccounts,
+        dataSource: .cpaManagerPlus,
+        panelURL: "https://cancel.example.com",
+        forceRefresh: true
+    ) { authIndex, _ in
+        await cancellationProbe.begin(authIndex)
+        await cancellationProbe.end()
+        if authIndex == "cancel-signal" {
+            throw CancellationError()
+        }
+        return RateLimitResetCredits(
+            availableCount: 4,
+            credits: [],
+            fetchedAt: loaderClock.now()
+        )
+    }
+}
+let cancellationProbeSnapshot = waitForAsync { await cancellationProbe.snapshot() }
+runner.check(
+    cancelledAccounts.first?.resetCredits?.availableCount == 4,
+    "a valid reset-credit success before cancellation should be retained"
+)
+runner.check(
+    cancellationProbeSnapshot.totalCalls == 2,
+    "cancellation should stop workers from scheduling later reset-credit requests"
+)
+runner.check(
+    cancellationProbeSnapshot.authIndexes == ["cancel-fast", "cancel-signal"],
+    "cancellation should not start an account after the cancellation signal"
+)
+runner.check(
+    cancellationCache.stale(
+        panelURL: "https://cancel.example.com",
+        authIndex: "cancel-fast"
+    )?.availableCount == 4,
+    "a cache write completed before cancellation should be preserved"
+)
+runner.check(
+    cancellationCache.stale(
+        panelURL: "https://cancel.example.com",
+        authIndex: "cancel-never-started"
+    ) == nil,
+    "an account not scheduled after cancellation should not write cache data"
+)
+
+runner.check(
+    RemoteResetCreditsEnrichmentCoordinator.timeoutBudget(forRequestTimeout: 1) == 5,
+    "reset-credit best-effort timeout should enforce its five-second minimum"
+)
+runner.check(
+    RemoteResetCreditsEnrichmentCoordinator.timeoutBudget(forRequestTimeout: 6) == 12,
+    "reset-credit best-effort timeout should use twice the single-request timeout"
+)
+runner.check(
+    RemoteResetCreditsEnrichmentCoordinator.timeoutBudget(forRequestTimeout: 30) == 20,
+    "reset-credit best-effort timeout should enforce its twenty-second maximum"
+)
+let pipelineSuccessProbe = ResetCreditsFetchProbe()
+let pipelineSuccess = waitForAsync {
+    await RemoteCoreThenEnrichmentPipeline.run(
+        core: { 21 },
+        enrichment: { value in
+            await pipelineSuccessProbe.begin("enrichment")
+            await pipelineSuccessProbe.end()
+            return value * 2
+        }
+    )
+}
+let pipelineSuccessProbeSnapshot = waitForAsync { await pipelineSuccessProbe.snapshot() }
+runner.check(
+    pipelineSuccess == 42 && pipelineSuccessProbeSnapshot.totalCalls == 1,
+    "a successful core refresh should run the non-throwing enrichment exactly once"
+)
+let pipelineFailureProbe = ResetCreditsFetchProbe()
+let pipelineFailure = waitForAsync { () -> Int? in
+    try? await RemoteCoreThenEnrichmentPipeline.run(
+        core: { () async throws -> Int in
+            throw ResetCreditsFetchTestError()
+        },
+        enrichment: { value in
+            await pipelineFailureProbe.begin("enrichment")
+            await pipelineFailureProbe.end()
+            return value * 2
+        }
+    )
+}
+let pipelineFailureProbeSnapshot = waitForAsync { await pipelineFailureProbe.snapshot() }
+runner.check(
+    pipelineFailure == nil && pipelineFailureProbeSnapshot.totalCalls == 0,
+    "a failed core refresh should propagate failure without starting enrichment"
+)
+let bestEffortCache = RemoteResetCreditsCache(ttl: 3_600, now: loaderClock.now)
+let coreAccounts = [
+    remoteAccount(
+        id: "core-survives-timeout",
+        state: .healthy,
+        quotaWindows: [
+            RemoteQuotaWindow(
+                id: "core-weekly",
+                shortLabel: "7d",
+                remainingPercent: 80,
+                usedPercent: 20,
+                resetText: nil
+            )
+        ]
+    )
+]
+let timeoutStart = Date()
+let timeoutEnrichmentResult = waitForAsync {
+    await RemoteResetCreditsEnrichmentCoordinator(
+        loader: RemoteResetCreditsLoader(cache: bestEffortCache),
+        timeoutBudget: 0.05
+    ).enrich(
+        accounts: coreAccounts,
+        dataSource: .cpaManagerPlus,
+        panelURL: "https://timeout.example.com",
+        forceRefresh: true
+    ) { _, _ in
+        usleep(500_000)
+        return RateLimitResetCredits(
+            availableCount: 7,
+            credits: [],
+            fetchedAt: loaderClock.now()
+        )
+    }
+}
+let timeoutElapsed = Date().timeIntervalSince(timeoutStart)
+runner.check(
+    timeoutEnrichmentResult == coreAccounts,
+    "reset-credit best-effort timeout should return the successful core account result"
+)
+runner.check(
+    timeoutElapsed < 0.30,
+    "a 50ms reset-credit budget should return without waiting for a 500ms non-cooperative fetch"
+)
+Thread.sleep(forTimeInterval: 0.55)
+runner.check(
+    bestEffortCache.stale(
+        panelURL: "https://timeout.example.com",
+        authIndex: "core-survives-timeout"
+    ) == nil,
+    "timed-out reset-credit enrichment should not write cache data"
+)
+
+let partialCache = RemoteResetCreditsCache(ttl: 3_600, now: loaderClock.now)
+let partialPanelURL = "https://partial.example.com"
+let partialSeedRevision = partialCache.beginRevision(panelURL: partialPanelURL)
+let slowStaleCredits = RateLimitResetCredits(
+    availableCount: 2,
+    credits: [],
+    fetchedAt: loaderClock.now()
+)
+partialCache.store(
+    slowStaleCredits,
+    panelURL: partialPanelURL,
+    authIndex: "partial-slow",
+    revision: partialSeedRevision
+)
+let partialAccounts = [
+    remoteAccount(id: "partial-fast", state: .healthy),
+    remoteAccount(id: "partial-slow", state: .healthy)
+]
+let partialResult = waitForAsync {
+    await RemoteResetCreditsEnrichmentCoordinator(
+        loader: RemoteResetCreditsLoader(cache: partialCache),
+        timeoutBudget: 0.10
+    ).enrich(
+        accounts: partialAccounts,
+        dataSource: .cpaManagerPlus,
+        panelURL: partialPanelURL,
+        forceRefresh: true
+    ) { authIndex, _ in
+        if authIndex == "partial-slow" {
+            usleep(500_000)
+            return RateLimitResetCredits(
+                availableCount: 99,
+                credits: [],
+                fetchedAt: loaderClock.now()
+            )
+        }
+        return RateLimitResetCredits(
+            availableCount: 8,
+            credits: [],
+            fetchedAt: loaderClock.now()
+        )
+    }
+}
+runner.check(
+    partialResult.map { $0.resetCredits?.availableCount } == [8, 2],
+    "best-effort timeout should merge a fast new value and the slow account stale value"
+)
+runner.check(
+    partialCache.stale(
+        panelURL: partialPanelURL,
+        authIndex: "partial-fast"
+    )?.availableCount == 8,
+    "a fast account should write cache immediately before another account times out"
+)
+Thread.sleep(forTimeInterval: 0.55)
+runner.check(
+    partialCache.stale(
+        panelURL: partialPanelURL,
+        authIndex: "partial-slow"
+    ) == slowStaleCredits,
+    "a slow account completing after timeout cancellation should not overwrite stale cache"
+)
+
+let callerCancellationCache = RemoteResetCreditsCache(ttl: 3_600, now: loaderClock.now)
+let callerCancellationElapsed = waitForAsync { () -> TimeInterval in
+    let task = Task {
+        await RemoteResetCreditsEnrichmentCoordinator(
+            loader: RemoteResetCreditsLoader(cache: callerCancellationCache),
+            timeoutBudget: 10
+        ).enrich(
+            accounts: [remoteAccount(id: "caller-cancelled", state: .healthy)],
+            dataSource: .cpaManagerPlus,
+            panelURL: "https://caller-cancel.example.com",
+            forceRefresh: true
+        ) { _, _ in
+            usleep(500_000)
+            return RateLimitResetCredits(
+                availableCount: 6,
+                credits: [],
+                fetchedAt: loaderClock.now()
+            )
+        }
+    }
+    try? await Task.sleep(nanoseconds: 20_000_000)
+    let startedAt = Date()
+    task.cancel()
+    _ = await task.value
+    return Date().timeIntervalSince(startedAt)
+}
+runner.check(
+    callerCancellationElapsed < 0.30,
+    "caller cancellation should resolve the one-shot coordinator gate immediately"
+)
+Thread.sleep(forTimeInterval: 0.55)
+runner.check(
+    callerCancellationCache.stale(
+        panelURL: "https://caller-cancel.example.com",
+        authIndex: "caller-cancelled"
+    ) == nil,
+    "a fetch completing after caller cancellation should not write cache"
+)
+
+let neverLoadedAccount = remoteAccount(id: "never-loaded", state: .healthy)
+let neverLoadedResult = waitForAsync {
+    await RemoteResetCreditsLoader(
+        cache: RemoteResetCreditsCache(ttl: 3_600, now: loaderClock.now)
+    ).load(
+        accounts: [neverLoadedAccount],
+        dataSource: .cpaManagerPlus,
+        panelURL: "https://new-panel.example.com"
+    ) { _, _ in
+        throw ResetCreditsFetchTestError()
+    }
+}
+runner.check(
+    neverLoadedResult == [neverLoadedAccount],
+    "first reset-credit failure should not alter account data, state, or reason"
+)
+
+let skippedProbe = ResetCreditsFetchProbe()
+let skippedDataSourceResult = waitForAsync {
+    await loader.load(
+        accounts: loaderAccounts,
+        dataSource: .cliProxyAPI,
+        panelURL: "https://panel.example.com",
+        forceRefresh: true
+    ) { authIndex, _ in
+        await skippedProbe.begin(authIndex)
+        await skippedProbe.end()
+        return cacheBoundaryCredits
+    }
+}
+let skippedFetchProbeSnapshot = waitForAsync { await skippedProbe.snapshot() }
+runner.check(
+    skippedDataSourceResult == loaderAccounts,
+    "CLIProxyAPI data source should skip reset-credit loading"
+)
+runner.check(
+    skippedFetchProbeSnapshot.totalCalls == 0,
+    "CLIProxyAPI data source should not issue reset-credit requests"
+)
+
+let missingAuthAccount = RemoteCodexAccount(
+    id: "missing-auth",
+    name: "missing-auth",
+    email: nil,
+    label: nil,
+    provider: "codex",
+    accountType: nil,
+    authIndex: "   ",
+    chatgptAccountID: nil,
+    status: "active",
+    statusMessage: nil,
+    successCount: 1,
+    failureCount: 0,
+    recentFailures: 0,
+    state: .healthy,
+    lastRefresh: nil,
+    planType: "plus",
+    quotaWindows: [],
+    quotaError: nil
+)
+let missingAuthResult = waitForAsync {
+    await loader.load(
+        accounts: [missingAuthAccount],
+        dataSource: .cpaManagerPlus,
+        panelURL: "https://panel.example.com",
+        forceRefresh: true
+    ) { _, _ in
+        return cacheBoundaryCredits
+    }
+}
+runner.check(
+    missingAuthResult == [missingAuthAccount],
+    "accounts without authIndex should be skipped without changing state"
+)
 
 let exhaustedFiveHourWindow = RemoteQuotaWindow(
     id: "code-primary",
@@ -2158,6 +2819,11 @@ let quotaAvailableAccounts = try CLIProxyAPIClient.decodeCodexInspectionAccounts
 )
 runner.check(quotaAvailableAccounts.first?.state == .healthy, "available quota reason should not be treated as quota exhausted")
 
+let preservedResetCredits = RateLimitResetCredits(
+    availableCount: 3,
+    credits: [],
+    fetchedAt: Date(timeIntervalSince1970: 1_820_000_000)
+)
 let previousQuotaAccounts = [
     remoteAccount(
         id: "preserve-1",
@@ -2171,7 +2837,7 @@ let previousQuotaAccounts = [
                 resetText: nil
             )
         ]
-    )
+    ).withResetCredits(preservedResetCredits)
 ]
 let currentQuotaMissingAccounts = [
     remoteAccount(id: "preserve-1", state: .healthy, quotaWindows: [])
@@ -2181,6 +2847,14 @@ let mergedQuotaAccounts = RemoteCodexAccount.preservingQuota(
     from: previousQuotaAccounts
 )
 runner.check(mergedQuotaAccounts.first?.quotaSummaryText == "5h 77%", "remote account list merge should preserve previous quota windows when current refresh has none")
+runner.check(
+    mergedQuotaAccounts.first?.resetCredits == preservedResetCredits,
+    "remote account quota merge should preserve reset-credit data"
+)
+runner.check(
+    previousQuotaAccounts[0].withQuotaExhaustion.resetCredits == preservedResetCredits,
+    "remote account state replacement should preserve reset-credit data"
+)
 
 let sensitiveStatusAccount = RemoteCodexAccount(
     id: "secret-status-field",

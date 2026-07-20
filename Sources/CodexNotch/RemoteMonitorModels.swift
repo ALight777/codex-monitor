@@ -20,7 +20,7 @@ enum RemoteAlertSeverity: Int, Comparable, Equatable {
     }
 }
 
-enum RemoteAccountState: Equatable {
+enum RemoteAccountState: Equatable, Sendable {
     case healthy
     case quotaExhausted
     case abnormal
@@ -59,7 +59,7 @@ enum RemoteAccountState: Equatable {
     }
 }
 
-struct RemoteCodexAccount: Identifiable, Equatable {
+struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let email: String?
@@ -79,6 +79,7 @@ struct RemoteCodexAccount: Identifiable, Equatable {
     let quotaWindows: [RemoteQuotaWindow]
     let quotaError: String?
     let unavailable: Bool
+    let resetCredits: RateLimitResetCredits?
 
     init(
         id: String,
@@ -99,7 +100,8 @@ struct RemoteCodexAccount: Identifiable, Equatable {
         planType: String?,
         quotaWindows: [RemoteQuotaWindow],
         quotaError: String?,
-        unavailable: Bool = false
+        unavailable: Bool = false,
+        resetCredits: RateLimitResetCredits? = nil
     ) {
         self.id = id
         self.name = name
@@ -120,6 +122,7 @@ struct RemoteCodexAccount: Identifiable, Equatable {
         self.quotaWindows = quotaWindows
         self.quotaError = quotaError
         self.unavailable = unavailable
+        self.resetCredits = resetCredits
     }
 
     var displayName: String {
@@ -252,13 +255,14 @@ struct RemoteCodexAccount: Identifiable, Equatable {
     }
 
     func preservingQuota(from previous: RemoteCodexAccount?) -> RemoteCodexAccount {
+        let preservedResetCredits = resetCredits ?? previous?.resetCredits
         guard quotaWindows.isEmpty,
               quotaError == nil,
               let previous else {
-            return withQuotaExhaustion
+            return withResetCredits(preservedResetCredits).withQuotaExhaustion
         }
         guard !previous.quotaWindows.isEmpty else {
-            return withQuotaExhaustion
+            return withResetCredits(preservedResetCredits).withQuotaExhaustion
         }
 
         return RemoteCodexAccount(
@@ -280,19 +284,21 @@ struct RemoteCodexAccount: Identifiable, Equatable {
             planType: planType ?? previous.planType,
             quotaWindows: previous.quotaWindows,
             quotaError: previous.quotaError,
-            unavailable: unavailable
+            unavailable: unavailable,
+            resetCredits: preservedResetCredits
         ).withQuotaExhaustion
     }
 
     func preservingFailedQuota(from previous: RemoteCodexAccount?) -> RemoteCodexAccount {
+        let preservedResetCredits = resetCredits ?? previous?.resetCredits
         guard quotaError != nil,
               let previous,
               !previous.quotaWindows.isEmpty else {
-            return withQuotaExhaustion
+            return withResetCredits(preservedResetCredits).withQuotaExhaustion
         }
 
         if quotaError?.isRemoteAuthFailure == true {
-            return withQuotaExhaustion
+            return withResetCredits(preservedResetCredits).withQuotaExhaustion
         }
 
         return RemoteCodexAccount(
@@ -314,8 +320,34 @@ struct RemoteCodexAccount: Identifiable, Equatable {
             planType: planType ?? previous.planType,
             quotaWindows: previous.quotaWindows,
             quotaError: quotaError,
-            unavailable: unavailable
+            unavailable: unavailable,
+            resetCredits: preservedResetCredits
         ).withQuotaExhaustion
+    }
+
+    func withResetCredits(_ resetCredits: RateLimitResetCredits?) -> RemoteCodexAccount {
+        RemoteCodexAccount(
+            id: id,
+            name: name,
+            email: email,
+            label: label,
+            provider: provider,
+            accountType: accountType,
+            authIndex: authIndex,
+            chatgptAccountID: chatgptAccountID,
+            status: status,
+            statusMessage: statusMessage,
+            successCount: successCount,
+            failureCount: failureCount,
+            recentFailures: recentFailures,
+            state: state,
+            lastRefresh: lastRefresh,
+            planType: planType,
+            quotaWindows: quotaWindows,
+            quotaError: quotaError,
+            unavailable: unavailable,
+            resetCredits: resetCredits
+        )
     }
 
     private var quotaThresholdReason: String? {
@@ -380,7 +412,8 @@ struct RemoteCodexAccount: Identifiable, Equatable {
             planType: planType,
             quotaWindows: quotaWindows,
             quotaError: quotaError,
-            unavailable: unavailable
+            unavailable: unavailable,
+            resetCredits: resetCredits
         )
     }
 
@@ -392,7 +425,7 @@ struct RemoteCodexAccount: Identifiable, Equatable {
     }
 }
 
-struct RemoteQuotaWindow: Identifiable, Equatable {
+struct RemoteQuotaWindow: Identifiable, Equatable, Sendable {
     let id: String
     let shortLabel: String
     let remainingPercent: Int?

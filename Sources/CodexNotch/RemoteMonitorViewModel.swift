@@ -16,6 +16,7 @@ final class RemoteMonitorViewModel: ObservableObject {
     private var refreshGeneration = 0
     private var observedSettings: RemoteMonitorSettingsSnapshot?
     private var loadedSettings: RemoteMonitorSettingsSnapshot?
+    private let resetCreditsCache = RemoteResetCreditsCache()
 
     init(settings: CodexNotchSettings) {
         self.settings = settings
@@ -25,14 +26,17 @@ final class RemoteMonitorViewModel: ObservableObject {
 
     func refreshNow() {
         consecutiveFailures = 0
-        refreshRemoteSnapshot(cancelInFlight: true)
+        refreshRemoteSnapshot(cancelInFlight: true, forceResetCreditsRefresh: true)
     }
 
     func refresh() {
         refreshRemoteSnapshot()
     }
 
-    private func refreshRemoteSnapshot(cancelInFlight: Bool = false) {
+    private func refreshRemoteSnapshot(
+        cancelInFlight: Bool = false,
+        forceResetCreditsRefresh: Bool = false
+    ) {
         refreshTimer?.invalidate()
         refreshTimer = nil
 
@@ -89,15 +93,36 @@ final class RemoteMonitorViewModel: ObservableObject {
             timeout: settings.cliproxyRequestTimeout,
             allowInsecureTLS: settings.cliproxyAllowInsecureTLS
         )
-        let totalTimeout = max(10, configuration.timeout * 4)
+        let coreTimeout = max(10, configuration.timeout * 4)
 
         refreshTask = Task.detached(priority: .utility) {
             do {
-                let result = try await Self.withTimeout(seconds: totalTimeout) {
-                    try await RemoteCodexProvider(
+                let result = try await RemoteCoreThenEnrichmentPipeline.run {
+                    try await Self.withTimeout(seconds: coreTimeout) {
+                        try await RemoteCodexProvider(
+                            dataSource: dataSource,
+                            configuration: configuration
+                        ).fetchCore()
+                    }
+                } enrichment: { coreResult in
+                    let resetCreditsTimeout = RemoteResetCreditsEnrichmentCoordinator
+                        .timeoutBudget(forRequestTimeout: configuration.timeout)
+                    let enrichedAccounts = await RemoteResetCreditsEnrichmentCoordinator(
+                        loader: RemoteResetCreditsLoader(cache: self.resetCreditsCache),
+                        timeoutBudget: resetCreditsTimeout
+                    ).enrich(
+                        accounts: coreResult.accounts,
                         dataSource: dataSource,
-                        configuration: configuration
-                    ).fetch()
+                        panelURL: configuration.panelURL,
+                        forceRefresh: forceResetCreditsRefresh
+                    ) { authIndex, accountID in
+                        let client = CLIProxyAPIClient(configuration: configuration)
+                        return try await client.fetchResetCredits(
+                            authIndex: authIndex,
+                            accountID: accountID
+                        )
+                    }
+                    return coreResult.replacingAccounts(enrichedAccounts)
                 }
                 await MainActor.run {
                     guard generation == self.refreshGeneration else {
@@ -345,13 +370,22 @@ private struct RemoteCodexFetchResult {
     let usageResult: Result<PeriodUsage, Error>
     let usageMessage: String?
     let usageUnavailableForSource: Bool
+
+    func replacingAccounts(_ accounts: [RemoteCodexAccount]) -> RemoteCodexFetchResult {
+        RemoteCodexFetchResult(
+            accounts: accounts,
+            usageResult: usageResult,
+            usageMessage: usageMessage,
+            usageUnavailableForSource: usageUnavailableForSource
+        )
+    }
 }
 
 private struct RemoteCodexProvider {
     let dataSource: RemoteCodexDataSource
     let configuration: CLIProxyAPIConfiguration
 
-    func fetch() async throws -> RemoteCodexFetchResult {
+    func fetchCore() async throws -> RemoteCodexFetchResult {
         let client = CLIProxyAPIClient(configuration: configuration)
         let accounts = try await client.fetchCodexAccounts(dataSource: dataSource)
         switch dataSource {

@@ -23,7 +23,7 @@ enum IslandMetrics {
     static let detailBottomPadding: CGFloat = 18
     static let detailOverlap: CGFloat = 18
     static let quotaResetTopMargin: CGFloat = 7
-    static let quotaResetTextHeight: CGFloat = 10
+    static let quotaResetTextHeight: CGFloat = 20
     static let quotaResetHeaderGap: CGFloat = 9
     static let minimumDetailHeight: CGFloat = 250
     static let visibleTaskRows = 4

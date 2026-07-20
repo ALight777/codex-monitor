@@ -477,22 +477,76 @@ struct RemoteQuotaWindow: Identifiable, Equatable, Sendable {
     }
 
     var isShortTermWindow: Bool {
-        shortLabel == "5h" || shortLabel.hasSuffix(" 5h")
+        primaryDisplayKind == .fiveHour
+            || shortLabel.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(" 5h")
     }
 
     var isPrimaryDisplayWindow: Bool {
-        let label = shortLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let compactLabel = label
+        primaryDisplayKind != nil
+    }
+
+    fileprivate var primaryDisplayKind: RemoteQuotaDisplayKind? {
+        let compactLabel = shortLabel
+            .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: " ", with: "")
             .lowercased()
-        return compactLabel == "5h"
-            || compactLabel == "5小时"
-            || compactLabel == "5hr"
-            || compactLabel == "5hrs"
-            || compactLabel == "7d"
-            || compactLabel == "7天"
-            || compactLabel == "1周"
-            || compactLabel == "周额度"
+        if ["5h", "5小时", "5hr", "5hrs"].contains(compactLabel) {
+            return .fiveHour
+        }
+        if ["7d", "7天", "1周", "周额度"].contains(compactLabel) {
+            return .weekly
+        }
+        return nil
+    }
+
+    fileprivate var isCanonicalPrimaryDisplayLabel: Bool {
+        let compactLabel = shortLabel
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        return compactLabel == "5h" || compactLabel == "7d"
+    }
+
+    fileprivate func isMoreAuthoritativePrimaryWindow(than other: RemoteQuotaWindow) -> Bool {
+        if reachesThreshold != other.reachesThreshold {
+            return reachesThreshold
+        }
+
+        let hasNumericValue = remainingPercent != nil || usedPercent != nil
+        let otherHasNumericValue = other.remainingPercent != nil || other.usedPercent != nil
+        if hasNumericValue != otherHasNumericValue {
+            return hasNumericValue
+        }
+
+        switch (remainingPercent, other.remainingPercent) {
+        case let (lhs?, rhs?) where lhs != rhs:
+            return lhs < rhs
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            break
+        }
+
+        switch (usedPercent, other.usedPercent) {
+        case let (lhs?, rhs?) where lhs != rhs:
+            return lhs > rhs
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            break
+        }
+
+        if isCanonicalPrimaryDisplayLabel != other.isCanonicalPrimaryDisplayLabel {
+            return isCanonicalPrimaryDisplayLabel
+        }
+        if shortLabel != other.shortLabel {
+            return shortLabel < other.shortLabel
+        }
+        return id < other.id
     }
 
     var isAccountAlertWindow: Bool {
@@ -554,6 +608,11 @@ struct RemoteQuotaWindow: Identifiable, Equatable, Sendable {
     }
 }
 
+private enum RemoteQuotaDisplayKind: CaseIterable {
+    case fiveHour
+    case weekly
+}
+
 extension Array where Element == RemoteQuotaWindow {
     var sortedForSummary: [RemoteQuotaWindow] {
         sorted {
@@ -565,12 +624,28 @@ extension Array where Element == RemoteQuotaWindow {
     }
 
     var primaryDisplayWindows: [RemoteQuotaWindow] {
-        let sortedWindows = sortedForSummary
-        return sortedWindows.filter(\.isPrimaryDisplayWindow)
+        authoritativePrimaryWindows
+    }
+
+    private var authoritativePrimaryWindows: [RemoteQuotaWindow] {
+        RemoteQuotaDisplayKind.allCases.compactMap { kind in
+            let matches = filter { $0.primaryDisplayKind == kind }
+            return matches.reduce(nil) { selected, candidate in
+                guard let selected else {
+                    return candidate
+                }
+                return candidate.isMoreAuthoritativePrimaryWindow(than: selected)
+                    ? candidate
+                    : selected
+            }
+        }
     }
 
     var accountAlertWindows: [RemoteQuotaWindow] {
-        sortedForSummary.filter(\.isAccountAlertWindow)
+        let nonPrimaryWindows = sortedForSummary.filter {
+            $0.primaryDisplayKind == nil && $0.isAccountAlertWindow
+        }
+        return authoritativePrimaryWindows + nonPrimaryWindows
     }
 }
 

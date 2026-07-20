@@ -154,6 +154,157 @@ runner.check(
     "payloads without a count or credits field should not create reset-credit data"
 )
 
+runner.check(
+    ResetCreditsDisplay(resetCredits: nil) == nil,
+    "missing reset-credit data should hide the entire indicator"
+)
+let zeroResetCreditsDisplay = runner.require(
+    ResetCreditsDisplay(
+        resetCredits: RateLimitResetCredits(
+            availableCount: 0,
+            credits: [],
+            fetchedAt: resetCreditsNow
+        )
+    ),
+    "zero reset credits should still produce display text"
+)
+runner.check(
+    zeroResetCreditsDisplay.countText == "剩余重置次数：0",
+    "zero reset credits should use the exact agreed count copy"
+)
+runner.check(
+    !zeroResetCreditsDisplay.showsInfoButton,
+    "zero reset credits should not show an information button"
+)
+let zeroCountWithStaleDetailsDisplay = runner.require(
+    ResetCreditsDisplay(
+        resetCredits: RateLimitResetCredits(
+            availableCount: 0,
+            credits: [
+                RateLimitResetCredit(
+                    id: "stale",
+                    expiresAt: Date(timeIntervalSince1970: 1_786_557_546)
+                )
+            ],
+            fetchedAt: resetCreditsNow
+        )
+    ),
+    "an authoritative zero count should remain visible despite stale details"
+)
+runner.check(
+    !zeroCountWithStaleDetailsDisplay.showsInfoButton,
+    "an authoritative zero count should hide the information button"
+)
+runner.check(
+    zeroCountWithStaleDetailsDisplay.expiryRows().isEmpty,
+    "an authoritative zero count should not expose stale expiry rows"
+)
+
+let countOnlyResetCreditsDisplay = runner.require(
+    ResetCreditsDisplay(
+        resetCredits: RateLimitResetCredits(
+            availableCount: 3,
+            credits: [],
+            fetchedAt: resetCreditsNow
+        )
+    ),
+    "a service count without expiry details should remain visible"
+)
+runner.check(
+    countOnlyResetCreditsDisplay.countText == "剩余重置次数：3",
+    "reset-credit display should use the exact agreed copy"
+)
+runner.check(
+    !countOnlyResetCreditsDisplay.showsInfoButton,
+    "a service count without expiry details should not show an information button"
+)
+
+let detailedResetCreditsDisplay = runner.require(
+    ResetCreditsDisplay(
+        resetCredits: RateLimitResetCredits(
+            availableCount: 2,
+            credits: [
+                RateLimitResetCredit(
+                    id: "later",
+                    expiresAt: Date(timeIntervalSince1970: 1_786_557_546)
+                ),
+                RateLimitResetCredit(
+                    id: "earlier",
+                    expiresAt: Date(timeIntervalSince1970: 1_785_110_188)
+                )
+            ],
+            fetchedAt: resetCreditsNow
+        )
+    ),
+    "expiry details should produce an information button"
+)
+runner.check(
+    detailedResetCreditsDisplay.showsInfoButton,
+    "available expiry details should show an information button"
+)
+runner.check(
+    detailedResetCreditsDisplay.expiryRows(timeZone: TimeZone(secondsFromGMT: 8 * 60 * 60)!) == [
+        ResetCreditExpiryRow(ordinalText: "第 1 次", expiryText: "2026/07/27 07:56"),
+        ResetCreditExpiryRow(ordinalText: "第 2 次", expiryText: "2026/08/13 01:59")
+    ],
+    "popover rows should sort expiries and use the agreed labels and date format"
+)
+
+let truncatedResetCreditsDisplay = runner.require(
+    ResetCreditsDisplay(
+        resetCredits: RateLimitResetCredits(
+            availableCount: 1,
+            credits: [
+                RateLimitResetCredit(id: "later", expiresAt: Date(timeIntervalSince1970: 1_786_557_546)),
+                RateLimitResetCredit(id: "earlier", expiresAt: Date(timeIntervalSince1970: 1_785_110_188))
+            ],
+            fetchedAt: resetCreditsNow
+        )
+    ),
+    "service count should cap stale expiry details"
+)
+runner.check(
+    truncatedResetCreditsDisplay.expiryDates.count == 1,
+    "expiry rows should never exceed the authoritative available count"
+)
+
+runner.check(ResetCreditsPlacement.showsInLocalQuotaRow(label: "7d"), "local weekly quota row should show reset credits")
+runner.check(!ResetCreditsPlacement.showsInLocalQuotaRow(label: "5h"), "local 5h quota row should not show reset credits")
+runner.check(!ResetCreditsPlacement.showsInLocalQuotaRow(label: "周额度"), "local reset credits should only attach to the canonical 7d row")
+
+let defaultRemoteRowWidth = IslandMetrics.width - 28
+let minimumRemoteRowWidth = IslandMetrics.shoulderWidth * 2 + IslandMetrics.minimumNotchWidth - 28
+runner.check(
+    ResetCreditsLayout.mode(availableWidth: defaultRemoteRowWidth, hasResetCredits: true) == .full,
+    "the default island width should use the full reset-credit layout"
+)
+runner.check(
+    ResetCreditsLayout.mode(availableWidth: minimumRemoteRowWidth, hasResetCredits: true) == .compact,
+    "the minimum notch width should use the compact reset-credit layout"
+)
+runner.check(
+    ResetCreditsLayout.mode(availableWidth: defaultRemoteRowWidth, hasResetCredits: false) == .compact,
+    "rows without reset-credit data should preserve the original compact allocation"
+)
+runner.check(
+    ResetCreditsLayout.estimatedLeadingWidth(availableWidth: defaultRemoteRowWidth, mode: .full)
+        >= ResetCreditsLayout.fullMinimumLeadingWidth,
+    "the full layout should preserve readable account information at the default island width"
+)
+runner.check(
+    ResetCreditsLayout.estimatedLeadingWidth(availableWidth: minimumRemoteRowWidth, mode: .compact)
+        >= ResetCreditsLayout.minimumReadableLeadingWidth,
+    "the compact layout should preserve readable account information at the minimum notch width"
+)
+runner.check(
+    ResetCreditsLayout.inlineLayoutHeight == IslandMetrics.quotaResetTextHeight,
+    "the local quota layout should reserve the full information-button hit target height"
+)
+runner.check(
+    ResetCreditsLayout.remoteRequiredContentHeight <= ResetCreditsLayout.remoteCardHeight,
+    "the remote state and 20-point quota lines should fit inside the fixed account card"
+)
+
 let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",
     title: "父任务",
@@ -402,8 +553,14 @@ runner.check(
     "taller collapsed islands should keep reset text below the physical notch without growing top content unnecessarily"
 )
 runner.check(
-    IslandMetrics.detailContentTopPadding(safeAreaTop: 60, collapsedHeight: tallNotchLayout.collapsedHeight) == IslandMetrics.detailTopPadding,
-    "detail content top padding should stay compact when the collapsed island height already accounts for the taller notch"
+    IslandMetrics.detailContentTopPadding(
+        safeAreaTop: 60,
+        collapsedHeight: tallNotchLayout.collapsedHeight
+    ) == IslandMetrics.quotaResetTopPadding(
+        safeAreaTop: 60,
+        collapsedHeight: tallNotchLayout.collapsedHeight
+    ) + IslandMetrics.quotaResetTextHeight + IslandMetrics.quotaResetHeaderGap,
+    "detail content should start below the full 20-point reset-credit hit target and header gap"
 )
 runner.check(
     IslandMetrics.combinedDetailHeight(
@@ -1194,6 +1351,47 @@ let proQuotaAccount = remoteAccount(
 )
 runner.check(proQuotaAccount.displayQuotaWindows.map(\.shortLabel) == ["5h", "7d"], "CLIProxyAPI Pro account detail should only display bare 5h and 7d quota windows")
 runner.check(proQuotaAccount.quotaSummaryText == "5h 98%  7d 60%", "CLIProxyAPI Pro account quota summary should hide extra Pro quota windows")
+let duplicateAliasQuotaAccount = remoteAccount(
+    id: "duplicate-primary-aliases",
+    state: .healthy,
+    quotaWindows: [
+        RemoteQuotaWindow(id: "alias-5h", shortLabel: "5小时", remainingPercent: 81, usedPercent: 19, resetText: nil),
+        RemoteQuotaWindow(id: "canonical-5h", shortLabel: "5h", remainingPercent: 81, usedPercent: 19, resetText: nil),
+        RemoteQuotaWindow(id: "alias-7d", shortLabel: "1周", remainingPercent: 61, usedPercent: 39, resetText: nil),
+        RemoteQuotaWindow(id: "canonical-7d", shortLabel: "7d", remainingPercent: 61, usedPercent: 39, resetText: nil),
+        RemoteQuotaWindow(id: "monthly", shortLabel: "30d", remainingPercent: 50, usedPercent: 50, resetText: nil)
+    ]
+)
+runner.check(
+    duplicateAliasQuotaAccount.displayQuotaWindows.map(\.id) == ["canonical-5h", "canonical-7d"],
+    "primary quota display should canonically deduplicate aliases and keep 5h/7d order"
+)
+runner.check(
+    duplicateAliasQuotaAccount.alertQuotaWindows.map(\.id) == ["canonical-5h", "canonical-7d", "monthly"],
+    "account alerts should reuse authoritative primary windows while preserving non-primary windows"
+)
+let conflictingAliasQuotaAccount = remoteAccount(
+    id: "conflicting-primary-aliases",
+    state: .healthy,
+    quotaWindows: [
+        RemoteQuotaWindow(id: "canonical-healthy", shortLabel: "5h", remainingPercent: 81, usedPercent: 19, resetText: nil),
+        RemoteQuotaWindow(id: "alias-exhausted", shortLabel: "5小时", remainingPercent: 0, usedPercent: 100, resetText: nil),
+        RemoteQuotaWindow(id: "weekly", shortLabel: "7d", remainingPercent: 60, usedPercent: 40, resetText: nil),
+        RemoteQuotaWindow(id: "monthly", shortLabel: "30d", remainingPercent: 50, usedPercent: 50, resetText: nil)
+    ]
+)
+runner.check(
+    conflictingAliasQuotaAccount.displayQuotaWindows.map(\.id) == ["alias-exhausted", "weekly"],
+    "display should select the most constrained authoritative primary window"
+)
+runner.check(
+    conflictingAliasQuotaAccount.alertQuotaWindows.map(\.id) == ["alias-exhausted", "weekly", "monthly"],
+    "alerts should reuse the same constrained primary window and retain 30d"
+)
+runner.check(
+    conflictingAliasQuotaAccount.withQuotaExhaustion.state == .quotaExhausted,
+    "the authoritative exhausted alias should drive the account alert state"
+)
 let modelOnlyQuotaAccount = remoteAccount(
     id: "model-only-windows",
     state: .healthy,

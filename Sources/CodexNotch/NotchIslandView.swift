@@ -586,10 +586,18 @@ struct DetailPanelView: View {
             Text(Formatters.quotaResetTime(date))
                 .foregroundStyle(color.opacity(0.82))
                 .monospacedDigit()
+
+            if ResetCreditsPlacement.showsInLocalQuotaRow(label: label) {
+                ResetCreditsIndicator(
+                    resetCredits: snapshot.resetCredits,
+                    fontSize: 8.2,
+                    foregroundColor: .white.opacity(0.54)
+                )
+            }
         }
         .font(.system(size: 8.8, weight: .bold, design: .rounded))
         .lineLimit(1)
-        .minimumScaleFactor(0.76)
+        .minimumScaleFactor(0.68)
     }
 
     private func quotaColor(for label: String) -> Color {
@@ -1008,7 +1016,23 @@ private struct RemoteAccountRow: View {
     let account: RemoteCodexAccount
 
     var body: some View {
-        HStack(spacing: 8) {
+        GeometryReader { geometry in
+            let layoutMode = ResetCreditsLayout.mode(
+                availableWidth: geometry.size.width,
+                hasResetCredits: account.resetCredits != nil
+            )
+            rowContent(layoutMode: layoutMode)
+        }
+        .frame(height: ResetCreditsLayout.remoteCardHeight)
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func rowContent(layoutMode: ResetCreditsLayoutMode) -> some View {
+        HStack(spacing: 6) {
             Circle()
                 .fill(account.state.color)
                 .frame(width: 8, height: 8)
@@ -1039,27 +1063,23 @@ private struct RemoteAccountRow: View {
                 }
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 0)
 
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: ResetCreditsLayout.remoteRowSpacing) {
                 Text(account.stateReasonText)
                     .font(.system(size: 10, weight: .heavy))
                     .foregroundStyle(account.state.color)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
+                    .frame(height: ResetCreditsLayout.remoteStateLineHeight, alignment: .center)
 
-                quotaGrid
+                quotaGrid(layoutMode: layoutMode)
             }
-            .frame(width: 148, alignment: .trailing)
+            .frame(width: layoutMode.trailingWidth, alignment: .trailing)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(minHeight: quotaWindows.count > 2 ? 74 : 62)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .padding(.vertical, ResetCreditsLayout.remoteVerticalPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var quotaWindows: [RemoteQuotaWindow] {
@@ -1067,7 +1087,7 @@ private struct RemoteAccountRow: View {
     }
 
     @ViewBuilder
-    private var quotaGrid: some View {
+    private func quotaGrid(layoutMode: ResetCreditsLayoutMode) -> some View {
         if quotaWindows.isEmpty {
             Text(account.quotaSummaryText)
                 .font(.system(size: 9.3, weight: .semibold, design: .rounded))
@@ -1075,24 +1095,28 @@ private struct RemoteAccountRow: View {
                 .foregroundStyle(quotaColor)
                 .lineLimit(1)
         } else {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(minimum: 58), spacing: 4, alignment: .trailing),
-                    GridItem(.flexible(minimum: 58), spacing: 4, alignment: .trailing)
-                ],
-                alignment: .trailing,
-                spacing: 3
-            ) {
+            HStack(spacing: layoutMode.quotaSpacing) {
                 ForEach(quotaWindows) { window in
                     Text("\(window.shortLabel) \(window.remainingText)")
-                        .font(.system(size: 8.4, weight: .bold, design: .rounded))
+                        .font(.system(size: layoutMode.quotaFontSize, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(window.reachesThreshold ? Color(red: 1.0, green: 0.55, blue: 0.25) : .white.opacity(0.62))
                         .lineLimit(1)
-                        .minimumScaleFactor(0.64)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .minimumScaleFactor(layoutMode == .full ? 0.72 : 0.58)
+                        .layoutPriority(1)
+                }
+
+                if account.resetCredits != nil {
+                    ResetCreditsIndicator(
+                        resetCredits: account.resetCredits,
+                        fontSize: layoutMode.resetCreditFontSize,
+                        foregroundColor: .white.opacity(0.58)
+                    )
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .layoutPriority(0)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 

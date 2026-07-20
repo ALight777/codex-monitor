@@ -221,6 +221,15 @@ struct CodexSessionEventDecoder {
         return CodexTokenCountEvent(timestamp: timestamp, date: date, tokens: tokens)
     }
 
+    func isWorldStateLine(_ line: String) -> Bool {
+        guard line.contains(#""world_state""#),
+              let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return object["type"] as? String == "world_state"
+    }
+
     func fastTokenCountLineInfo(_ line: String) -> (timestamp: String, tokens: Int)? {
         guard lineContainsTokenCountPayload(line),
               let timestamp = fastJSONStringValue(for: "timestamp", in: line),

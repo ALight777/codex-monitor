@@ -627,6 +627,12 @@ final class CodexUsageStore: @unchecked Sendable {
             return databaseTokens
         }
 
+        // Spawned Codex agents inherit the parent rollout and its database total.
+        // Their own usage must be derived from the child-only suffix instead.
+        if sessionMeta(from: path)?.isSubagent == true {
+            return sessionTokenTotal(from: path) ?? 0
+        }
+
         guard allowInactiveScan || databaseTokens <= 0 else {
             return databaseTokens
         }
@@ -651,6 +657,10 @@ final class CodexUsageStore: @unchecked Sendable {
         let signature = fileSignature(path)
         guard signature.exists else {
             return databaseTokens
+        }
+
+        if sessionMeta(from: path)?.isSubagent == true {
+            return sessionTokenTotal(from: path) ?? 0
         }
 
         if databaseTokens > 0, signature.size > UsageScanPolicy.largeSessionTokenScanLimit {
@@ -774,6 +784,7 @@ final class CodexUsageStore: @unchecked Sendable {
         return withSessionIndexNames(
             try Shell.sqliteJSON(database: stateDatabase, query: query, as: [ThreadRecord].self)
         )
+        .filter { !isSubagentThread($0) }
     }
 
     private func withSessionIndexNames(_ threads: [ThreadRecord]) -> [ThreadRecord] {
@@ -925,13 +936,6 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func loadPeriodUsageFromRollouts(now: Date, threads: [ThreadRecord]) -> PeriodUsage {
-        let paths = Array(Set(threads.map(\.rolloutPath)).filter {
-            !$0.isEmpty && FileManager.default.fileExists(atPath: $0)
-        }).sorted()
-        if let usage = loadPeriodUsageWithRipgrep(now: now, paths: paths) {
-            return usage
-        }
-
         let dayStart = now.addingTimeInterval(-24 * 60 * 60)
         let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
         let monthStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
@@ -961,6 +965,27 @@ final class CodexUsageStore: @unchecked Sendable {
             } else {
                 recordsByPath[thread.rolloutPath] = thread
             }
+        }
+
+        let mainPaths = recordsByPath.values.compactMap { thread -> String? in
+            guard sessionMeta(from: thread.rolloutPath)?.isSubagent != true else {
+                return nil
+            }
+            return thread.rolloutPath
+        }.sorted()
+
+        if let mainUsage = loadPeriodUsageWithRipgrep(now: now, paths: mainPaths) {
+            day = mainUsage.day
+            week = mainUsage.week
+            month = mainUsage.month
+
+            for thread in recordsByPath.values where sessionMeta(from: thread.rolloutPath)?.isSubagent == true {
+                add(
+                    tokens: thread.tokensUsed,
+                    date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
+                )
+            }
+            return PeriodUsage(day: day, week: week, month: month)
         }
 
         for thread in recordsByPath.values {
@@ -1311,6 +1336,8 @@ final class CodexUsageStore: @unchecked Sendable {
             return nil
         }
 
+        let isSubagent = sessionMeta(from: path)?.isSubagent == true
+
         cacheLock.lock()
         if let cached = sessionTokenTotalCache[path],
            cached.signature == signature {
@@ -1333,7 +1360,9 @@ final class CodexUsageStore: @unchecked Sendable {
             initialPendingLine = cached.pendingLine
             hadTokenEvent = cached.foundTokenEvent
         } else {
-            scanStart = 0
+            scanStart = isSubagent
+                ? (lastWorldStateLineOffset(in: path, endingAt: signature.size) ?? 0)
+                : 0
             initialTotal = 0
             initialPendingLine = ""
             hadTokenEvent = false
@@ -1345,7 +1374,8 @@ final class CodexUsageStore: @unchecked Sendable {
             endingAt: signature.size,
             initialTotal: initialTotal,
             initialPendingLine: initialPendingLine,
-            hadTokenEvent: hadTokenEvent
+            hadTokenEvent: hadTokenEvent,
+            resetOnWorldState: isSubagent
         ) else {
             return nil
         }
@@ -1368,7 +1398,8 @@ final class CodexUsageStore: @unchecked Sendable {
         endingAt: UInt64,
         initialTotal: Int = 0,
         initialPendingLine: String = "",
-        hadTokenEvent: Bool = false
+        hadTokenEvent: Bool = false,
+        resetOnWorldState: Bool = false
     ) -> SessionTokenScanResult? {
         guard FileManager.default.fileExists(atPath: path),
               let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
@@ -1414,8 +1445,16 @@ final class CodexUsageStore: @unchecked Sendable {
             }
             pending = String(lastLine)
 
-            for line in lines.dropLast() where line.contains(#""token_count""#) {
-                guard let tokens = tokenCountTokens(from: String(line)) else {
+            for rawLine in lines.dropLast() {
+                let line = String(rawLine)
+                if resetOnWorldState,
+                   sessionDecoder.isWorldStateLine(line) {
+                    total = 0
+                    foundTokenEvent = false
+                    continue
+                }
+                guard line.contains(#""token_count""#),
+                      let tokens = tokenCountTokens(from: line) else {
                     continue
                 }
                 total += tokens
@@ -1423,8 +1462,13 @@ final class CodexUsageStore: @unchecked Sendable {
             }
         }
 
-        if pending.contains(#""token_count""#),
-           let tokens = tokenCountTokens(from: pending) {
+        if resetOnWorldState,
+           sessionDecoder.isWorldStateLine(pending) {
+            total = 0
+            foundTokenEvent = false
+            pending = ""
+        } else if pending.contains(#""token_count""#),
+                  let tokens = tokenCountTokens(from: pending) {
             total += tokens
             pending = ""
             foundTokenEvent = true
@@ -1436,6 +1480,58 @@ final class CodexUsageStore: @unchecked Sendable {
             pendingLine: pending,
             foundTokenEvent: foundTokenEvent
         )
+    }
+
+    private func lastWorldStateLineOffset(in path: String, endingAt: UInt64) -> UInt64? {
+        guard endingAt > 0,
+              let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
+            return nil
+        }
+        defer {
+            try? handle.close()
+        }
+
+        let maximumBytes = min(endingAt, UsageScanPolicy.largeSessionTokenScanLimit)
+        var suffixBytes = min(maximumBytes, UInt64(1024 * 1024))
+
+        while suffixBytes > 0 {
+            let suffixStart = endingAt - suffixBytes
+            let data: Data
+            do {
+                try handle.seek(toOffset: suffixStart)
+                data = try handle.readToEnd() ?? Data()
+            } catch {
+                return nil
+            }
+
+            var lineStart = data.startIndex
+            var lastOffset: UInt64?
+
+            for index in data.indices where data[index] == 0x0A {
+                let lineData = data[lineStart..<index]
+                let line = String(decoding: lineData, as: UTF8.self)
+                if sessionDecoder.isWorldStateLine(line) {
+                    lastOffset = suffixStart + UInt64(lineStart)
+                }
+                lineStart = data.index(after: index)
+            }
+
+            if lineStart < data.endIndex {
+                let line = String(decoding: data[lineStart..<data.endIndex], as: UTF8.self)
+                if sessionDecoder.isWorldStateLine(line) {
+                    lastOffset = suffixStart + UInt64(lineStart)
+                }
+            }
+
+            if let lastOffset {
+                return lastOffset
+            }
+            guard suffixBytes < maximumBytes else {
+                return nil
+            }
+            suffixBytes = min(maximumBytes, suffixBytes * 2)
+        }
+        return nil
     }
 
     private func filePrefix(from path: String, maxBytes: Int) -> String? {

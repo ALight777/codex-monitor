@@ -17,6 +17,7 @@ final class UsageViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var completionFollowUpTimers: [Timer] = []
     private var fileChangeRefreshTimers: [Timer] = []
+    private var usageFileChangeTimer: Timer?
     private var fileWatchers: [CodexFileWatcher] = []
     private var watchedPaths: [String] = []
     private var isRefreshingSnapshot = false
@@ -112,6 +113,8 @@ final class UsageViewModel: ObservableObject {
         usageTimer = nil
         pendingUsageTimer?.invalidate()
         pendingUsageTimer = nil
+        usageFileChangeTimer?.invalidate()
+        usageFileChangeTimer = nil
         pendingUsageRefresh = false
     }
 
@@ -309,6 +312,32 @@ final class UsageViewModel: ObservableObject {
             timer.tolerance = 0.2
             return timer
         }
+        scheduleUsageRefreshAfterFileChange(now: now)
+    }
+
+    private func scheduleUsageRefreshAfterFileChange(now: Date) {
+        guard periodUsageRefreshEnabled, usageFileChangeTimer == nil else {
+            return
+        }
+
+        let delay = UsageRefreshCadence.fileChangeDelay(
+            now: now,
+            lastCompletedAt: lastUsageRefreshCompletedAt
+        )
+        let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else {
+                    return
+                }
+                self.usageFileChangeTimer = nil
+                guard self.periodUsageRefreshEnabled else {
+                    return
+                }
+                self.refreshUsageTotals(scheduleNext: true)
+            }
+        }
+        timer.tolerance = min(2, delay * 0.2)
+        usageFileChangeTimer = timer
     }
 
     private func observeSettings() {
@@ -356,6 +385,8 @@ final class UsageViewModel: ObservableObject {
         pendingSnapshotTimer = nil
         pendingUsageTimer?.invalidate()
         pendingUsageTimer = nil
+        usageFileChangeTimer?.invalidate()
+        usageFileChangeTimer = nil
         watcherRefreshTimer?.invalidate()
         watcherRefreshTimer = nil
 

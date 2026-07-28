@@ -1483,6 +1483,25 @@ runner.check(UsageRefreshCadence.refreshInterval(configured: 30, lastDuration: n
 runner.check(UsageRefreshCadence.refreshInterval(configured: 300, lastDuration: nil) == 300, "period usage refresh should respect larger configured intervals")
 runner.check(UsageRefreshCadence.refreshInterval(configured: 120, lastDuration: 6) == 180, "slow usage scans should push the next refresh farther out")
 runner.check(UsageRefreshCadence.refreshInterval(configured: 600, lastDuration: 40) == 1_200, "very slow usage scans should adapt without exceeding the cap")
+let usageFileChangeNow = Date(timeIntervalSince1970: 1_000)
+runner.check(
+    UsageRefreshCadence.fileChangeDelay(now: usageFileChangeNow, lastCompletedAt: nil) == 4,
+    "the first watched session change should settle briefly before refreshing usage"
+)
+runner.check(
+    UsageRefreshCadence.fileChangeDelay(
+        now: usageFileChangeNow,
+        lastCompletedAt: usageFileChangeNow.addingTimeInterval(-30)
+    ) == 30,
+    "watched session changes should respect the one-minute usage refresh throttle"
+)
+runner.check(
+    UsageRefreshCadence.fileChangeDelay(
+        now: usageFileChangeNow,
+        lastCompletedAt: usageFileChangeNow.addingTimeInterval(-90)
+    ) == 4,
+    "stale period usage should refresh promptly after a watched session change"
+)
 runner.check(BalanceRefreshCadence.refreshInterval(base: 300, consecutiveFailures: 0) == 300, "healthy balance refresh should use the configured interval")
 runner.check(BalanceRefreshCadence.refreshInterval(base: 300, consecutiveFailures: 1) == 30, "failed balance refresh should retry quickly instead of leaving stale timeout state")
 runner.check(BalanceRefreshCadence.refreshInterval(base: 60, consecutiveFailures: 3) == 30, "repeated balance failures should cap retry interval")

@@ -344,6 +344,9 @@ enum RefreshCadence {
 }
 
 enum UsageRefreshCadence {
+    private static let fileChangeMinimumInterval: TimeInterval = 60
+    private static let fileChangeSettleDelay: TimeInterval = 4
+
     static func refreshInterval(configured: TimeInterval, lastDuration: TimeInterval?) -> TimeInterval {
         let base = clamped(configured.rounded(), min: 120, max: 1_800)
         guard let lastDuration, lastDuration > 0 else {
@@ -352,6 +355,15 @@ enum UsageRefreshCadence {
 
         let adaptive = (lastDuration * 30).rounded()
         return clamped(max(base, adaptive), min: 120, max: 1_800)
+    }
+
+    static func fileChangeDelay(now: Date, lastCompletedAt: Date?) -> TimeInterval {
+        guard let lastCompletedAt else {
+            return fileChangeSettleDelay
+        }
+
+        let elapsed = max(0, now.timeIntervalSince(lastCompletedAt))
+        return max(fileChangeSettleDelay, fileChangeMinimumInterval - elapsed)
     }
 
     private static func clamped(_ value: TimeInterval, min: TimeInterval, max: TimeInterval) -> TimeInterval {

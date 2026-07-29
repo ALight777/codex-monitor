@@ -851,11 +851,18 @@ struct DetailPanelView: View {
 
     private var periodUsage: some View {
         HStack(spacing: 8) {
-            PeriodUsageCell(label: "24小时", value: Formatters.compactTokens(snapshot.usage24h))
+            PeriodUsageCell(label: "24小时", value: localPeriodUsageText(snapshot.usage24h))
             PeriodUsageCell(label: "7天", value: Formatters.compactTokens(snapshot.usage7d))
             PeriodUsageCell(label: "30天", value: Formatters.compactTokens(snapshot.usage30d))
         }
         .padding(.top, 1)
+    }
+
+    private func localPeriodUsageText(_ tokens: Int) -> String {
+        if tokens == 0, viewModel.isRefreshingUsage {
+            return "--"
+        }
+        return Formatters.compactTokens(tokens)
     }
 }
 
@@ -983,10 +990,12 @@ private struct TaskRow: View {
             }
 
             HStack(spacing: 6) {
-                Text(task.detail)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.56))
-                    .lineLimit(1)
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(task.displayDetail(now: context.date))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.56))
+                        .lineLimit(1)
+                }
 
                 Spacer(minLength: 8)
 

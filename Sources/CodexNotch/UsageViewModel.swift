@@ -5,6 +5,7 @@ import Foundation
 final class UsageViewModel: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot = .empty
     @Published private(set) var isRefreshing = false
+    @Published private(set) var isRefreshingUsage = false
 
     private let store: CodexUsageStore
     private let settings: CodexNotchSettings
@@ -16,12 +17,12 @@ final class UsageViewModel: ObservableObject {
     private var settingsChangeTimer: Timer?
     private var cancellables: Set<AnyCancellable> = []
     private var completionFollowUpTimers: [Timer] = []
+    private var completionUsageRefreshTimer: Timer?
     private var fileChangeRefreshTimers: [Timer] = []
     private var usageFileChangeTimer: Timer?
     private var fileWatchers: [CodexFileWatcher] = []
     private var watchedPaths: [String] = []
     private var isRefreshingSnapshot = false
-    private var isRefreshingUsage = false
     private var isRefreshingWatchPaths = false
     private var pendingSnapshotRefresh = false
     private var pendingSnapshotBypassFastCache = false
@@ -81,6 +82,7 @@ final class UsageViewModel: ObservableObject {
                 self.pendingSnapshotBypassFastCache = false
                 if wasRunning && !self.snapshot.isRunning {
                     self.scheduleCompletionFollowUp()
+                    self.scheduleCompletionUsageRefresh()
                 }
                 if shouldRefreshAgain {
                     self.schedulePendingSnapshotRefresh(bypassFastCache: shouldBypassFastCache)
@@ -94,6 +96,18 @@ final class UsageViewModel: ObservableObject {
     func refreshAll() {
         refresh(bypassFastCache: true)
         refreshUsageTotals(scheduleNext: periodUsageRefreshEnabled)
+    }
+
+    func resumeAfterSystemActivity() {
+        fastTimer?.invalidate()
+        fastTimer = nil
+        pendingSnapshotTimer?.invalidate()
+        pendingSnapshotTimer = nil
+        refresh(bypassFastCache: true)
+        refreshWatchPaths()
+        if periodUsageRefreshEnabled {
+            refreshUsageTotals(scheduleNext: true)
+        }
     }
 
     func refreshUsageTotalsIfStale(maxAge: TimeInterval = 120) {
@@ -237,6 +251,26 @@ final class UsageViewModel: ObservableObject {
             timer.tolerance = 1
             return timer
         }
+    }
+
+    private func scheduleCompletionUsageRefresh() {
+        completionUsageRefreshTimer?.invalidate()
+
+        let delay = UsageRefreshCadence.fileChangeDelay(
+            now: Date(),
+            lastCompletedAt: lastUsageRefreshCompletedAt
+        )
+        let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else {
+                    return
+                }
+                self.completionUsageRefreshTimer = nil
+                self.refreshUsageTotals(scheduleNext: self.periodUsageRefreshEnabled)
+            }
+        }
+        timer.tolerance = min(2, delay * 0.2)
+        completionUsageRefreshTimer = timer
     }
 
     private func refreshWatchPaths() {
@@ -385,6 +419,8 @@ final class UsageViewModel: ObservableObject {
         pendingSnapshotTimer = nil
         pendingUsageTimer?.invalidate()
         pendingUsageTimer = nil
+        completionUsageRefreshTimer?.invalidate()
+        completionUsageRefreshTimer = nil
         usageFileChangeTimer?.invalidate()
         usageFileChangeTimer = nil
         watcherRefreshTimer?.invalidate()
@@ -433,6 +469,7 @@ final class UsageViewModel: ObservableObject {
                         title: task.title,
                         status: task.status == .running ? .recent : task.status,
                         detail: task.detail,
+                        detailPrefix: task.detailPrefix,
                         tokenCount: task.tokenCount,
                         updatedAt: task.updatedAt,
                         activeSubagentCount: task.activeSubagentCount

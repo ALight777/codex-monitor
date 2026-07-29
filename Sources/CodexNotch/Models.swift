@@ -159,6 +159,7 @@ struct CodexTask: Identifiable, Equatable {
     let title: String
     let status: TaskStatus
     let detail: String
+    let detailPrefix: String?
     let tokenCount: Int
     let updatedAt: Date
     let activeSubagentCount: Int
@@ -168,6 +169,7 @@ struct CodexTask: Identifiable, Equatable {
         title: String,
         status: TaskStatus,
         detail: String,
+        detailPrefix: String? = nil,
         tokenCount: Int,
         updatedAt: Date,
         activeSubagentCount: Int = 0
@@ -176,9 +178,17 @@ struct CodexTask: Identifiable, Equatable {
         self.title = title
         self.status = status
         self.detail = detail
+        self.detailPrefix = detailPrefix
         self.tokenCount = tokenCount
         self.updatedAt = updatedAt
         self.activeSubagentCount = activeSubagentCount
+    }
+
+    func displayDetail(now: Date = Date()) -> String {
+        guard let detailPrefix else {
+            return detail
+        }
+        return "\(detailPrefix) · \(Formatters.relativeAge(updatedAt, now: now))前"
     }
 }
 

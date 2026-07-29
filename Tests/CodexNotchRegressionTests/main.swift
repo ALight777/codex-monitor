@@ -386,6 +386,19 @@ let snapshotFormatterTask = CodexTask(
     updatedAt: Date(timeIntervalSince1970: 0),
     activeSubagentCount: 3
 )
+let liveAgeTask = CodexTask(
+    id: "live-age",
+    title: "时间更新",
+    status: .recent,
+    detail: "gpt-5.6 · 超高推理 · 1分钟前",
+    detailPrefix: "gpt-5.6 · 超高推理",
+    tokenCount: 1,
+    updatedAt: Date(timeIntervalSince1970: 1_000)
+)
+runner.check(
+    liveAgeTask.displayDetail(now: Date(timeIntervalSince1970: 8_200)) == "gpt-5.6 · 超高推理 · 2小时前",
+    "task detail should recalculate its relative age from the current UI clock"
+)
 let snapshotFormatterSnapshot = UsageSnapshot(
     primaryPercent: 88,
     secondaryPercent: 66,

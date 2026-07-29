@@ -167,6 +167,7 @@ final class NotchOverlayController {
         configureContent()
         observeState()
         observeScreenChanges()
+        observeSystemActivity()
         installEventMonitors()
         synchronizeFramesForGeometryChange()
     }
@@ -343,6 +344,23 @@ final class NotchOverlayController {
                 self.synchronizeFramesForGeometryChange()
             }
             .store(in: &cancellables)
+    }
+
+    private func observeSystemActivity() {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        for name in [
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.screensDidWakeNotification,
+            NSWorkspace.sessionDidBecomeActiveNotification
+        ] {
+            notificationCenter.publisher(for: name)
+                .sink { [weak self] _ in
+                    Task { @MainActor in
+                        self?.viewModel.resumeAfterSystemActivity()
+                    }
+                }
+                .store(in: &cancellables)
+        }
     }
 
     private func installEventMonitors() {

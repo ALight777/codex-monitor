@@ -530,6 +530,54 @@ let expiredRateLimitSnapshot = RateLimitSnapshot(
 runner.check(expiredRateLimitSnapshot.primaryDisplayPercent(now: rateLimitNow) == 100, "expired 5h quota should display as restored")
 runner.check(expiredRateLimitSnapshot.primaryDisplayResetDate(now: rateLimitNow) == nil, "expired 5h reset time should be hidden")
 runner.check(expiredRateLimitSnapshot.secondaryDisplayResetDate(now: rateLimitNow) == Date(timeIntervalSince1970: 2_500), "future 7d reset time should be preserved")
+let cachedAppServerRateLimits = RateLimitSnapshot(
+    primaryPercent: nil,
+    secondaryPercent: 97,
+    primaryResetsAt: nil,
+    secondaryResetsAt: 3_000,
+    capturedAt: Date(timeIntervalSince1970: 2_000),
+    isPrimaryCodexLimit: true,
+    resetCredits: RateLimitResetCredits(
+        availableCount: 2,
+        credits: [],
+        fetchedAt: Date(timeIntervalSince1970: 2_000)
+    )
+)
+let newerLocalRateLimits = RateLimitSnapshot(
+    primaryPercent: nil,
+    secondaryPercent: 87,
+    primaryResetsAt: nil,
+    secondaryResetsAt: 3_000,
+    capturedAt: Date(timeIntervalSince1970: 2_030),
+    isPrimaryCodexLimit: true
+)
+let freshestLocalRateLimits = RateLimitSnapshot.freshest(
+    appServer: cachedAppServerRateLimits,
+    localFiles: newerLocalRateLimits
+)
+runner.check(
+    freshestLocalRateLimits.secondaryPercent == 87,
+    "a newer local rate-limit event should replace the cached app-server percentage"
+)
+runner.check(
+    freshestLocalRateLimits.resetCredits == cachedAppServerRateLimits.resetCredits,
+    "a newer local rate-limit event should preserve app-server reset-credit details"
+)
+let refreshedAppServerRateLimits = RateLimitSnapshot(
+    primaryPercent: nil,
+    secondaryPercent: 85,
+    primaryResetsAt: nil,
+    secondaryResetsAt: 3_000,
+    capturedAt: Date(timeIntervalSince1970: 2_040),
+    isPrimaryCodexLimit: true
+)
+runner.check(
+    RateLimitSnapshot.freshest(
+        appServer: refreshedAppServerRateLimits,
+        localFiles: newerLocalRateLimits
+    ).secondaryPercent == 85,
+    "a freshly queried app-server percentage should remain authoritative"
+)
 let weeklyOnlyQuotaWindow = UsageQuotaWindow(
     id: "codex-weekly",
     shortLabel: "7d",

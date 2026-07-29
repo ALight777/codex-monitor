@@ -488,6 +488,27 @@ struct RateLimitSnapshot: Equatable {
     var windows: [UsageQuotaWindow] = []
     var resetCredits: RateLimitResetCredits? = nil
 
+    static func freshest(
+        appServer: RateLimitSnapshot?,
+        localFiles: RateLimitSnapshot
+    ) -> RateLimitSnapshot {
+        guard let appServer else {
+            return localFiles
+        }
+
+        let appServerCapturedAt = appServer.capturedAt ?? .distantPast
+        let localCapturedAt = localFiles.capturedAt ?? .distantPast
+        guard localCapturedAt > appServerCapturedAt else {
+            return appServer
+        }
+
+        var result = localFiles
+        if result.resetCredits == nil {
+            result.resetCredits = appServer.resetCredits
+        }
+        return result
+    }
+
     var primaryResetDate: Date? {
         resetDate(from: primaryResetsAt)
     }

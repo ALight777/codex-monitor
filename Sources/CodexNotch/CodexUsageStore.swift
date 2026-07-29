@@ -1794,7 +1794,10 @@ final class CodexUsageStore: @unchecked Sendable {
     private func loadRateLimits(from paths: [String], source: RateLimitSourcePreference, now: Date) -> RateLimitSnapshot {
         switch source {
         case .appServerFirst:
-            loadAppServerRateLimits(now: now) ?? loadLatestRateLimits(from: paths)
+            RateLimitSnapshot.freshest(
+                appServer: loadAppServerRateLimits(now: now),
+                localFiles: loadLatestRateLimits(from: paths)
+            )
         case .localFilesOnly:
             loadLatestRateLimits(from: paths)
         }

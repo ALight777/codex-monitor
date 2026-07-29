@@ -381,7 +381,7 @@ let snapshotFormatterTask = CodexTask(
     id: "snapshot-task",
     title: "父任务",
     status: .running,
-    detail: "gpt-5.5 · 高推理",
+    detailPrefix: "gpt-5.5 · 高推理",
     tokenCount: 12345,
     updatedAt: Date(timeIntervalSince1970: 0),
     activeSubagentCount: 3
@@ -390,7 +390,6 @@ let liveAgeTask = CodexTask(
     id: "live-age",
     title: "时间更新",
     status: .recent,
-    detail: "gpt-5.6 · 超高推理 · 1分钟前",
     detailPrefix: "gpt-5.6 · 超高推理",
     tokenCount: 1,
     updatedAt: Date(timeIntervalSince1970: 1_000)
@@ -834,7 +833,36 @@ final class AsyncResultBox<Value: Sendable>: @unchecked Sendable {
     }
 }
 
+final class AsyncGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if isOpen {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+                lock.unlock()
+            }
+        }
+    }
+
+    func open() {
+        lock.lock()
+        isOpen = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        lock.unlock()
+        pendingWaiters.forEach { $0.resume() }
+    }
+}
+
 func waitForAsync<Value: Sendable>(
+    timeout: TimeInterval = 15,
     _ operation: @escaping @Sendable () async -> Value
 ) -> Value {
     let semaphore = DispatchSemaphore(value: 0)
@@ -843,7 +871,9 @@ func waitForAsync<Value: Sendable>(
         box.store(await operation())
         semaphore.signal()
     }
-    semaphore.wait()
+    guard semaphore.wait(timeout: .now() + timeout) == .success else {
+        fatalError("Async test operation timed out after \(timeout) seconds")
+    }
     guard let value = box.load() else {
         fatalError("Async test operation completed without a value")
     }
@@ -1242,8 +1272,8 @@ let coreAccounts = [
         ]
     )
 ]
-let timeoutStart = Date()
-let timeoutEnrichmentResult = waitForAsync {
+let timeoutFetchGate = AsyncGate()
+let timeoutEnrichmentResult = waitForAsync(timeout: 1) {
     await RemoteResetCreditsEnrichmentCoordinator(
         loader: RemoteResetCreditsLoader(cache: bestEffortCache),
         timeoutBudget: 0.05
@@ -1253,7 +1283,7 @@ let timeoutEnrichmentResult = waitForAsync {
         panelURL: "https://timeout.example.com",
         forceRefresh: true
     ) { _, _ in
-        usleep(500_000)
+        await timeoutFetchGate.wait()
         return RateLimitResetCredits(
             availableCount: 7,
             credits: [],
@@ -1261,16 +1291,12 @@ let timeoutEnrichmentResult = waitForAsync {
         )
     }
 }
-let timeoutElapsed = Date().timeIntervalSince(timeoutStart)
 runner.check(
     timeoutEnrichmentResult == coreAccounts,
     "reset-credit best-effort timeout should return the successful core account result"
 )
-runner.check(
-    timeoutElapsed < 0.30,
-    "a 50ms reset-credit budget should return without waiting for a 500ms non-cooperative fetch"
-)
-Thread.sleep(forTimeInterval: 0.55)
+timeoutFetchGate.open()
+Thread.sleep(forTimeInterval: 0.10)
 runner.check(
     bestEffortCache.stale(
         panelURL: "https://timeout.example.com",
@@ -1297,7 +1323,8 @@ let partialAccounts = [
     remoteAccount(id: "partial-fast", state: .healthy),
     remoteAccount(id: "partial-slow", state: .healthy)
 ]
-let partialResult = waitForAsync {
+let partialSlowFetchGate = AsyncGate()
+let partialResult = waitForAsync(timeout: 1) {
     await RemoteResetCreditsEnrichmentCoordinator(
         loader: RemoteResetCreditsLoader(cache: partialCache),
         timeoutBudget: 0.10
@@ -1308,7 +1335,7 @@ let partialResult = waitForAsync {
         forceRefresh: true
     ) { authIndex, _ in
         if authIndex == "partial-slow" {
-            usleep(500_000)
+            await partialSlowFetchGate.wait()
             return RateLimitResetCredits(
                 availableCount: 99,
                 credits: [],
@@ -1333,7 +1360,8 @@ runner.check(
     )?.availableCount == 8,
     "a fast account should write cache immediately before another account times out"
 )
-Thread.sleep(forTimeInterval: 0.55)
+partialSlowFetchGate.open()
+Thread.sleep(forTimeInterval: 0.10)
 runner.check(
     partialCache.stale(
         panelURL: partialPanelURL,
@@ -1343,7 +1371,8 @@ runner.check(
 )
 
 let callerCancellationCache = RemoteResetCreditsCache(ttl: 3_600, now: loaderClock.now)
-let callerCancellationElapsed = waitForAsync { () -> TimeInterval in
+let callerCancellationFetchGate = AsyncGate()
+waitForAsync(timeout: 1) {
     let task = Task {
         await RemoteResetCreditsEnrichmentCoordinator(
             loader: RemoteResetCreditsLoader(cache: callerCancellationCache),
@@ -1354,7 +1383,7 @@ let callerCancellationElapsed = waitForAsync { () -> TimeInterval in
             panelURL: "https://caller-cancel.example.com",
             forceRefresh: true
         ) { _, _ in
-            usleep(500_000)
+            await callerCancellationFetchGate.wait()
             return RateLimitResetCredits(
                 availableCount: 6,
                 credits: [],
@@ -1363,16 +1392,11 @@ let callerCancellationElapsed = waitForAsync { () -> TimeInterval in
         }
     }
     try? await Task.sleep(nanoseconds: 20_000_000)
-    let startedAt = Date()
     task.cancel()
     _ = await task.value
-    return Date().timeIntervalSince(startedAt)
 }
-runner.check(
-    callerCancellationElapsed < 0.30,
-    "caller cancellation should resolve the one-shot coordinator gate immediately"
-)
-Thread.sleep(forTimeInterval: 0.55)
+callerCancellationFetchGate.open()
+Thread.sleep(forTimeInterval: 0.10)
 runner.check(
     callerCancellationCache.stale(
         panelURL: "https://caller-cancel.example.com",
@@ -3597,13 +3621,13 @@ let localSnapshot = localStore.loadSnapshot(
 runner.check(localSnapshot.isRunning, "recent session rollout should mark local Codex as running")
 runner.check(localSnapshot.tasks.contains { $0.id == sessionID && $0.status == .running }, "recent session rollout should appear in running task list")
 runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.title == "正在运行的 Codex 任务", "session rollout should use the user message as task title")
-runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.detail.contains("gpt-5.5 · 超高推理") == true, "session rollout should use turn context model and effort")
+runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.detailPrefix.contains("gpt-5.5 · 超高推理") == true, "session rollout should use turn context model and effort")
 runner.check(!localSnapshot.tasks.contains { $0.id == subagentSessionID }, "subagent rollout should not appear as a separate local task")
 runner.check(!localSnapshot.tasks.contains { $0.id == parentOnlySubagentID }, "subagent-only activity should still hide the child task")
 runner.check(!localSnapshot.tasks.contains { $0.id == longMetaSubagentID }, "subagent rollout with long session metadata should still hide the child task")
 runner.check(localSnapshot.tasks.contains { $0.id == parentOnlySessionID && $0.status == .running }, "recent subagent activity should mark the parent task running")
 runner.check(localSnapshot.tasks.contains { $0.id == longMetaParentSessionID && $0.status == .running }, "long session metadata subagent activity should mark the parent task running")
-runner.check(localSnapshot.tasks.first { $0.id == parentOnlySessionID }?.detail.contains("gpt-5.5 · 高推理") == true, "parent running through subagent activity should use turn context model and effort")
+runner.check(localSnapshot.tasks.first { $0.id == parentOnlySessionID }?.detailPrefix.contains("gpt-5.5 · 高推理") == true, "parent running through subagent activity should use turn context model and effort")
 runner.check(localSnapshot.tasks.first { $0.id == sessionID }?.activeSubagentCount == 1, "parent task should only show currently active subagents")
 runner.check(localSnapshot.tasks.first { $0.id == parentOnlySessionID }?.activeSubagentCount == 1, "parent running through subagent activity should show one subagent")
 runner.check(localSnapshot.tasks.first { $0.id == longMetaParentSessionID }?.activeSubagentCount == 1, "parent running through long metadata subagent activity should show one subagent")

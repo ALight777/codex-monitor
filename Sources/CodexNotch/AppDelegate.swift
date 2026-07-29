@@ -146,6 +146,7 @@ final class NotchOverlayController {
     private var detailTransition = DetailTransitionState()
     private var pendingDetailWorkItems: [DispatchWorkItem] = []
     private var latestDetailExpandedFrame: NSRect?
+    private var systemActivityResumeTimer: Timer?
 
     private static let detailSettleDuration: TimeInterval = 0.12
 
@@ -268,8 +269,10 @@ final class NotchOverlayController {
                 self.setDetailVisible(isExpanded)
                 if isExpanded, self.settings.showPeriodUsage {
                     self.viewModel.refreshUsageTotalsIfStale()
+                } else if self.settings.showPeriodUsage {
+                    self.viewModel.pausePeriodicUsageRefresh()
                 } else {
-                    self.viewModel.pauseUsageTotals()
+                    self.viewModel.disableUsageTotals()
                 }
             }
             .store(in: &cancellables)
@@ -285,8 +288,12 @@ final class NotchOverlayController {
                         if showPeriodUsage {
                             self.viewModel.refreshUsageTotalsIfStale()
                         } else {
-                            self.viewModel.pauseUsageTotals()
+                            self.viewModel.disableUsageTotals()
                         }
+                    } else if showPeriodUsage {
+                        self.viewModel.pausePeriodicUsageRefresh()
+                    } else {
+                        self.viewModel.disableUsageTotals()
                     }
                     self.updateFrames()
                 }
@@ -356,11 +363,26 @@ final class NotchOverlayController {
             notificationCenter.publisher(for: name)
                 .sink { [weak self] _ in
                     Task { @MainActor in
-                        self?.viewModel.resumeAfterSystemActivity()
+                        self?.scheduleSystemActivityResume()
                     }
                 }
                 .store(in: &cancellables)
         }
+    }
+
+    private func scheduleSystemActivityResume() {
+        systemActivityResumeTimer?.invalidate()
+        let timer = Timer.scheduledTimer(
+            withTimeInterval: SystemActivityRefreshCadence.debounceDelay,
+            repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.systemActivityResumeTimer = nil
+                self?.viewModel.resumeAfterSystemActivity()
+            }
+        }
+        timer.tolerance = 0.25
+        systemActivityResumeTimer = timer
     }
 
     private func installEventMonitors() {

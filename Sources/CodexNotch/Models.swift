@@ -158,8 +158,7 @@ struct CodexTask: Identifiable, Equatable {
     let id: String
     let title: String
     let status: TaskStatus
-    let detail: String
-    let detailPrefix: String?
+    let detailPrefix: String
     let tokenCount: Int
     let updatedAt: Date
     let activeSubagentCount: Int
@@ -168,8 +167,7 @@ struct CodexTask: Identifiable, Equatable {
         id: String,
         title: String,
         status: TaskStatus,
-        detail: String,
-        detailPrefix: String? = nil,
+        detailPrefix: String,
         tokenCount: Int,
         updatedAt: Date,
         activeSubagentCount: Int = 0
@@ -177,7 +175,6 @@ struct CodexTask: Identifiable, Equatable {
         self.id = id
         self.title = title
         self.status = status
-        self.detail = detail
         self.detailPrefix = detailPrefix
         self.tokenCount = tokenCount
         self.updatedAt = updatedAt
@@ -185,9 +182,6 @@ struct CodexTask: Identifiable, Equatable {
     }
 
     func displayDetail(now: Date = Date()) -> String {
-        guard let detailPrefix else {
-            return detail
-        }
         return "\(detailPrefix) · \(Formatters.relativeAge(updatedAt, now: now))前"
     }
 }
@@ -356,6 +350,7 @@ enum RefreshCadence {
 enum UsageRefreshCadence {
     private static let fileChangeMinimumInterval: TimeInterval = 60
     private static let fileChangeSettleDelay: TimeInterval = 4
+    static let maximumFailureRetries = 3
 
     static func refreshInterval(configured: TimeInterval, lastDuration: TimeInterval?) -> TimeInterval {
         let base = clamped(configured.rounded(), min: 120, max: 1_800)
@@ -374,6 +369,17 @@ enum UsageRefreshCadence {
 
         let elapsed = max(0, now.timeIntervalSince(lastCompletedAt))
         return max(fileChangeSettleDelay, fileChangeMinimumInterval - elapsed)
+    }
+
+    static func failureRetryDelay(consecutiveFailures: Int) -> TimeInterval {
+        switch consecutiveFailures {
+        case ...1:
+            5
+        case 2:
+            15
+        default:
+            30
+        }
     }
 
     private static func clamped(_ value: TimeInterval, min: TimeInterval, max: TimeInterval) -> TimeInterval {

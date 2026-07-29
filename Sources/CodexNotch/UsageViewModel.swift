@@ -6,6 +6,7 @@ final class UsageViewModel: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot = .empty
     @Published private(set) var isRefreshing = false
     @Published private(set) var isRefreshingUsage = false
+    @Published private(set) var hasLoadedUsageTotals = false
 
     private let store: CodexUsageStore
     private let settings: CodexNotchSettings
@@ -26,12 +27,12 @@ final class UsageViewModel: ObservableObject {
     private var isRefreshingWatchPaths = false
     private var pendingSnapshotRefresh = false
     private var pendingSnapshotBypassFastCache = false
-    private var pendingUsageRefresh = false
     private var pendingWatchPathsRefresh = false
     private var lastFileChangeRefreshScheduledAt: Date = .distantPast
     private var lastUsageRefreshDuration: TimeInterval?
-    private var lastUsageRefreshCompletedAt: Date?
     private var periodUsageRefreshEnabled = false
+    private var usageRefreshQueue = UsageRefreshQueue()
+    private var usageLoadState = PeriodUsageLoadState()
     private var watcherRefreshGeneration = 0
     private var observedSettings: LocalUsageSettingsSnapshot?
 
@@ -68,7 +69,8 @@ final class UsageViewModel: ObservableObject {
                 taskHistoryRange: taskHistoryRange
             )
             await MainActor.run {
-                let wasRunning = self.snapshot.isRunning
+                let snapshotLoadSucceeded = nextSnapshot.errorMessage == nil
+                let previousTasks = self.snapshot.tasks
                 var mergedSnapshot = self.stabilizedSnapshot(nextSnapshot)
                 mergedSnapshot.usage24h = self.snapshot.usage24h
                 mergedSnapshot.usage7d = self.snapshot.usage7d
@@ -80,7 +82,11 @@ final class UsageViewModel: ObservableObject {
                 let shouldBypassFastCache = self.pendingSnapshotBypassFastCache
                 self.pendingSnapshotRefresh = false
                 self.pendingSnapshotBypassFastCache = false
-                if wasRunning && !self.snapshot.isRunning {
+                if snapshotLoadSucceeded,
+                   !TaskCompletionDetector.completedRunningTaskIDs(
+                    previous: previousTasks,
+                    current: self.snapshot.tasks
+                ).isEmpty {
                     self.scheduleCompletionFollowUp()
                     self.scheduleCompletionUsageRefresh()
                 }
@@ -111,9 +117,13 @@ final class UsageViewModel: ObservableObject {
     }
 
     func refreshUsageTotalsIfStale(maxAge: TimeInterval = 120) {
+        guard settings.showPeriodUsage else {
+            disableUsageTotals()
+            return
+        }
         periodUsageRefreshEnabled = true
         let now = Date()
-        let shouldRefresh = lastUsageRefreshCompletedAt.map { now.timeIntervalSince($0) >= maxAge } ?? true
+        let shouldRefresh = usageLoadState.lastSuccessfulAt.map { now.timeIntervalSince($0) >= maxAge } ?? true
         if shouldRefresh {
             refreshUsageTotals(scheduleNext: true)
         } else {
@@ -121,21 +131,30 @@ final class UsageViewModel: ObservableObject {
         }
     }
 
-    func pauseUsageTotals() {
+    func pausePeriodicUsageRefresh() {
         periodUsageRefreshEnabled = false
         usageTimer?.invalidate()
         usageTimer = nil
-        pendingUsageTimer?.invalidate()
-        pendingUsageTimer = nil
         usageFileChangeTimer?.invalidate()
         usageFileChangeTimer = nil
-        pendingUsageRefresh = false
+    }
+
+    func disableUsageTotals() {
+        pausePeriodicUsageRefresh()
+        pendingUsageTimer?.invalidate()
+        pendingUsageTimer = nil
+        completionUsageRefreshTimer?.invalidate()
+        completionUsageRefreshTimer = nil
+        usageRefreshQueue.cancelPending()
     }
 
     private func refreshUsageTotals(scheduleNext: Bool? = nil) {
+        guard settings.showPeriodUsage else {
+            disableUsageTotals()
+            return
+        }
         let shouldScheduleNext = scheduleNext ?? periodUsageRefreshEnabled
-        guard !isRefreshingUsage else {
-            pendingUsageRefresh = pendingUsageRefresh || shouldScheduleNext
+        guard usageRefreshQueue.request(scheduleNext: shouldScheduleNext) else {
             return
         }
         usageTimer?.invalidate()
@@ -151,20 +170,44 @@ final class UsageViewModel: ObservableObject {
             let duration = Date().timeIntervalSince(refreshStartedAt)
             await MainActor.run {
                 self.lastUsageRefreshDuration = duration
-                self.lastUsageRefreshCompletedAt = Date()
+                let completedAt = Date()
+                let succeeded = self.usageLoadState.record(
+                    usage,
+                    completedAt: completedAt
+                )
                 if let usage {
                     self.snapshot.usage24h = usage.day
                     self.snapshot.usage7d = usage.week
                     self.snapshot.usage30d = usage.month
                 }
+                self.hasLoadedUsageTotals = self.usageLoadState.hasSuccessfulValue
+                let completion = self.usageRefreshQueue.complete()
                 self.isRefreshingUsage = false
                 self.updateRefreshingState()
-                let shouldRefreshAgain = self.pendingUsageRefresh
-                self.pendingUsageRefresh = false
-                if shouldRefreshAgain {
-                    self.schedulePendingUsageRefresh()
-                } else if shouldScheduleNext && self.periodUsageRefreshEnabled {
-                    self.scheduleUsageRefresh()
+                switch completion {
+                case .schedulePending(let scheduleNext):
+                    let delay = succeeded
+                        ? RefreshCadence.pendingUsageDelay(for: self.settings.usageRefreshInterval)
+                        : UsageRefreshCadence.failureRetryDelay(
+                            consecutiveFailures: self.usageLoadState.consecutiveFailures
+                        )
+                    self.schedulePendingUsageRefresh(
+                        scheduleNext: scheduleNext,
+                        delay: delay
+                    )
+                case .finished(let scheduleNext):
+                    if !succeeded,
+                       self.usageLoadState.consecutiveFailures <= UsageRefreshCadence.maximumFailureRetries,
+                       self.settings.showPeriodUsage {
+                        self.schedulePendingUsageRefresh(
+                            scheduleNext: scheduleNext,
+                            delay: UsageRefreshCadence.failureRetryDelay(
+                                consecutiveFailures: self.usageLoadState.consecutiveFailures
+                            )
+                        )
+                    } else if scheduleNext && self.periodUsageRefreshEnabled {
+                        self.scheduleUsageRefresh()
+                    }
                 }
             }
         }
@@ -213,16 +256,18 @@ final class UsageViewModel: ObservableObject {
         usageTimer = timer
     }
 
-    private func schedulePendingUsageRefresh() {
+    private func schedulePendingUsageRefresh(
+        scheduleNext: Bool,
+        delay: TimeInterval
+    ) {
         usageTimer?.invalidate()
         usageTimer = nil
         pendingUsageTimer?.invalidate()
 
-        let delay = RefreshCadence.pendingUsageDelay(for: settings.usageRefreshInterval)
         let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.pendingUsageTimer = nil
-                self?.refreshUsageTotals(scheduleNext: true)
+                self?.refreshUsageTotals(scheduleNext: scheduleNext)
             }
         }
         timer.tolerance = min(5, delay * 0.35)
@@ -254,11 +299,14 @@ final class UsageViewModel: ObservableObject {
     }
 
     private func scheduleCompletionUsageRefresh() {
+        guard settings.showPeriodUsage else {
+            return
+        }
         completionUsageRefreshTimer?.invalidate()
 
         let delay = UsageRefreshCadence.fileChangeDelay(
             now: Date(),
-            lastCompletedAt: lastUsageRefreshCompletedAt
+            lastCompletedAt: usageLoadState.lastSuccessfulAt
         )
         let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -356,7 +404,7 @@ final class UsageViewModel: ObservableObject {
 
         let delay = UsageRefreshCadence.fileChangeDelay(
             now: now,
-            lastCompletedAt: lastUsageRefreshCompletedAt
+            lastCompletedAt: usageLoadState.lastSuccessfulAt
         )
         let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -417,17 +465,15 @@ final class UsageViewModel: ObservableObject {
         usageTimer = nil
         pendingSnapshotTimer?.invalidate()
         pendingSnapshotTimer = nil
-        pendingUsageTimer?.invalidate()
-        pendingUsageTimer = nil
-        completionUsageRefreshTimer?.invalidate()
-        completionUsageRefreshTimer = nil
         usageFileChangeTimer?.invalidate()
         usageFileChangeTimer = nil
         watcherRefreshTimer?.invalidate()
         watcherRefreshTimer = nil
 
         refresh(bypassFastCache: true)
-        if periodUsageRefreshEnabled {
+        if !settings.showPeriodUsage {
+            disableUsageTotals()
+        } else if periodUsageRefreshEnabled {
             refreshUsageTotals(scheduleNext: true)
         }
         refreshWatchPaths()
@@ -468,7 +514,6 @@ final class UsageViewModel: ObservableObject {
                         id: task.id,
                         title: task.title,
                         status: task.status == .running ? .recent : task.status,
-                        detail: task.detail,
                         detailPrefix: task.detailPrefix,
                         tokenCount: task.tokenCount,
                         updatedAt: task.updatedAt,

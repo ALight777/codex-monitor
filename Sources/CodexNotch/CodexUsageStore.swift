@@ -1227,13 +1227,11 @@ final class CodexUsageStore: @unchecked Sendable {
             let model = thread.model ?? "模型未知"
             let effort = localizedEffort(thread.reasoningEffort)
             let detailPrefix = "\(model) · \(effort)"
-            let detail = "\(detailPrefix) · \(Formatters.relativeAge(updatedAt, now: now))前"
 
             return CodexTask(
                 id: thread.id,
                 title: Formatters.shortTitle(thread.title),
                 status: status,
-                detail: detail,
                 detailPrefix: detailPrefix,
                 tokenCount: thread.tokensUsed,
                 updatedAt: updatedAt,

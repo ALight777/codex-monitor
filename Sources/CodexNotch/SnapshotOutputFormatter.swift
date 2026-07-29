@@ -129,7 +129,7 @@ private struct SnapshotTaskJSON: Encodable {
         self.title = task.title
         self.status = task.status.rawValue
         self.statusLabel = task.status.label
-        self.detail = task.detail
+        self.detail = task.displayDetail()
         self.tokens = task.tokenCount
         self.subagents = task.activeSubagentCount
         self.updatedAt = ISO8601DateFormatter().string(from: task.updatedAt)

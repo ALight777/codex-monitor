@@ -12,6 +12,9 @@ DMG_STAGE_DIR="$DIST_DIR/dmg-stage"
 PACKAGE_STAGE_DIR="$DIST_DIR/package-stage"
 
 cd "$ROOT_DIR"
+if [[ "${CODEX_NOTCH_SKIP_TESTS:-0}" != "1" ]]; then
+  "$ROOT_DIR/scripts/run-regression-tests.sh"
+fi
 swift "$ROOT_DIR/scripts/generate-app-icon.swift"
 find "$DIST_DIR" -maxdepth 1 -type f \( -name "$APP_NAME.dmg" -o -name "$APP_NAME-*.dmg" -o -name "$PACKAGE_NAME-*.dmg" \) -delete
 rm -rf "$DMG_STAGE_DIR" "$PACKAGE_STAGE_DIR"

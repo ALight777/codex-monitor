@@ -641,18 +641,20 @@ struct DetailPanelView: View {
 
     private var localContent: some View {
         VStack(spacing: 10) {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 7) {
-                    ForEach(displayedTasks) { task in
-                        TaskRow(task: task)
-                    }
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 7) {
+                        ForEach(displayedTasks) { task in
+                            TaskRow(task: task, now: context.date)
+                        }
 
-                    if displayedTasks.isEmpty {
-                        emptyState
+                        if displayedTasks.isEmpty {
+                            emptyState
+                        }
                     }
                 }
+                .frame(maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxHeight: .infinity, alignment: .top)
 
             if settings.showPeriodUsage {
                 periodUsage
@@ -852,17 +854,17 @@ struct DetailPanelView: View {
     private var periodUsage: some View {
         HStack(spacing: 8) {
             PeriodUsageCell(label: "24小时", value: localPeriodUsageText(snapshot.usage24h))
-            PeriodUsageCell(label: "7天", value: Formatters.compactTokens(snapshot.usage7d))
-            PeriodUsageCell(label: "30天", value: Formatters.compactTokens(snapshot.usage30d))
+            PeriodUsageCell(label: "7天", value: localPeriodUsageText(snapshot.usage7d))
+            PeriodUsageCell(label: "30天", value: localPeriodUsageText(snapshot.usage30d))
         }
         .padding(.top, 1)
     }
 
     private func localPeriodUsageText(_ tokens: Int) -> String {
-        if tokens == 0, viewModel.isRefreshingUsage {
-            return "--"
-        }
-        return Formatters.compactTokens(tokens)
+        PeriodUsageDisplay.text(
+            tokens: tokens,
+            hasLoaded: viewModel.hasLoadedUsageTotals
+        )
     }
 }
 
@@ -972,6 +974,7 @@ private struct RefreshIcon: View {
 
 private struct TaskRow: View {
     let task: CodexTask
+    let now: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -990,12 +993,10 @@ private struct TaskRow: View {
             }
 
             HStack(spacing: 6) {
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(task.displayDetail(now: context.date))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.56))
-                        .lineLimit(1)
-                }
+                Text(task.displayDetail(now: now))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.56))
+                    .lineLimit(1)
 
                 Spacer(minLength: 8)
 

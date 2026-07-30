@@ -44,6 +44,8 @@ final class CodexNotchSettings: ObservableObject {
         static let remoteMonitorEnabled = "remoteMonitorEnabled"
         static let remoteCodexDataSource = "remoteCodexDataSource"
         static let cliproxyPanelURL = "cliproxyPanelURL"
+        static let remoteAccountSources = "remoteAccountSources"
+        static let remoteAccountSourcesMigrationVersion = "remoteAccountSourcesMigrationVersion"
         static let cliproxyRefreshInterval = "cliproxyRefreshInterval"
         static let cliproxyRequestTimeout = "cliproxyRequestTimeout"
         static let cliproxyAllowInsecureTLS = "cliproxyAllowInsecureTLS"
@@ -67,6 +69,7 @@ final class CodexNotchSettings: ObservableObject {
         static let subAPIWarningThreshold = "subAPIWarningThreshold"
         static let subAPIAlertThreshold = "subAPIAlertThreshold"
         static let secretStorageMode = "secretStorageMode"
+        static let legacyKeychainMigrationVersion = "legacyKeychainMigrationVersion"
     }
 
     private let defaults: UserDefaults
@@ -149,56 +152,15 @@ final class CodexNotchSettings: ObservableObject {
         }
     }
 
-    @Published var remoteCodexDataSource: RemoteCodexDataSource {
+    @Published var remoteAccountSources: [RemoteAccountSourceConfiguration] {
         didSet {
-            defaults.set(remoteCodexDataSource.rawValue, forKey: Keys.remoteCodexDataSource)
-        }
-    }
-
-    @Published var cliproxyPanelURL: String {
-        didSet {
-            let trimmed = cliproxyPanelURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            if cliproxyPanelURL != trimmed {
-                cliproxyPanelURL = trimmed
-                return
-            }
-            if Self.managementOrigin(from: oldValue) != Self.managementOrigin(from: trimmed),
-               !oldValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               !cliproxyManagementKey.isEmpty {
-                cliproxyManagementKey = ""
-            }
-            defaults.set(trimmed, forKey: Keys.cliproxyPanelURL)
-            markSecretConfigurationEdited()
-        }
-    }
-
-    @Published var cliproxyManagementKey: String {
-        didSet {
-            persistCliproxyManagementKey()
+            persistRemoteAccountSources(remoteAccountSources, oldSources: oldValue)
         }
     }
 
     @Published var cliproxyRefreshInterval: TimeInterval {
         didSet {
             normalizeCliproxyRefreshInterval()
-        }
-    }
-
-    @Published var cliproxyRequestTimeout: TimeInterval {
-        didSet {
-            normalizeCliproxyRequestTimeout()
-        }
-    }
-
-    @Published var cliproxyAllowInsecureTLS: Bool {
-        didSet {
-            if oldValue != cliproxyAllowInsecureTLS, !cliproxyManagementKey.isEmpty {
-                cliproxyManagementKey = ""
-            }
-            defaults.set(cliproxyAllowInsecureTLS, forKey: Keys.cliproxyAllowInsecureTLS)
-            if oldValue != cliproxyAllowInsecureTLS {
-                markSecretConfigurationEdited()
-            }
         }
     }
 
@@ -363,6 +325,7 @@ final class CodexNotchSettings: ObservableObject {
     @Published private(set) var subAPIKeychainError: String?
     @Published private(set) var secretStorageMode: SecretStorageMode
     @Published private(set) var secretStorageError: String?
+    @Published private(set) var secretStoreReady: Bool
 
     init(
         defaults: UserDefaults = .standard,
@@ -378,6 +341,7 @@ final class CodexNotchSettings: ObservableObject {
         self.secretStores = secretStores
         let loadedSecretStorageMode = SecretStorageMode(rawValue: defaults.string(forKey: Keys.secretStorageMode) ?? "") ?? .keychain
         self.secretStorageMode = loadedSecretStorageMode
+        self.secretStoreReady = loadSecretsSynchronously
         let secretLoad = Self.loadSecrets(
             defaults: defaults,
             mode: loadedSecretStorageMode,
@@ -406,12 +370,8 @@ final class CodexNotchSettings: ObservableObject {
             max: NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit)
         )
         self.remoteMonitorEnabled = defaults.object(forKey: Keys.remoteMonitorEnabled) as? Bool ?? false
-        self.remoteCodexDataSource = RemoteCodexDataSource(rawValue: defaults.string(forKey: Keys.remoteCodexDataSource) ?? "") ?? .cpaManagerPlus
-        self.cliproxyPanelURL = defaults.string(forKey: Keys.cliproxyPanelURL) ?? ""
-        self.cliproxyManagementKey = loadedVault.value(for: .cliproxyManagement)
+        self.remoteAccountSources = []
         self.cliproxyRefreshInterval = Self.clamped(defaults.object(forKey: Keys.cliproxyRefreshInterval) as? TimeInterval ?? 60, min: 60, max: 3_600)
-        self.cliproxyRequestTimeout = Self.clamped(defaults.object(forKey: Keys.cliproxyRequestTimeout) as? TimeInterval ?? 6, min: 3, max: 30)
-        self.cliproxyAllowInsecureTLS = defaults.object(forKey: Keys.cliproxyAllowInsecureTLS) as? Bool ?? false
         self.newAPIMonitorEnabled = defaults.object(forKey: Keys.newAPIMonitorEnabled) as? Bool ?? false
         self.newAPIPanelURL = defaults.string(forKey: Keys.newAPIPanelURL) ?? ""
         self.newAPIManagementKey = loadedVault.value(for: .newAPIManagement)
@@ -445,14 +405,30 @@ final class CodexNotchSettings: ObservableObject {
         self.newAPIKeychainError = secretLoad.newAPIAccounts.keychainError
         self.subAPIAccounts = secretLoad.subAPIAccounts.accounts
         self.subAPIKeychainError = secretLoad.subAPIAccounts.keychainError
+        self.remoteAccountSources = secretLoad.remoteAccountSources.sources
+        if let remoteError = secretLoad.remoteAccountSources.keychainError {
+            self.cliproxyKeychainError = remoteError
+        }
         self.secretVault = loadedVault
+        if loadSecretsSynchronously,
+           secretLoad.remoteAccountSources.needsConfigurationPersistence {
+            Self.persistMigratedRemoteAccountSources(
+                secretLoad.remoteAccountSources.sources,
+                defaults: defaults
+            )
+        }
+        var persistedLegacyMigration = !migratedSecretVault
         if migratedSecretVault {
             do {
                 try secretStores.store(for: secretStorageMode).saveVault(loadedVault)
                 self.secretStorageError = nil
+                persistedLegacyMigration = true
             } catch {
                 self.secretStorageError = error.localizedDescription
             }
+        }
+        if secretLoad.legacyKeychainMigrationAttempted, persistedLegacyMigration {
+            defaults.set(1, forKey: Keys.legacyKeychainMigrationVersion)
         }
         self.isInitializing = false
         if !loadSecretsSynchronously {
@@ -495,43 +471,6 @@ final class CodexNotchSettings: ObservableObject {
         usageRefreshInterval = 300
         watcherRefreshInterval = 12
         fileChangeRefreshMinimumGap = 3
-    }
-
-    static func managementKeyForSave(
-        draftKey: String,
-        oldPanelURL: String,
-        newPanelURL: String,
-        oldAllowsInsecureTLS: Bool,
-        newAllowsInsecureTLS: Bool,
-        remoteEnabled: Bool,
-        oldDataSource: RemoteCodexDataSource? = nil,
-        newDataSource: RemoteCodexDataSource? = nil,
-        oldSavedKey: String? = nil
-    ) -> String {
-        guard remoteEnabled else {
-            return ""
-        }
-
-        let oldOrigin = managementOrigin(from: oldPanelURL)
-        let newOrigin = managementOrigin(from: newPanelURL)
-        let originChanged = originChanged(
-            oldURL: oldPanelURL,
-            newURL: newPanelURL,
-            oldOrigin: oldOrigin,
-            newOrigin: newOrigin
-        )
-        let tlsModeChanged = oldAllowsInsecureTLS != newAllowsInsecureTLS
-        let sourceChanged = oldDataSource != nil && newDataSource != nil && oldDataSource != newDataSource
-        guard !originChanged, !tlsModeChanged, !sourceChanged else {
-            if let oldSavedKey,
-               !draftKey.isEmpty,
-               draftKey != oldSavedKey {
-                return draftKey
-            }
-            return ""
-        }
-
-        return draftKey
     }
 
     static func apiKeyForSave(
@@ -590,12 +529,21 @@ final class CodexNotchSettings: ObservableObject {
     ) -> SecretLoadResult {
         var loadedVault = (try? secretStores.store(for: mode).loadVault()) ?? SecretVault()
         var migratedSecretVault = false
+        let shouldMigrateLegacyKeychain = includeLegacyKeychain
+            && defaults.integer(forKey: Keys.legacyKeychainMigrationVersion) < 1
+        let shouldReadLegacyRemoteKeychain = shouldMigrateLegacyKeychain
+            && defaults.data(forKey: Keys.remoteAccountSources) == nil
+            && defaults.integer(forKey: Keys.remoteAccountSourcesMigrationVersion) < 1
+        let shouldReadLegacyNewAPIKeychain = shouldMigrateLegacyKeychain
+            && defaults.data(forKey: Keys.newAPIAccounts) == nil
+        let shouldReadLegacySubAPIKeychain = shouldMigrateLegacyKeychain
+            && defaults.data(forKey: Keys.subAPIAccounts) == nil
         migratedSecretVault = applyInitialOrLegacySecret(
             initialValue: initialManagementKey,
             key: .cliproxyManagement,
             legacyLocations: [(cliproxyKeychainService, cliproxyKeychainAccount)],
             vault: &loadedVault,
-            includeLegacyKeychain: includeLegacyKeychain
+            includeLegacyKeychain: shouldReadLegacyRemoteKeychain
         ) || migratedSecretVault
         migratedSecretVault = applyInitialOrLegacySecret(
             initialValue: initialNewAPIKey,
@@ -605,15 +553,43 @@ final class CodexNotchSettings: ObservableObject {
                 ("com.alight.codexnotch.newapi.management-key", cliproxyKeychainAccount)
             ],
             vault: &loadedVault,
-            includeLegacyKeychain: includeLegacyKeychain
+            includeLegacyKeychain: shouldReadLegacyNewAPIKeychain
         ) || migratedSecretVault
         migratedSecretVault = applyInitialOrLegacySecret(
             initialValue: initialSubAPIKey,
             key: .subAPIManagement,
             legacyLocations: [(subAPIKeychainService, cliproxyKeychainAccount)],
             vault: &loadedVault,
-            includeLegacyKeychain: includeLegacyKeychain
+            includeLegacyKeychain: shouldReadLegacySubAPIKeychain
         ) || migratedSecretVault
+
+        let legacyRemoteSource = RemoteCodexDataSource(
+            rawValue: defaults.string(forKey: Keys.remoteCodexDataSource) ?? ""
+        ) ?? .cpaManagerPlus
+        let compatibleLegacyRemoteSource: RemoteCodexDataSource =
+            legacyRemoteSource == .cliProxyAPI ? .cliProxyAPI : .cpaManagerPlus
+        let legacyRemote = RemoteAccountSourceConfiguration(
+            id: "legacy-remote-account-source",
+            source: compatibleLegacyRemoteSource,
+            enabled: true,
+            label: compatibleLegacyRemoteSource.label,
+            panelURL: defaults.string(forKey: Keys.cliproxyPanelURL) ?? "",
+            username: "",
+            secret: loadedVault.value(for: .cliproxyManagement),
+            allowInsecureTLS: defaults.object(forKey: Keys.cliproxyAllowInsecureTLS) as? Bool ?? false,
+            requestTimeout: clamped(
+                defaults.object(forKey: Keys.cliproxyRequestTimeout) as? TimeInterval ?? 6,
+                min: 3,
+                max: 30
+            )
+        )
+        let loadedRemoteAccountSources = loadRemoteAccountSources(
+            defaults: defaults,
+            vault: &loadedVault,
+            legacy: legacyRemote,
+            includeLegacyKeychain: shouldMigrateLegacyKeychain
+        )
+        migratedSecretVault = loadedRemoteAccountSources.migratedSecrets || migratedSecretVault
 
         let newAPIEnabled = defaults.object(forKey: Keys.newAPIMonitorEnabled) as? Bool ?? false
         let newAPIPanelURL = defaults.string(forKey: Keys.newAPIPanelURL) ?? ""
@@ -639,7 +615,7 @@ final class CodexNotchSettings: ObservableObject {
                 allowInsecureTLS: newAPIAllowInsecureTLS,
                 requestTimeout: newAPIRequestTimeout
             ),
-            includeLegacyKeychain: includeLegacyKeychain
+            includeLegacyKeychain: shouldMigrateLegacyKeychain
         )
         migratedSecretVault = loadedNewAPIAccounts.migratedSecrets || migratedSecretVault
 
@@ -665,13 +641,15 @@ final class CodexNotchSettings: ObservableObject {
                 allowInsecureTLS: subAPIAllowInsecureTLS,
                 requestTimeout: subAPIRequestTimeout
             ),
-            includeLegacyKeychain: includeLegacyKeychain
+            includeLegacyKeychain: shouldMigrateLegacyKeychain
         )
         migratedSecretVault = loadedSubAPIAccounts.migratedSecrets || migratedSecretVault
 
         return SecretLoadResult(
             vault: loadedVault,
             migratedSecretVault: migratedSecretVault,
+            legacyKeychainMigrationAttempted: shouldMigrateLegacyKeychain,
+            remoteAccountSources: loadedRemoteAccountSources,
             newAPIAccounts: loadedNewAPIAccounts,
             subAPIAccounts: loadedSubAPIAccounts
         )
@@ -703,6 +681,9 @@ final class CodexNotchSettings: ObservableObject {
     }
 
     private func applySecretLoadResult(_ result: SecretLoadResult, mode: SecretStorageMode, revision: Int) {
+        defer {
+            secretStoreReady = true
+        }
         guard mode == secretStorageMode,
               revision == secretConfigurationRevision else {
             return
@@ -710,7 +691,10 @@ final class CodexNotchSettings: ObservableObject {
 
         isApplyingSecretVault = true
         secretVault = result.vault
-        cliproxyManagementKey = result.vault.value(for: .cliproxyManagement)
+        remoteAccountSources = result.remoteAccountSources.sources
+        if let remoteError = result.remoteAccountSources.keychainError {
+            cliproxyKeychainError = remoteError
+        }
         newAPIManagementKey = result.vault.value(for: .newAPIManagement)
         subAPIManagementKey = result.vault.value(for: .subAPIManagement)
         newAPIAccounts = result.newAPIAccounts.accounts
@@ -719,14 +703,25 @@ final class CodexNotchSettings: ObservableObject {
         subAPIKeychainError = result.subAPIAccounts.keychainError
         isApplyingSecretVault = false
 
-        guard result.migratedSecretVault else {
-            return
+        if result.remoteAccountSources.needsConfigurationPersistence {
+            Self.persistMigratedRemoteAccountSources(
+                result.remoteAccountSources.sources,
+                defaults: defaults
+            )
         }
-        do {
-            try secretStores.store(for: secretStorageMode).saveVault(result.vault)
-            secretStorageError = nil
-        } catch {
-            secretStorageError = error.localizedDescription
+
+        var persistedLegacyMigration = !result.migratedSecretVault
+        if result.migratedSecretVault {
+            do {
+                try secretStores.store(for: secretStorageMode).saveVault(result.vault)
+                secretStorageError = nil
+                persistedLegacyMigration = true
+            } catch {
+                secretStorageError = error.localizedDescription
+            }
+        }
+        if result.legacyKeychainMigrationAttempted, persistedLegacyMigration {
+            defaults.set(1, forKey: Keys.legacyKeychainMigrationVersion)
         }
     }
 
@@ -758,6 +753,125 @@ final class CodexNotchSettings: ObservableObject {
         return false
     }
 
+    nonisolated private static func loadRemoteAccountSources(
+        defaults: UserDefaults,
+        vault: inout SecretVault,
+        legacy: RemoteAccountSourceConfiguration,
+        includeLegacyKeychain: Bool
+    ) -> RemoteAccountSourcesLoadResult {
+        if let data = defaults.data(forKey: Keys.remoteAccountSources) {
+            guard let decoded = try? JSONDecoder().decode(
+                [RemoteAccountSourceConfiguration].self,
+                from: data
+            ) else {
+                return RemoteAccountSourcesLoadResult(
+                    sources: [],
+                    keychainError: "远程账号配置损坏，已停止加载旧配置",
+                    migratedSecrets: false,
+                    needsConfigurationPersistence: false
+                )
+            }
+            var errors: [String] = []
+            var migratedSecrets = false
+            let sources = decoded.map { source in
+                var copy = source
+                let secretKey = SecretKey.remoteAccountSource(id: copy.id)
+                let bindingKey = SecretKey.remoteAccountSourceBinding(id: copy.id)
+                let expectedBinding = copy.credentialBindingID
+                let vaultSecret = vault.value(for: secretKey)
+                if !vaultSecret.isEmpty {
+                    guard let expectedBinding else {
+                        copy.secret = ""
+                        copy.secretReadFailed = true
+                        errors.append("\(copy.displayLabel)：面板地址无效，已阻止读取认证信息")
+                        return copy
+                    }
+                    let storedBinding = vault.value(for: bindingKey)
+                    if storedBinding.isEmpty {
+                        vault.set(expectedBinding, for: bindingKey)
+                        migratedSecrets = true
+                    } else if storedBinding != expectedBinding {
+                        copy.secret = ""
+                        copy.secretReadFailed = true
+                        errors.append("\(copy.displayLabel)：服务器或账号已变更，请重新输入认证信息")
+                        return copy
+                    }
+                    copy.secret = vaultSecret
+                    return copy
+                }
+                guard includeLegacyKeychain else {
+                    copy.secret = ""
+                    copy.secretReadFailed = false
+                    return copy
+                }
+                do {
+                    let legacySecret = try KeychainStore.read(
+                        service: "com.alight.codexnotch.remote-account-source",
+                        account: copy.id
+                    )
+                    if !legacySecret.isEmpty, let expectedBinding {
+                        copy.secret = legacySecret
+                        vault.set(legacySecret, for: secretKey)
+                        vault.set(expectedBinding, for: bindingKey)
+                        migratedSecrets = true
+                    } else if !legacySecret.isEmpty {
+                        copy.secret = ""
+                        copy.secretReadFailed = true
+                        errors.append("\(copy.displayLabel)：面板地址无效，未迁移认证信息")
+                    }
+                } catch {
+                    copy.secret = ""
+                    copy.secretReadFailed = true
+                    errors.append("\(copy.displayLabel)：\(error.localizedDescription)")
+                }
+                return copy
+            }
+            return RemoteAccountSourcesLoadResult(
+                sources: sources,
+                keychainError: errors.isEmpty ? nil : errors.joined(separator: "；"),
+                migratedSecrets: migratedSecrets,
+                needsConfigurationPersistence: false
+            )
+        }
+
+        if defaults.integer(forKey: Keys.remoteAccountSourcesMigrationVersion) >= 1 {
+            return RemoteAccountSourcesLoadResult(
+                sources: [],
+                keychainError: nil,
+                migratedSecrets: false,
+                needsConfigurationPersistence: false
+            )
+        }
+
+        let hasLegacyConfiguration = !legacy.panelURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !legacy.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !legacy.secret.isEmpty
+        guard hasLegacyConfiguration else {
+            return RemoteAccountSourcesLoadResult(
+                sources: [],
+                keychainError: nil,
+                migratedSecrets: false,
+                needsConfigurationPersistence: true
+            )
+        }
+
+        var migrated = legacy
+        if !migrated.secret.isEmpty, let binding = migrated.credentialBindingID {
+            vault.set(migrated.secret, for: .remoteAccountSource(id: migrated.id))
+            vault.set(binding, for: .remoteAccountSourceBinding(id: migrated.id))
+            vault.removeValue(for: .cliproxyManagement)
+        } else if !migrated.secret.isEmpty {
+            migrated.secret = ""
+            migrated.secretReadFailed = true
+        }
+        return RemoteAccountSourcesLoadResult(
+            sources: [migrated],
+            keychainError: nil,
+            migratedSecrets: !migrated.secret.isEmpty,
+            needsConfigurationPersistence: true
+        )
+    }
+
     nonisolated private static func loadBalanceAccounts(
         defaults: UserDefaults,
         key: String,
@@ -779,8 +893,26 @@ final class CodexNotchSettings: ObservableObject {
                 var copy = account
                 copy.source = source
                 let secretKey = SecretKey.balanceAccount(source: source, id: copy.id)
+                let bindingKey = SecretKey.balanceAccountBinding(source: source, id: copy.id)
+                let expectedBinding = copy.credentialBindingID
                 let vaultSecret = vault.value(for: secretKey)
                 if !vaultSecret.isEmpty {
+                    guard let expectedBinding else {
+                        copy.secret = ""
+                        copy.secretReadFailed = true
+                        keychainErrors.append("\(copy.displayLabel)：面板地址无效，已阻止读取认证信息")
+                        return copy
+                    }
+                    let storedBinding = vault.value(for: bindingKey)
+                    if storedBinding.isEmpty {
+                        vault.set(expectedBinding, for: bindingKey)
+                        migratedSecrets = true
+                    } else if storedBinding != expectedBinding {
+                        copy.secret = ""
+                        copy.secretReadFailed = true
+                        keychainErrors.append("\(copy.displayLabel)：服务器或账号已变更，请重新输入认证信息")
+                        return copy
+                    }
                     copy.secret = vaultSecret
                     return copy
                 }
@@ -791,10 +923,15 @@ final class CodexNotchSettings: ObservableObject {
                 }
                 do {
                     let legacySecret = try KeychainStore.read(service: service, account: copy.id)
-                    copy.secret = legacySecret
-                    if !legacySecret.isEmpty {
+                    if !legacySecret.isEmpty, let expectedBinding {
+                        copy.secret = legacySecret
                         vault.set(legacySecret, for: secretKey)
+                        vault.set(expectedBinding, for: bindingKey)
                         migratedSecrets = true
+                    } else if !legacySecret.isEmpty {
+                        copy.secret = ""
+                        copy.secretReadFailed = true
+                        keychainErrors.append("\(copy.displayLabel)：面板地址无效，未迁移认证信息")
                     }
                 } catch {
                     copy.secret = ""
@@ -810,10 +947,28 @@ final class CodexNotchSettings: ObservableObject {
             )
         }
 
+        var migratedLegacy = legacy
+        var migratedSecret = false
+        if hasLegacyConfiguration,
+           !migratedLegacy.secret.isEmpty,
+           let binding = migratedLegacy.credentialBindingID {
+            vault.set(
+                migratedLegacy.secret,
+                for: .balanceAccount(source: source, id: migratedLegacy.id)
+            )
+            vault.set(
+                binding,
+                for: .balanceAccountBinding(source: source, id: migratedLegacy.id)
+            )
+            migratedSecret = true
+        } else if hasLegacyConfiguration, !migratedLegacy.secret.isEmpty {
+            migratedLegacy.secret = ""
+            migratedLegacy.secretReadFailed = true
+        }
         return BalanceAccountsLoadResult(
-            accounts: hasLegacyConfiguration ? [legacy] : [],
+            accounts: hasLegacyConfiguration ? [migratedLegacy] : [],
             keychainError: nil,
-            migratedSecrets: false
+            migratedSecrets: migratedSecret
         )
     }
 
@@ -841,6 +996,19 @@ final class CodexNotchSettings: ObservableObject {
             newAPIAccounts
         case .subAPI:
             subAPIAccounts
+        }
+    }
+
+    func setRemoteAccountSources(_ sources: [RemoteAccountSourceConfiguration]) {
+        let currentByID = Dictionary(
+            remoteAccountSources.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+        remoteAccountSources = sources.map { source in
+            Self.sanitizedRemoteAccountSourceForSave(
+                source,
+                oldSource: currentByID[source.id]
+            )
         }
     }
 
@@ -942,20 +1110,6 @@ final class CodexNotchSettings: ObservableObject {
         secretConfigurationRevision += 1
     }
 
-    private func persistCliproxyManagementKey() {
-        guard !isInitializing && !isApplyingSecretVault else {
-            return
-        }
-        markSecretConfigurationEdited()
-        secretVault.set(cliproxyManagementKey, for: .cliproxyManagement)
-        do {
-            try persistSecretVault()
-            cliproxyKeychainError = nil
-        } catch {
-            cliproxyKeychainError = error.localizedDescription
-        }
-    }
-
     private func persistBalanceManagementKey(_ value: String, key: SecretKey, source: BalanceMonitorSource) {
         guard !isInitializing && !isApplyingSecretVault else {
             return
@@ -978,8 +1132,8 @@ final class CodexNotchSettings: ObservableObject {
         }
     }
 
-    private func persistSecretVault() throws {
-        try secretStores.store(for: secretStorageMode).saveVault(secretVault)
+    private func persistSecretVault(_ vault: SecretVault? = nil) throws {
+        try secretStores.store(for: secretStorageMode).saveVault(vault ?? secretVault)
         secretStorageError = nil
     }
 
@@ -1010,32 +1164,40 @@ final class CodexNotchSettings: ObservableObject {
             return
         }
         markSecretConfigurationEdited()
-        var keychainError: String?
         do {
+            let data = try JSONEncoder().encode(accounts)
+            var candidateVault = secretVault
             for account in accounts {
                 if account.secretReadFailed && account.secret.isEmpty {
                     continue
                 }
-                secretVault.set(account.secret, for: .balanceAccount(source: source, id: account.id))
+                let secretKey = SecretKey.balanceAccount(source: source, id: account.id)
+                let bindingKey = SecretKey.balanceAccountBinding(source: source, id: account.id)
+                if account.secret.isEmpty {
+                    candidateVault.removeValue(for: secretKey)
+                    candidateVault.removeValue(for: bindingKey)
+                } else {
+                    guard let binding = account.credentialBindingID else {
+                        throw SecretConfigurationPersistenceError.invalidBinding(account.displayLabel)
+                    }
+                    candidateVault.set(account.secret, for: secretKey)
+                    candidateVault.set(binding, for: bindingKey)
+                }
             }
             let newIDs = Set(accounts.map(\.id))
             for oldAccount in oldAccounts where !newIDs.contains(oldAccount.id) {
-                secretVault.removeValue(for: .balanceAccount(source: source, id: oldAccount.id))
+                candidateVault.removeValue(for: .balanceAccount(source: source, id: oldAccount.id))
+                candidateVault.removeValue(for: .balanceAccountBinding(source: source, id: oldAccount.id))
             }
-            try persistSecretVault()
-        } catch {
-            keychainError = error.localizedDescription
-        }
-
-        do {
-            let data = try JSONEncoder().encode(accounts)
+            try persistSecretVault(candidateVault)
+            secretVault = candidateVault
             switch source {
             case .newAPI:
                 defaults.set(data, forKey: Keys.newAPIAccounts)
-                newAPIKeychainError = keychainError
+                newAPIKeychainError = nil
             case .subAPI:
                 defaults.set(data, forKey: Keys.subAPIAccounts)
-                subAPIKeychainError = keychainError
+                subAPIKeychainError = nil
             }
         } catch {
             switch source {
@@ -1044,7 +1206,75 @@ final class CodexNotchSettings: ObservableObject {
             case .subAPI:
                 subAPIKeychainError = error.localizedDescription
             }
+            isApplyingSecretVault = true
+            switch source {
+            case .newAPI:
+                newAPIAccounts = oldAccounts
+            case .subAPI:
+                subAPIAccounts = oldAccounts
+            }
+            isApplyingSecretVault = false
         }
+    }
+
+    private func persistRemoteAccountSources(
+        _ sources: [RemoteAccountSourceConfiguration],
+        oldSources: [RemoteAccountSourceConfiguration]
+    ) {
+        guard !isInitializing && !isApplyingSecretVault else {
+            return
+        }
+        markSecretConfigurationEdited()
+        do {
+            let data = try JSONEncoder().encode(sources)
+            var candidateVault = secretVault
+            for source in sources {
+                if source.secretReadFailed && source.secret.isEmpty {
+                    continue
+                }
+                let secretKey = SecretKey.remoteAccountSource(id: source.id)
+                let bindingKey = SecretKey.remoteAccountSourceBinding(id: source.id)
+                if source.secret.isEmpty {
+                    candidateVault.removeValue(for: secretKey)
+                    candidateVault.removeValue(for: bindingKey)
+                } else {
+                    guard let binding = source.credentialBindingID else {
+                        throw SecretConfigurationPersistenceError.invalidBinding(source.displayLabel)
+                    }
+                    candidateVault.set(source.secret, for: secretKey)
+                    candidateVault.set(binding, for: bindingKey)
+                }
+            }
+            let newIDs = Set(sources.map(\.id))
+            for oldSource in oldSources where !newIDs.contains(oldSource.id) {
+                candidateVault.removeValue(for: .remoteAccountSource(id: oldSource.id))
+                candidateVault.removeValue(for: .remoteAccountSourceBinding(id: oldSource.id))
+            }
+            if !sources.isEmpty {
+                candidateVault.removeValue(for: .cliproxyManagement)
+            }
+            try persistSecretVault(candidateVault)
+            secretVault = candidateVault
+            defaults.set(data, forKey: Keys.remoteAccountSources)
+            defaults.set(1, forKey: Keys.remoteAccountSourcesMigrationVersion)
+            cliproxyKeychainError = nil
+        } catch {
+            cliproxyKeychainError = error.localizedDescription
+            isApplyingSecretVault = true
+            remoteAccountSources = oldSources
+            isApplyingSecretVault = false
+        }
+    }
+
+    nonisolated private static func persistMigratedRemoteAccountSources(
+        _ sources: [RemoteAccountSourceConfiguration],
+        defaults: UserDefaults
+    ) {
+        guard let data = try? JSONEncoder().encode(sources) else {
+            return
+        }
+        defaults.set(data, forKey: Keys.remoteAccountSources)
+        defaults.set(1, forKey: Keys.remoteAccountSourcesMigrationVersion)
     }
 
     private func sanitizedBalanceAccount(
@@ -1073,7 +1303,47 @@ final class CodexNotchSettings: ObservableObject {
             newOrigin: Self.apiOrigin(from: copy.panelURL)
         )
         let tlsModeChanged = oldAccount.allowInsecureTLS != copy.allowInsecureTLS
-        if (originChanged || tlsModeChanged), copy.secret == oldAccount.secret {
+        let principalChanged = oldAccount.username
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare(
+                copy.username.trimmingCharacters(in: .whitespacesAndNewlines)
+            ) != .orderedSame
+        if (originChanged || tlsModeChanged || principalChanged),
+           copy.secret == oldAccount.secret {
+            copy.secret = ""
+            copy.secretReadFailed = false
+        }
+        return copy
+    }
+
+    static func sanitizedRemoteAccountSourceForSave(
+        _ source: RemoteAccountSourceConfiguration,
+        oldSource: RemoteAccountSourceConfiguration?
+    ) -> RemoteAccountSourceConfiguration {
+        var copy = source
+        copy.requestTimeout = clamped(copy.requestTimeout, min: 3, max: 30)
+        copy.panelURL = copy.panelURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        copy.username = copy.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        copy.label = copy.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !copy.secret.isEmpty {
+            copy.secretReadFailed = false
+        }
+        guard let oldSource else {
+            return copy
+        }
+        let originChanged = originChanged(
+            oldURL: oldSource.panelURL,
+            newURL: copy.panelURL,
+            oldOrigin: apiOrigin(from: oldSource.panelURL),
+            newOrigin: apiOrigin(from: copy.panelURL)
+        )
+        let tlsModeChanged = oldSource.allowInsecureTLS != copy.allowInsecureTLS
+        let providerChanged = oldSource.source != copy.source
+        let principalChanged = oldSource.username
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare(copy.username) != .orderedSame
+        if (originChanged || tlsModeChanged || providerChanged || principalChanged),
+           copy.secret == oldSource.secret {
             copy.secret = ""
             copy.secretReadFailed = false
         }
@@ -1149,18 +1419,6 @@ final class CodexNotchSettings: ObservableObject {
         )
         if cliproxyRefreshInterval != value {
             cliproxyRefreshInterval = value
-        }
-    }
-
-    private func normalizeCliproxyRequestTimeout() {
-        let value = normalized(
-            cliproxyRequestTimeout,
-            min: 3,
-            max: 30,
-            key: Keys.cliproxyRequestTimeout
-        )
-        if cliproxyRequestTimeout != value {
-            cliproxyRequestTimeout = value
         }
     }
 
@@ -1259,16 +1517,6 @@ final class CodexNotchSettings: ObservableObject {
         return true
     }
 
-    private static func managementOrigin(from input: String) -> String? {
-        guard let url = CLIProxyAPIClient.managementBaseURL(from: input),
-              let scheme = url.scheme,
-              let host = url.host else {
-            return nil
-        }
-        let port = url.port.map { ":\($0)" } ?? ""
-        return "\(scheme)://\(host.lowercased())\(port)"
-    }
-
     private static func apiOrigin(from input: String) -> String? {
         guard let url = BalanceAPIClient.apiBaseURL(from: input),
               let scheme = url.scheme,
@@ -1286,11 +1534,31 @@ private struct BalanceAccountsLoadResult {
     let migratedSecrets: Bool
 }
 
+private struct RemoteAccountSourcesLoadResult {
+    let sources: [RemoteAccountSourceConfiguration]
+    let keychainError: String?
+    let migratedSecrets: Bool
+    let needsConfigurationPersistence: Bool
+}
+
 private struct SecretLoadResult {
     let vault: SecretVault
     let migratedSecretVault: Bool
+    let legacyKeychainMigrationAttempted: Bool
+    let remoteAccountSources: RemoteAccountSourcesLoadResult
     let newAPIAccounts: BalanceAccountsLoadResult
     let subAPIAccounts: BalanceAccountsLoadResult
+}
+
+private enum SecretConfigurationPersistenceError: LocalizedError {
+    case invalidBinding(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidBinding(let label):
+            "\(label) 的服务器地址无效，认证信息未保存"
+        }
+    }
 }
 
 private struct SendableUserDefaults: @unchecked Sendable {

@@ -97,8 +97,8 @@ runner.check(
     "expanded detail frame height should equal detail height"
 )
 
-runner.check(AppInfo.version == "0.1.9", "app info should expose version 0.1.9")
-runner.check(AppInfo.displayVersion == "0.1.9", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.1.10", "app info should expose version 0.1.10")
+runner.check(AppInfo.displayVersion == "0.1.10", "app info should fall back to source version when bundle version is unavailable")
 
 let resetCreditsNow = Date(timeIntervalSince1970: 1_784_500_000)
 let appServerResetCreditsJSON = Data(#"""
@@ -965,6 +965,14 @@ runner.check(
     cacheBoundary.fresh(panelURL: "https://panel.example.com", authIndex: "Auth-B") == nil,
     "reset-credit cache should isolate auth indexes"
 )
+runner.check(
+    cacheBoundary.fresh(
+        panelURL: "https://panel.example.com",
+        authIndex: "Auth-A",
+        scopeID: "another-source"
+    ) == nil,
+    "reset-credit cache should isolate data-source configurations on the same panel"
+)
 remoteResetCreditsClock.advance(by: 3_599)
 runner.check(
     cacheBoundary.fresh(panelURL: "https://panel.example.com", authIndex: "Auth-A") != nil,
@@ -1645,22 +1653,36 @@ let asyncSecretDefaults = runner.require(
 )
 asyncSecretDefaults.removePersistentDomain(forName: asyncSecretSuiteName)
 var staleAsyncVault = SecretVault()
-staleAsyncVault.set("old-clip-secret", for: .cliproxyManagement)
+staleAsyncVault.set("old-clip-secret", for: .remoteAccountSource(id: "async-remote"))
 staleAsyncVault.set("old-newapi-secret", for: .balanceAccount(source: .newAPI, id: "async-account"))
 let sequencedSecretStore = SequencedSecretStore(vaults: [SecretVault(), staleAsyncVault])
 let asyncSettings = CodexNotchSettings(
     defaults: asyncSecretDefaults,
+    initialManagementKey: "",
+    initialNewAPIKey: "",
+    initialSubAPIKey: "",
     secretStores: SecretStoreFactory(keychain: sequencedSecretStore, database: MemorySecretStore()),
     launchAtLoginManager: FakeLaunchAtLoginManager(),
     loadSecretsSynchronously: false
+)
+runner.check(
+    !asyncSettings.secretStoreReady,
+    "settings should stay locked until asynchronous secrets finish loading"
 )
 runner.check(
     sequencedSecretStore.secondLoadStarted.wait(timeout: .now() + 2) == .success,
     "async secret load should start in the background"
 )
 asyncSettings.remoteMonitorEnabled = true
-asyncSettings.cliproxyPanelURL = "https://new.example.com/management.html"
-asyncSettings.cliproxyManagementKey = "new-clip-secret"
+asyncSettings.setRemoteAccountSources([
+    RemoteAccountSourceConfiguration(
+        id: "async-remote",
+        source: .cliProxyAPI,
+        label: "Async Remote",
+        panelURL: "https://new.example.com/management.html",
+        secret: "new-clip-secret"
+    )
+])
 asyncSettings.setBalanceAccounts([
     BalanceAccountConfiguration(
         id: "async-account",
@@ -1675,19 +1697,29 @@ asyncSettings.setBalanceAccounts([
 ], for: .newAPI)
 sequencedSecretStore.releaseSecondLoad.signal()
 _ = pumpMainRunLoop(until: Date().addingTimeInterval(1)) {
-    sequencedSecretStore.loadCount >= 2
+    sequencedSecretStore.loadCount >= 2 && asyncSettings.secretStoreReady
 }
 RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
-runner.check(asyncSettings.cliproxyManagementKey == "new-clip-secret", "late async secret load should not overwrite a user-saved CLIProxyAPI key")
+runner.check(
+    asyncSettings.secretStoreReady,
+    "settings should unlock after asynchronous secrets finish loading"
+)
+runner.check(
+    asyncSettings.remoteAccountSources.first?.secret == "new-clip-secret",
+    "late async secret load should not overwrite a user-saved remote source key"
+)
 runner.check(
     asyncSettings.balanceAccounts(for: .newAPI).first?.secret == "new-account-secret",
     "late async secret load should not overwrite a user-saved balance account password"
 )
 asyncSecretDefaults.removePersistentDomain(forName: asyncSecretSuiteName)
 
+settingsDefaults.set(RemoteCodexDataSource.cliProxyAPI.rawValue, forKey: "remoteCodexDataSource")
+settingsDefaults.set("https://legacy.example.com/management.html", forKey: "cliproxyPanelURL")
+settingsDefaults.set(true, forKey: "remoteMonitorEnabled")
 let settings = CodexNotchSettings(
     defaults: settingsDefaults,
-    initialManagementKey: "",
+    initialManagementKey: "legacy-remote-secret",
     initialNewAPIKey: "",
     initialSubAPIKey: "",
     secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
@@ -1699,14 +1731,14 @@ settings.usageRefreshInterval = settings.usageRefreshInterval
 settings.watcherRefreshInterval = settings.watcherRefreshInterval
 settings.fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
 settings.cliproxyRefreshInterval = settings.cliproxyRefreshInterval
-settings.cliproxyRequestTimeout = settings.cliproxyRequestTimeout
 runner.check(settings.activeRefreshInterval == 3, "saving unchanged refresh intervals should not recurse or change values")
 settings.usageRefreshInterval = 900
 runner.check(settings.usageRefreshInterval == 900, "low-power usage refresh intervals above five minutes should persist")
 
-runner.check(settings.remoteCodexDataSource == .cpaManagerPlus, "remote Codex monitor should default to CPA Manager Plus data")
+runner.check(settings.remoteAccountSources.count == 1, "legacy remote settings should migrate to one source")
+runner.check(settings.remoteAccountSources.first?.source == .cliProxyAPI, "legacy remote source type should be preserved")
+runner.check(settings.remoteAccountSources.first?.secret == "legacy-remote-secret", "legacy remote secret should migrate into the source")
 runner.check(settings.notchDisplaySource == .codex, "collapsed notch display should default to local Codex")
-settings.remoteCodexDataSource = .cliProxyAPI
 settings.notchDisplaySource = .remoteCodex
 settings.notchWidthAdjustment = 8
 settings.newAPIMonitorEnabled = true
@@ -1725,7 +1757,8 @@ let reloadedSettings = CodexNotchSettings(
     secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
     launchAtLoginManager: FakeLaunchAtLoginManager()
 )
-runner.check(reloadedSettings.remoteCodexDataSource == .cliProxyAPI, "remote Codex data source should persist")
+runner.check(reloadedSettings.remoteAccountSources.count == 1, "migrated remote source list should persist")
+runner.check(reloadedSettings.remoteAccountSources.first?.source == .cliProxyAPI, "migrated remote source type should persist")
 runner.check(reloadedSettings.notchDisplaySource == .remoteCodex, "collapsed notch display source should persist")
 runner.check(reloadedSettings.notchWidthAdjustment == 8, "manual notch width adjustment should persist")
 reloadedSettings.notchWidthAdjustment = 200
@@ -1748,6 +1781,7 @@ runner.check(migratedSubAPIAccounts.count == 1, "legacy Sub2API settings should 
 runner.check(migratedSubAPIAccounts.first?.panelURL == "https://subapi.example.com", "migrated Sub2API account should preserve panel URL")
 runner.check(migratedSubAPIAccounts.first?.username == "user@example.com", "migrated Sub2API account should preserve login name")
 reloadedSettings.setBalanceAccounts([], for: .newAPI)
+reloadedSettings.setRemoteAccountSources([])
 let emptiedSettings = CodexNotchSettings(
     defaults: settingsDefaults,
     initialManagementKey: "",
@@ -1757,7 +1791,35 @@ let emptiedSettings = CodexNotchSettings(
     launchAtLoginManager: FakeLaunchAtLoginManager()
 )
 runner.check(emptiedSettings.balanceAccounts(for: .newAPI).isEmpty, "explicitly saved empty NewAPI account list should not revive legacy settings")
+runner.check(emptiedSettings.remoteAccountSources.isEmpty, "explicitly saved empty remote source list should not revive legacy settings")
 settingsDefaults.removePersistentDomain(forName: settingsSuiteName)
+
+let corruptedRemoteSuiteName = "CodexNotchCorruptedRemoteSources-\(UUID().uuidString)"
+let corruptedRemoteDefaults = runner.require(
+    UserDefaults(suiteName: corruptedRemoteSuiteName),
+    "corrupted remote-source defaults should be available"
+)
+corruptedRemoteDefaults.removePersistentDomain(forName: corruptedRemoteSuiteName)
+corruptedRemoteDefaults.set(Data("not-json".utf8), forKey: "remoteAccountSources")
+corruptedRemoteDefaults.set("https://legacy.example.com", forKey: "cliproxyPanelURL")
+corruptedRemoteDefaults.set(true, forKey: "remoteMonitorEnabled")
+let corruptedRemoteSettings = CodexNotchSettings(
+    defaults: corruptedRemoteDefaults,
+    initialManagementKey: "legacy-secret",
+    initialNewAPIKey: "",
+    initialSubAPIKey: "",
+    secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
+    launchAtLoginManager: FakeLaunchAtLoginManager()
+)
+runner.check(
+    corruptedRemoteSettings.remoteAccountSources.isEmpty,
+    "corrupted remote source data should not silently revive legacy settings"
+)
+runner.check(
+    corruptedRemoteSettings.cliproxyKeychainError?.contains("配置损坏") == true,
+    "corrupted remote source data should surface a clear configuration error"
+)
+corruptedRemoteDefaults.removePersistentDomain(forName: corruptedRemoteSuiteName)
 
 let databaseModeSuiteName = "CodexNotchDatabaseSecretMode-\(UUID().uuidString)"
 let databaseModeDefaults = runner.require(
@@ -1765,6 +1827,10 @@ let databaseModeDefaults = runner.require(
     "database secret mode defaults should be available"
 )
 databaseModeDefaults.removePersistentDomain(forName: databaseModeSuiteName)
+databaseModeDefaults.set(
+    "https://cliproxy.example.com/management.html",
+    forKey: "cliproxyPanelURL"
+)
 let keychainStoreForDatabaseMode = MemorySecretStore()
 let databaseStoreForDatabaseMode = MemorySecretStore()
 let databaseModeSettings = CodexNotchSettings(
@@ -1794,7 +1860,10 @@ let reloadedDatabaseModeSettings = CodexNotchSettings(
     launchAtLoginManager: FakeLaunchAtLoginManager()
 )
 runner.check(reloadedDatabaseModeSettings.secretStorageMode == .database, "secret storage mode should persist")
-runner.check(reloadedDatabaseModeSettings.cliproxyManagementKey == "clip-secret", "database mode should reload CLIProxyAPI key")
+runner.check(
+    reloadedDatabaseModeSettings.remoteAccountSources.first?.secret == "clip-secret",
+    "database mode should reload the migrated remote source key"
+)
 runner.check(reloadedDatabaseModeSettings.newAPIManagementKey == "newapi-secret", "database mode should reload NewAPI key")
 runner.check(reloadedDatabaseModeSettings.subAPIManagementKey == "subapi-secret", "database mode should reload Sub2API key")
 runner.check(
@@ -2253,42 +2322,6 @@ let alertThresholdSubAPIProfileAccount = try BalanceAPIClient.decodeSubAPIProfil
 )
 runner.check(alertThresholdSubAPIProfileAccount.state == .error, "Sub2API balance below alert threshold should become error")
 runner.check(alertThresholdSubAPIProfileAccount.stateText == "余额低于告警阈值", "Sub2API error status should explain the balance threshold reason")
-
-let subAPIPlatformQuotaPayload = """
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "platform_quotas": [
-      {
-        "platform": "openai",
-        "daily_usage_usd": 1.5,
-        "daily_limit_usd": 5,
-        "weekly_usage_usd": 4,
-        "weekly_limit_usd": 20,
-        "monthly_usage_usd": 8,
-        "monthly_limit_usd": 30
-      }
-    ]
-  }
-}
-""".data(using: .utf8)!
-let subAPIQuotaAccounts = try BalanceAPIClient.decodeSubAPIPlatformQuotaAccounts(subAPIPlatformQuotaPayload)
-runner.check(subAPIQuotaAccounts.count == 1, "Sub2API platform quota list should decode")
-runner.check(subAPIQuotaAccounts[0].displayName == "openai", "Sub2API platform quota should use platform name")
-runner.check(subAPIQuotaAccounts[0].amountText == "$3.50", "Sub2API platform quota should display the most constrained remaining quota")
-let subAPIQuotaAccountsForA = try BalanceAPIClient.decodeSubAPIPlatformQuotaAccounts(
-    subAPIPlatformQuotaPayload,
-    accountID: "account-a",
-    accountLabel: "A"
-)
-let subAPIQuotaAccountsForB = try BalanceAPIClient.decodeSubAPIPlatformQuotaAccounts(
-    subAPIPlatformQuotaPayload,
-    accountID: "account-b",
-    accountLabel: "B"
-)
-runner.check(subAPIQuotaAccountsForA[0].id != subAPIQuotaAccountsForB[0].id, "Sub2API platform quota row ids should include the parent account id")
-runner.check(subAPIQuotaAccountsForA[0].displayName == "A · openai", "Sub2API platform quota display name should include account label when available")
 
 let failedBalanceEnvelope = """
 {
@@ -3275,51 +3308,38 @@ let sensitiveReasonAccount = RemoteCodexAccount(
 )
 runner.check(!sensitiveReasonAccount.stateReasonText.lowercased().contains("sk-"), "remote status reasons should redact token-like secrets before display")
 
-runner.check(
-    CodexNotchSettings.managementKeyForSave(
-        draftKey: "old-secret",
-        oldPanelURL: "https://old.example.com/management.html",
-        newPanelURL: "https://new.example.com/management.html",
-        oldAllowsInsecureTLS: false,
-        newAllowsInsecureTLS: false,
-        remoteEnabled: true
-    ).isEmpty,
-    "changing remote panel origin should clear the old management key instead of saving it to the new origin"
+let oldRemoteSource = RemoteAccountSourceConfiguration(
+    id: "remote-source",
+    source: .cpaManagerPlus,
+    panelURL: "https://old.example.com/management.html",
+    secret: "old-secret"
 )
+var changedRemoteOrigin = oldRemoteSource
+changedRemoteOrigin.panelURL = "https://new.example.com/management.html"
 runner.check(
-    CodexNotchSettings.managementKeyForSave(
-        draftKey: "old-secret",
-        oldPanelURL: "https://old.example.com/management.html",
-        newPanelURL: "https://old.example.com/management.html",
-        oldAllowsInsecureTLS: false,
-        newAllowsInsecureTLS: true,
-        remoteEnabled: true
-    ).isEmpty,
-    "changing insecure TLS mode should clear the old management key"
+    CodexNotchSettings.sanitizedRemoteAccountSourceForSave(
+        changedRemoteOrigin,
+        oldSource: oldRemoteSource
+    ).secret.isEmpty,
+    "changing a remote source origin should clear a reused management key"
 )
+var changedRemoteProvider = oldRemoteSource
+changedRemoteProvider.source = .cliProxyAPI
 runner.check(
-    CodexNotchSettings.managementKeyForSave(
-        draftKey: "new-secret",
-        oldPanelURL: "https://old.example.com/management.html",
-        newPanelURL: "https://new.example.com/management.html",
-        oldAllowsInsecureTLS: false,
-        newAllowsInsecureTLS: false,
-        remoteEnabled: true,
-        oldSavedKey: "old-secret"
-    ) == "new-secret",
-    "changing remote panel origin should save a newly entered management key"
+    CodexNotchSettings.sanitizedRemoteAccountSourceForSave(
+        changedRemoteProvider,
+        oldSource: oldRemoteSource
+    ).secret.isEmpty,
+    "changing a remote source provider should clear a reused management key"
 )
+var changedRemoteSecret = changedRemoteOrigin
+changedRemoteSecret.secret = "new-secret"
 runner.check(
-    CodexNotchSettings.managementKeyForSave(
-        draftKey: "old-secret",
-        oldPanelURL: "not a url",
-        newPanelURL: "https://new.example.com/management.html",
-        oldAllowsInsecureTLS: false,
-        newAllowsInsecureTLS: false,
-        remoteEnabled: true,
-        oldSavedKey: "old-secret"
-    ).isEmpty,
-    "changing from an invalid remote panel URL to a valid origin should clear a reused management key"
+    CodexNotchSettings.sanitizedRemoteAccountSourceForSave(
+        changedRemoteSecret,
+        oldSource: oldRemoteSource
+    ).secret == "new-secret",
+    "changing a remote source origin should preserve a newly entered key"
 )
 runner.check(
     CodexNotchSettings.apiKeyForSave(

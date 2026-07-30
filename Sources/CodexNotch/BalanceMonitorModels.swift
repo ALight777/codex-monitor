@@ -222,6 +222,33 @@ struct BalanceAccountConfiguration: Identifiable, Codable, Equatable {
         hasValidThresholdOrder ? nil : customThresholds.orderValidationMessage
     }
 
+    var credentialBindingID: String? {
+        guard let baseURL = BalanceAPIClient.apiBaseURL(from: panelURL),
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false),
+              components.scheme != nil,
+              components.host != nil else {
+            return nil
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        if (components.scheme == "https" && components.port == 443)
+            || (components.scheme == "http" && components.port == 80) {
+            components.port = nil
+        }
+        components.query = nil
+        components.fragment = nil
+        var endpoint = components.string ?? baseURL.absoluteString
+        while endpoint.hasSuffix("/") {
+            endpoint.removeLast()
+        }
+        return [
+            source.rawValue,
+            endpoint,
+            username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            allowInsecureTLS ? "insecure-tls" : "system-tls"
+        ].joined(separator: "|")
+    }
+
     func thresholdSummary(defaults: BalanceThresholdConfiguration) -> String {
         let prefix = usesDefaultThresholds ? "默认" : "自定义"
         return "\(prefix)：\(effectiveThresholds(defaults: defaults).summaryText)"

@@ -14,7 +14,7 @@ private enum DetailPage: String, CaseIterable, Identifiable {
         case .codex:
             "Codex"
         case .remoteCodex:
-            "CLIProxyAPI"
+            "远程账号"
         case .newAPI:
             "NewAPI"
         case .subAPI:
@@ -182,7 +182,7 @@ struct NotchIslandView: View {
         case .automatic, .codex:
             "Codex"
         case .remoteCodex:
-            "CLIProxyAPI"
+            "远程"
         case .newAPI:
             "NewAPI"
         case .subAPI:
@@ -292,6 +292,7 @@ struct DetailPanelView: View {
     let onNewAPIRefresh: () -> Void
     let onSubAPIRefresh: () -> Void
     @State private var detailPage: DetailPage = .codex
+    @State private var showsRemoteUsageInfo = false
 
     private var snapshot: UsageSnapshot {
         viewModel.snapshot
@@ -435,7 +436,7 @@ struct DetailPanelView: View {
         case .codex:
             snapshot.isRunning ? "正在运行" : "最近活动"
         case .remoteCodex:
-            "CLIProxyAPI 账号"
+            "远程账号"
         case .newAPI:
             "NewAPI 余额"
         case .subAPI:
@@ -448,12 +449,6 @@ struct DetailPanelView: View {
         case .codex:
             return snapshot.isRunning ? "\(snapshot.tasks.filter { $0.status == .running }.count) 个任务" : "空闲"
         case .remoteCodex:
-            if remoteViewModel.snapshot.usageUnavailableForSource {
-                return "仅账号"
-            }
-            if remoteViewModel.snapshot.usageMessage != nil {
-                return "用量旧"
-            }
             return remoteHeaderStatus
         case .newAPI:
             return balanceHeaderStatus(newAPIViewModel.snapshot)
@@ -495,9 +490,7 @@ struct DetailPanelView: View {
     private var remoteStatusColor: Color {
         switch remoteViewModel.snapshot.panelSeverity {
         case .none:
-            return remoteViewModel.snapshot.usageMessage == nil
-                ? Color(red: 0.61, green: 0.95, blue: 0.68)
-                : Color(red: 1.0, green: 0.55, blue: 0.25)
+            return Color(red: 0.61, green: 0.95, blue: 0.68)
         case .warning:
             return Color(red: 1.0, green: 0.55, blue: 0.25)
         case .error:
@@ -523,7 +516,7 @@ struct DetailPanelView: View {
         case .codex:
             "刷新 Codex"
         case .remoteCodex:
-            "刷新 CLIProxyAPI"
+            "刷新远程账号"
         case .newAPI:
             "刷新 NewAPI"
         case .subAPI:
@@ -673,6 +666,9 @@ struct DetailPanelView: View {
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 7) {
+                            if let message = remoteViewModel.snapshot.message {
+                                inlineWarningMessage(message)
+                            }
                             ForEach(remoteViewModel.snapshot.accounts) { account in
                                 RemoteAccountRow(account: account)
                             }
@@ -682,7 +678,7 @@ struct DetailPanelView: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
 
-            cpaUsageSummary
+            remoteUsageSummary
         }
         .frame(maxHeight: .infinity, alignment: .bottom)
     }
@@ -717,7 +713,7 @@ struct DetailPanelView: View {
     private var remoteSummary: some View {
         HStack(spacing: 8) {
             RemoteSummaryCell(label: "正常", value: "\(remoteViewModel.snapshot.healthyCount)")
-            RemoteSummaryCell(label: "配额", value: "\(remoteViewModel.snapshot.quotaCount)")
+            RemoteSummaryCell(label: "额度受限", value: "\(remoteViewModel.snapshot.quotaCount)")
             RemoteSummaryCell(label: "异常", value: "\(remoteViewModel.snapshot.abnormalCount)")
         }
     }
@@ -739,21 +735,124 @@ struct DetailPanelView: View {
         )
     }
 
-    @ViewBuilder
-    private var cpaUsageSummary: some View {
-        if remoteViewModel.snapshot.usageUnavailableForSource {
-            HStack(spacing: 8) {
-                PeriodUsageCell(label: "来源", value: "CLIProxyAPI")
-                PeriodUsageCell(label: "账号", value: "\(remoteViewModel.snapshot.accounts.count)")
-                PeriodUsageCell(label: "用量", value: "未提供")
-            }
-        } else {
-            HStack(spacing: 8) {
-                PeriodUsageCell(label: "24小时", value: Formatters.compactTokens(remoteViewModel.snapshot.usage24h))
-                PeriodUsageCell(label: "7天", value: Formatters.compactTokens(remoteViewModel.snapshot.usage7d))
-                PeriodUsageCell(label: "30天", value: Formatters.compactTokens(remoteViewModel.snapshot.usage30d))
+    private var remoteUsageSummary: some View {
+        HStack(spacing: 8) {
+            PeriodUsageCell(label: "24小时", value: remoteUsageValue(remoteViewModel.snapshot.usage24h))
+            PeriodUsageCell(label: "7天", value: remoteUsageValue(remoteViewModel.snapshot.usage7d))
+            ZStack(alignment: .topTrailing) {
+                PeriodUsageCell(label: "30天", value: remoteUsageValue(remoteViewModel.snapshot.usage30d))
+                Button {
+                    showsRemoteUsageInfo.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.56))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("查看用量统计范围")
+                .popover(isPresented: $showsRemoteUsageInfo, arrowEdge: .bottom) {
+                    remoteUsageInfoPopover
+                }
+                .padding(.top, 2)
+                .padding(.trailing, 3)
             }
         }
+    }
+
+    private func remoteUsageValue(_ value: Int) -> String {
+        remoteViewModel.snapshot.hasIncludedUsageSource
+            ? Formatters.compactTokens(value)
+            : "--"
+    }
+
+    private var remoteUsageInfoPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Token 用量统计")
+                .font(.system(size: 13, weight: .bold))
+
+            VStack(spacing: 7) {
+                if remoteViewModel.snapshot.usageSources.isEmpty {
+                    Text("暂无数据源统计信息")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(remoteViewModel.snapshot.usageSources) { source in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(source.label)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(remoteUsageCoverageLabel(source.state))
+                                    .font(.system(size: 10.5, weight: .bold))
+                                    .foregroundStyle(remoteUsageCoverageColor(source.state))
+                            }
+                            if let message = source.message, source.state != .included {
+                                Text(message)
+                                    .font(.system(size: 9.5))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Text("最近更新")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(remoteUsageLastUpdatedText)
+            }
+            .font(.system(size: 10.5, weight: .medium))
+
+            Text("统计的是各远程面板转发的 Token，不等同于上游官方额度。")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 310)
+    }
+
+    private func remoteUsageCoverageLabel(_ state: RemoteUsageCoverageState) -> String {
+        switch state {
+        case .included:
+            "已统计"
+        case .duplicate:
+            "已去重"
+        case .unavailable:
+            "未提供"
+        case .failed:
+            "刷新失败"
+        }
+    }
+
+    private func remoteUsageCoverageColor(_ state: RemoteUsageCoverageState) -> Color {
+        switch state {
+        case .included:
+            Color(red: 0.25, green: 0.68, blue: 0.34)
+        case .duplicate:
+            .secondary
+        case .unavailable:
+            .secondary
+        case .failed:
+            Color(red: 0.95, green: 0.46, blue: 0.18)
+        }
+    }
+
+    private var remoteUsageLastUpdatedText: String {
+        guard let date = remoteViewModel.snapshot.lastUpdated else {
+            return "尚未更新"
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     private func balanceSummary(_ snapshot: BalanceMonitorSnapshot) -> some View {

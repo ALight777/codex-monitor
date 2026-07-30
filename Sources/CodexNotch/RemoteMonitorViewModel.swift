@@ -51,12 +51,9 @@ final class RemoteMonitorViewModel: ObservableObject {
             return
         }
 
-        let panelURL = settings.cliproxyPanelURL
-        let key = settings.cliproxyManagementKey
-        let dataSource = settings.remoteCodexDataSource
         let settingsSnapshot = RemoteMonitorSettingsSnapshot(settings: settings)
-        guard !panelURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let sourceSelection = currentSourceSelection()
+        guard sourceSelection.enabledCount > 0 else {
             invalidateInFlightRefresh()
             loadedSettings = nil
             snapshot = .notConfigured
@@ -72,7 +69,7 @@ final class RemoteMonitorViewModel: ObservableObject {
         refreshGeneration += 1
         let generation = refreshGeneration
         let canPreserveSnapshot = loadedSettings == settingsSnapshot
-        let previousAccounts = canPreserveSnapshot && dataSource == .cpaManagerPlus ? snapshot.accounts : []
+        let previousAccounts = canPreserveSnapshot ? snapshot.accounts : []
         if snapshot.accounts.isEmpty || !canPreserveSnapshot {
             snapshot = RemoteMonitorSnapshot(
                 panelState: .loading,
@@ -83,54 +80,25 @@ final class RemoteMonitorViewModel: ObservableObject {
                 usage7d: canPreserveSnapshot ? snapshot.usage7d : 0,
                 usage30d: canPreserveSnapshot ? snapshot.usage30d : 0,
                 usageMessage: nil,
-                usageUnavailableForSource: false
+                usageUnavailableForSource: false,
+                usageSources: canPreserveSnapshot ? snapshot.usageSources : []
             )
         }
 
-        let configuration = CLIProxyAPIConfiguration(
-            panelURL: panelURL,
-            managementKey: key,
-            timeout: settings.cliproxyRequestTimeout,
-            allowInsecureTLS: settings.cliproxyAllowInsecureTLS
-        )
-        let coreTimeout = max(10, configuration.timeout * 4)
-
         refreshTask = Task.detached(priority: .utility) {
             do {
-                let result = try await RemoteCoreThenEnrichmentPipeline.run {
-                    try await Self.withTimeout(seconds: coreTimeout) {
-                        try await RemoteCodexProvider(
-                            dataSource: dataSource,
-                            configuration: configuration
-                        ).fetchCore()
-                    }
-                } enrichment: { coreResult in
-                    let resetCreditsTimeout = RemoteResetCreditsEnrichmentCoordinator
-                        .timeoutBudget(forRequestTimeout: configuration.timeout)
-                    let enrichedAccounts = await RemoteResetCreditsEnrichmentCoordinator(
-                        loader: RemoteResetCreditsLoader(cache: self.resetCreditsCache),
-                        timeoutBudget: resetCreditsTimeout
-                    ).enrich(
-                        accounts: coreResult.accounts,
-                        dataSource: dataSource,
-                        panelURL: configuration.panelURL,
-                        forceRefresh: forceResetCreditsRefresh
-                    ) { authIndex, accountID in
-                        let client = CLIProxyAPIClient(configuration: configuration)
-                        return try await client.fetchResetCredits(
-                            authIndex: authIndex,
-                            accountID: accountID
-                        )
-                    }
-                    return coreResult.replacingAccounts(enrichedAccounts)
-                }
+                let result = try await RemoteCodexMultiSourceProvider(
+                    sources: sourceSelection.connections,
+                    initialOutcomes: sourceSelection.configurationFailures,
+                    resetCreditsCache: self.resetCreditsCache,
+                    forceResetCreditsRefresh: forceResetCreditsRefresh
+                ).fetchCore()
                 await MainActor.run {
                     guard generation == self.refreshGeneration else {
                         return
                     }
                     guard self.settings.remoteMonitorEnabled,
-                          self.settings.remoteCodexDataSource == dataSource,
-                          self.currentConfiguration() == configuration else {
+                          RemoteMonitorSettingsSnapshot(settings: self.settings) == settingsSnapshot else {
                         self.finishRefreshAndRunPending()
                         if !self.settings.remoteMonitorEnabled {
                             self.snapshot = .disabled
@@ -141,15 +109,23 @@ final class RemoteMonitorViewModel: ObservableObject {
                     self.isRefreshing = false
                     self.refreshTask = nil
                     self.loadedSettings = settingsSnapshot
+                    let mergedAccounts = RemoteAccountSnapshotMerger.merge(
+                        current: result.accounts,
+                        previous: previousAccounts,
+                        failedSourceIDs: result.failedSourceIDs
+                    )
                     let accounts = RemoteCodexAccount.preservingQuota(
-                        in: result.accounts,
+                        in: mergedAccounts,
                         from: previousAccounts
                     )
                     self.snapshot = self.snapshot(
                         from: accounts,
                         usageResult: result.usageResult,
                         usageMessageOverride: result.usageMessage,
-                        usageUnavailableForSource: result.usageUnavailableForSource
+                        usageUnavailableForSource: result.usageUnavailableForSource,
+                        usageSources: result.usageSources,
+                        panelMessage: result.panelMessage,
+                        hasSourceFailures: result.hasSourceFailures
                     )
                     self.scheduleStatusRefresh()
                     self.runPendingRefreshIfNeeded()
@@ -160,8 +136,7 @@ final class RemoteMonitorViewModel: ObservableObject {
                         return
                     }
                     guard self.settings.remoteMonitorEnabled,
-                          self.settings.remoteCodexDataSource == dataSource,
-                          self.currentConfiguration() == configuration else {
+                          RemoteMonitorSettingsSnapshot(settings: self.settings) == settingsSnapshot else {
                         self.finishRefreshAndRunPending()
                         if !self.settings.remoteMonitorEnabled {
                             self.snapshot = .disabled
@@ -180,7 +155,8 @@ final class RemoteMonitorViewModel: ObservableObject {
                         usage7d: canPreserveSnapshot ? self.snapshot.usage7d : 0,
                         usage30d: canPreserveSnapshot ? self.snapshot.usage30d : 0,
                         usageMessage: canPreserveSnapshot ? self.snapshot.usageMessage : nil,
-                        usageUnavailableForSource: canPreserveSnapshot ? self.snapshot.usageUnavailableForSource : false
+                        usageUnavailableForSource: canPreserveSnapshot ? self.snapshot.usageUnavailableForSource : false,
+                        usageSources: canPreserveSnapshot ? self.snapshot.usageSources : []
                     )
                     self.scheduleStatusRefresh()
                     self.runPendingRefreshIfNeeded()
@@ -265,11 +241,14 @@ final class RemoteMonitorViewModel: ObservableObject {
         from accounts: [RemoteCodexAccount],
         usageResult: Result<PeriodUsage, Error>? = nil,
         usageMessageOverride: String? = nil,
-        usageUnavailableForSource: Bool = false
+        usageUnavailableForSource: Bool = false,
+        usageSources: [RemoteUsageSourceCoverage] = [],
+        panelMessage: String? = nil,
+        hasSourceFailures: Bool = false
     ) -> RemoteMonitorSnapshot {
         let state: RemotePanelState
         if accounts.isEmpty {
-            state = .warning
+            state = hasSourceFailures ? .error : .warning
         } else {
             switch RemoteMonitorSnapshot.poolAlertSeverity(for: accounts) {
             case .error:
@@ -277,7 +256,7 @@ final class RemoteMonitorViewModel: ObservableObject {
             case .warning:
                 state = .warning
             case .none:
-                state = .healthy
+                state = hasSourceFailures ? .warning : .healthy
             }
         }
 
@@ -289,7 +268,7 @@ final class RemoteMonitorViewModel: ObservableObject {
             usageMessage = usageMessageOverride
         case .failure:
             usage = nil
-            usageMessage = "用量刷新失败，已沿用旧值"
+            usageMessage = usageMessageOverride ?? "用量刷新失败，已沿用旧值"
         case nil:
             usage = nil
             usageMessage = usageMessageOverride ?? snapshot.usageMessage
@@ -298,28 +277,37 @@ final class RemoteMonitorViewModel: ObservableObject {
         return RemoteMonitorSnapshot(
             panelState: state,
             accounts: accounts,
-            message: accounts.isEmpty ? "没有找到已启用的 Codex 账号" : nil,
+            message: panelMessage ?? (accounts.isEmpty ? "没有找到已启用的 Codex 账号" : nil),
             lastUpdated: Date(),
             usage24h: usage?.day ?? snapshot.usage24h,
             usage7d: usage?.week ?? snapshot.usage7d,
             usage30d: usage?.month ?? snapshot.usage30d,
             usageMessage: usageMessage,
-            usageUnavailableForSource: usageUnavailableForSource
+            usageUnavailableForSource: usageUnavailableForSource,
+            usageSources: usageSources
         )
     }
 
-    private func currentConfiguration() -> CLIProxyAPIConfiguration? {
-        let panelURL = settings.cliproxyPanelURL
-        let key = settings.cliproxyManagementKey
-        guard !panelURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
+    private func currentSourceSelection() -> RemoteMonitorSourceSelection {
+        let enabledSources = settings.remoteAccountSources.filter(\.enabled)
+        var connections: [RemoteMonitorSourceConnection] = []
+        var failures: [RemoteSourceFetchOutcome] = []
+        for source in enabledSources {
+            if let connection = RemoteMonitorSourceConnection(source: source) {
+                connections.append(connection)
+            } else {
+                failures.append(
+                    .configurationFailure(
+                        source: source,
+                        message: source.configurationIssue ?? "配置不完整"
+                    )
+                )
+            }
         }
-        return CLIProxyAPIConfiguration(
-            panelURL: panelURL,
-            managementKey: key,
-            timeout: settings.cliproxyRequestTimeout,
-            allowInsecureTLS: settings.cliproxyAllowInsecureTLS
+        return RemoteMonitorSourceSelection(
+            enabledCount: enabledSources.count,
+            connections: connections,
+            configurationFailures: failures
         )
     }
 
@@ -340,7 +328,397 @@ final class RemoteMonitorViewModel: ObservableObject {
         return message
     }
 
-    nonisolated private static func withTimeout<T: Sendable>(
+}
+
+private struct RemoteRefreshTimeoutError: LocalizedError {
+    var errorDescription: String? {
+        "远程刷新超时"
+    }
+}
+
+struct RemoteCodexFetchResult {
+    let accounts: [RemoteCodexAccount]
+    let usageResult: Result<PeriodUsage, Error>
+    let usageMessage: String?
+    let usageUnavailableForSource: Bool
+    let usageSources: [RemoteUsageSourceCoverage]
+    let panelMessage: String?
+    let hasSourceFailures: Bool
+    let failedSourceIDs: Set<String>
+}
+
+private struct RemoteMonitorSourceSelection: Sendable {
+    let enabledCount: Int
+    let connections: [RemoteMonitorSourceConnection]
+    let configurationFailures: [RemoteSourceFetchOutcome]
+}
+
+private struct RemoteMonitorSourceConnection: Equatable, Sendable {
+    let source: RemoteAccountSourceConfiguration
+    let connection: RemoteMonitorConnectionConfiguration
+
+    init?(source: RemoteAccountSourceConfiguration) {
+        let panelURL = source.panelURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard source.configurationIssue == nil else {
+            return nil
+        }
+        self.source = source
+        switch source.source {
+        case .cliProxyAPI, .cpaManagerPlus:
+            connection = .cliProxy(
+                CLIProxyAPIConfiguration(
+                    panelURL: panelURL,
+                    managementKey: source.secret,
+                    timeout: source.requestTimeout,
+                    allowInsecureTLS: source.allowInsecureTLS
+                )
+            )
+        case .sub2API:
+            let email = source.username.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !email.isEmpty else {
+                return nil
+            }
+            connection = .sub2API(
+                Sub2APIRemoteConfiguration(
+                    panelURL: panelURL,
+                    adminEmail: email,
+                    adminPassword: source.secret,
+                    timeout: source.requestTimeout,
+                    allowInsecureTLS: source.allowInsecureTLS
+                )
+            )
+        }
+    }
+}
+
+private struct RemoteCodexMultiSourceProvider: Sendable {
+    let sources: [RemoteMonitorSourceConnection]
+    let initialOutcomes: [RemoteSourceFetchOutcome]
+    let resetCreditsCache: RemoteResetCreditsCache
+    let forceResetCreditsRefresh: Bool
+
+    func fetchCore() async throws -> RemoteCodexFetchResult {
+        let fetchedOutcomes = await withTaskGroup(
+            of: RemoteSourceFetchOutcome.self,
+            returning: [RemoteSourceFetchOutcome].self
+        ) { group in
+            for source in sources {
+                group.addTask {
+                    await fetch(source)
+                }
+            }
+            var values: [RemoteSourceFetchOutcome] = []
+            for await outcome in group {
+                values.append(outcome)
+            }
+            return values
+        }
+        let outcomes = initialOutcomes + fetchedOutcomes
+
+        return RemoteMultiSourceOutcomeAggregator.aggregate(outcomes)
+    }
+
+    private func fetch(_ source: RemoteMonitorSourceConnection) async -> RemoteSourceFetchOutcome {
+        do {
+            let timeout = RemoteRefreshTimeoutPolicy.budget(
+                for: source.source.source,
+                requestTimeout: source.connection.timeout
+            )
+            let success = try await RemoteOperationTimeout.value(seconds: timeout) {
+                try await fetchSuccess(source)
+            }
+            return RemoteSourceFetchOutcome(
+                source: source.source,
+                success: success,
+                failureMessage: nil
+            )
+        } catch {
+            let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return RemoteSourceFetchOutcome(
+                source: source.source,
+                success: nil,
+                failureMessage: "\(source.source.displayLabel)：\(reason.redactedForDisplay)"
+            )
+        }
+    }
+
+    private func fetchSuccess(
+        _ source: RemoteMonitorSourceConnection
+    ) async throws -> RemoteSourceFetchSuccess {
+            let accounts: [RemoteCodexAccount]
+            var usage: PeriodUsage?
+            var usageError: String?
+            let supportsUsage = source.source.source.supportsTokenUsage
+
+            switch (source.source.source, source.connection) {
+            case (.cliProxyAPI, .cliProxy(let configuration)):
+                accounts = try await CLIProxyAPIClient(configuration: configuration)
+                    .fetchCodexAccounts(dataSource: .cliProxyAPI)
+            case (.cpaManagerPlus, .cliProxy(let configuration)):
+                let client = CLIProxyAPIClient(configuration: configuration)
+                let coreAccounts = try await client.fetchCodexAccounts(dataSource: .cpaManagerPlus)
+                let resetCreditsTimeout = RemoteResetCreditsEnrichmentCoordinator
+                    .timeoutBudget(forRequestTimeout: configuration.timeout)
+                accounts = await RemoteResetCreditsEnrichmentCoordinator(
+                    loader: RemoteResetCreditsLoader(cache: resetCreditsCache),
+                    timeoutBudget: resetCreditsTimeout
+                ).enrich(
+                    accounts: coreAccounts,
+                    dataSource: .cpaManagerPlus,
+                    panelURL: configuration.panelURL,
+                    cacheScopeID: source.source.id,
+                    forceRefresh: forceResetCreditsRefresh
+                ) { authIndex, accountID in
+                    try await CLIProxyAPIClient(configuration: configuration).fetchResetCredits(
+                        authIndex: authIndex,
+                        accountID: accountID
+                    )
+                }
+                do {
+                    usage = try await client.fetchManagerPlusUsageTotals()
+                } catch {
+                    usageError = ((error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription).redactedForDisplay
+                }
+            case (.sub2API, .sub2API(let configuration)):
+                let snapshot = try await Sub2APIRemoteClient(configuration: configuration)
+                    .fetchCodexSnapshot()
+                accounts = snapshot.accounts
+                usage = snapshot.usage
+                usageError = snapshot.usageError
+            default:
+                throw RemoteMonitorConfigurationError.incompatibleSource
+            }
+
+            return RemoteSourceFetchSuccess(
+                accounts: accounts.map { $0.scoped(to: source.source) },
+                usage: usage,
+                supportsUsage: supportsUsage,
+                usageError: usageError
+            )
+    }
+}
+
+enum RemoteMultiSourceOutcomeAggregator {
+    static func aggregate(_ outcomes: [RemoteSourceFetchOutcome]) -> RemoteCodexFetchResult {
+        let successes = outcomes.compactMap(\.success)
+        let failures = outcomes.compactMap(\.failureMessage)
+
+        let accounts = successes
+            .flatMap(\.accounts)
+            .sorted {
+                if $0.provider == $1.provider {
+                    return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+                }
+                return ($0.provider ?? "").localizedCaseInsensitiveCompare($1.provider ?? "") == .orderedAscending
+            }
+        let usageOutcomes = outcomes.filter(\.supportsUsage)
+        let expectedUsageScopeIDs = Set(usageOutcomes.map(\.usageScopeID))
+        let usageAggregation = RemoteUsageAggregator.aggregate(
+            usageOutcomes.compactMap { outcome in
+                guard let usage = outcome.success?.usage else {
+                    return nil
+                }
+                return RemoteUsageContribution(
+                    sourceID: outcome.source.id,
+                    scopeID: outcome.usageScopeID,
+                    usage: usage
+                )
+            },
+            expectedScopeIDs: expectedUsageScopeIDs
+        )
+        let usage = usageAggregation.usage
+        let supportsUsage = !usageOutcomes.isEmpty
+        let hasUsageFailures = !usageAggregation.missingScopeIDs.isEmpty
+        let usageSources = outcomes
+            .map {
+                $0.usageCoverage(
+                    duplicateUsageSourceIDs: usageAggregation.duplicateSourceIDs
+                )
+            }
+            .sorted {
+                $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending
+            }
+        var usageMessages: [String] = []
+        if hasUsageFailures {
+            usageMessages.append(
+                usageAggregation.includedScopeIDs.isEmpty
+                    ? "用量刷新失败，已沿用旧值"
+                    : "部分数据源用量刷新失败，已沿用上次完整统计"
+            )
+        } else if !supportsUsage {
+            usageMessages.append("已启用的数据源未提供 Token 用量")
+        }
+        if !usageAggregation.duplicateSourceIDs.isEmpty {
+            usageMessages.append("重复面板的用量已自动去重")
+        }
+        let usageMessage = usageMessages.isEmpty ? nil : usageMessages.joined(separator: "；")
+        let panelMessage = failures.isEmpty
+            ? nil
+            : "\(failures.count) 个数据源刷新失败：" + failures.joined(separator: "；")
+
+        return RemoteCodexFetchResult(
+            accounts: accounts,
+            usageResult: hasUsageFailures
+                ? .failure(RemoteUsageRefreshError())
+                : .success(usage),
+            usageMessage: usageMessage,
+            usageUnavailableForSource: !supportsUsage,
+            usageSources: usageSources,
+            panelMessage: panelMessage,
+            hasSourceFailures: !failures.isEmpty,
+            failedSourceIDs: Set(
+                outcomes.compactMap { outcome in
+                    outcome.success == nil ? outcome.source.id : nil
+                }
+            )
+        )
+    }
+}
+
+struct RemoteSourceFetchOutcome: Sendable {
+    let source: RemoteAccountSourceConfiguration
+    let success: RemoteSourceFetchSuccess?
+    let failureMessage: String?
+
+    var supportsUsage: Bool {
+        source.source.supportsTokenUsage
+    }
+
+    var usageScopeID: String {
+        source.usageScopeID ?? source.id
+    }
+
+    func usageCoverage(
+        duplicateUsageSourceIDs: Set<String>
+    ) -> RemoteUsageSourceCoverage {
+        let state: RemoteUsageCoverageState
+        let message: String?
+        if let success {
+            if !success.supportsUsage {
+                state = .unavailable
+                message = "该数据源未提供 Token 用量接口"
+            } else if duplicateUsageSourceIDs.contains(source.id) {
+                state = .duplicate
+                message = "与同一面板的其他数据源重复，未重复计入"
+            } else if success.usage != nil {
+                state = .included
+                message = nil
+            } else {
+                state = .failed
+                message = success.usageError ?? "用量刷新失败"
+            }
+        } else if source.source == .cliProxyAPI {
+            state = .unavailable
+            message = "该数据源未提供 Token 用量接口"
+        } else {
+            state = .failed
+            message = failureMessage
+        }
+        return RemoteUsageSourceCoverage(
+            id: source.id,
+            label: source.displayLabel,
+            source: source.source,
+            state: state,
+            message: message
+        )
+    }
+
+    static func configurationFailure(
+        source: RemoteAccountSourceConfiguration,
+        message: String
+    ) -> RemoteSourceFetchOutcome {
+        RemoteSourceFetchOutcome(
+            source: source,
+            success: nil,
+            failureMessage: "\(source.displayLabel)：\(message)"
+        )
+    }
+}
+
+struct RemoteSourceFetchSuccess: Sendable {
+    let accounts: [RemoteCodexAccount]
+    let usage: PeriodUsage?
+    let supportsUsage: Bool
+    let usageError: String?
+}
+
+struct RemoteUsageContribution: Equatable, Sendable {
+    let sourceID: String
+    let scopeID: String
+    let usage: PeriodUsage
+}
+
+struct RemoteUsageAggregation: Equatable, Sendable {
+    let usage: PeriodUsage
+    let duplicateSourceIDs: Set<String>
+    let includedScopeIDs: Set<String>
+    let missingScopeIDs: Set<String>
+}
+
+enum RemoteUsageAggregator {
+    static func aggregate(
+        _ contributions: [RemoteUsageContribution],
+        expectedScopeIDs: Set<String> = []
+    ) -> RemoteUsageAggregation {
+        var seenScopes: Set<String> = []
+        var duplicateSourceIDs: Set<String> = []
+        var usage = PeriodUsage.zero
+
+        for contribution in contributions {
+            guard seenScopes.insert(contribution.scopeID).inserted else {
+                duplicateSourceIDs.insert(contribution.sourceID)
+                continue
+            }
+            usage = PeriodUsage.saturatedSum(usage, contribution.usage)
+        }
+
+        return RemoteUsageAggregation(
+            usage: usage,
+            duplicateSourceIDs: duplicateSourceIDs,
+            includedScopeIDs: seenScopes,
+            missingScopeIDs: expectedScopeIDs.subtracting(seenScopes)
+        )
+    }
+}
+
+private struct RemoteUsageRefreshError: Error {}
+
+enum RemoteRefreshTimeoutPolicy {
+    static func budget(
+        for source: RemoteCodexDataSource,
+        requestTimeout: TimeInterval
+    ) -> TimeInterval {
+        let timeout = max(3, requestTimeout)
+        switch source {
+        case .sub2API:
+            return Sub2APIRemoteClient.refreshBudget(forRequestTimeout: timeout)
+        case .cliProxyAPI, .cpaManagerPlus:
+            return max(10, timeout * 4)
+        }
+    }
+}
+
+private enum RemoteMonitorConnectionConfiguration: Equatable, Sendable {
+    case cliProxy(CLIProxyAPIConfiguration)
+    case sub2API(Sub2APIRemoteConfiguration)
+
+    var timeout: TimeInterval {
+        switch self {
+        case .cliProxy(let configuration):
+            configuration.timeout
+        case .sub2API(let configuration):
+            configuration.timeout
+        }
+    }
+}
+
+private enum RemoteMonitorConfigurationError: Error {
+    case incompatibleSource
+}
+
+enum RemoteOperationTimeout {
+    static func value<T: Sendable>(
         seconds: TimeInterval,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
@@ -353,7 +731,6 @@ final class RemoteMonitorViewModel: ObservableObject {
                 try await Task.sleep(nanoseconds: nanoseconds)
                 throw RemoteRefreshTimeoutError()
             }
-
             guard let result = try await group.next() else {
                 throw RemoteRefreshTimeoutError()
             }
@@ -363,73 +740,67 @@ final class RemoteMonitorViewModel: ObservableObject {
     }
 }
 
-private struct RemoteRefreshTimeoutError: Error {}
+enum RemoteAccountSnapshotMerger {
+    static func merge(
+        current: [RemoteCodexAccount],
+        previous: [RemoteCodexAccount],
+        failedSourceIDs: Set<String>
+    ) -> [RemoteCodexAccount] {
+        guard !previous.isEmpty, !failedSourceIDs.isEmpty else {
+            return sorted(current)
+        }
+        let currentIDs = Set(current.map(\.id))
+        let preserved = previous.filter { account in
+            guard !currentIDs.contains(account.id),
+                  let sourceID = sourceID(from: account.id) else {
+                return false
+            }
+            return failedSourceIDs.contains(sourceID)
+        }
+        return sorted(current + preserved)
+    }
 
-private struct RemoteCodexFetchResult {
-    let accounts: [RemoteCodexAccount]
-    let usageResult: Result<PeriodUsage, Error>
-    let usageMessage: String?
-    let usageUnavailableForSource: Bool
+    private static func sourceID(from accountID: String) -> String? {
+        guard let separator = accountID.range(of: "::") else {
+            return nil
+        }
+        return String(accountID[..<separator.lowerBound])
+    }
 
-    func replacingAccounts(_ accounts: [RemoteCodexAccount]) -> RemoteCodexFetchResult {
-        RemoteCodexFetchResult(
-            accounts: accounts,
-            usageResult: usageResult,
-            usageMessage: usageMessage,
-            usageUnavailableForSource: usageUnavailableForSource
-        )
+    private static func sorted(_ accounts: [RemoteCodexAccount]) -> [RemoteCodexAccount] {
+        accounts.sorted {
+            if $0.provider == $1.provider {
+                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+            return ($0.provider ?? "").localizedCaseInsensitiveCompare($1.provider ?? "") == .orderedAscending
+        }
     }
 }
 
-private struct RemoteCodexProvider {
-    let dataSource: RemoteCodexDataSource
-    let configuration: CLIProxyAPIConfiguration
+private extension PeriodUsage {
+    static func saturatedSum(_ lhs: PeriodUsage, _ rhs: PeriodUsage) -> PeriodUsage {
+        PeriodUsage(
+            day: saturatedAdd(lhs.day, rhs.day),
+            week: saturatedAdd(lhs.week, rhs.week),
+            month: saturatedAdd(lhs.month, rhs.month)
+        )
+    }
 
-    func fetchCore() async throws -> RemoteCodexFetchResult {
-        let client = CLIProxyAPIClient(configuration: configuration)
-        let accounts = try await client.fetchCodexAccounts(dataSource: dataSource)
-        switch dataSource {
-        case .cpaManagerPlus:
-            let usageResult: Result<PeriodUsage, Error>
-            do {
-                usageResult = .success(try await client.fetchManagerPlusUsageTotals())
-            } catch {
-                usageResult = .failure(error)
-            }
-            return RemoteCodexFetchResult(
-                accounts: accounts,
-                usageResult: usageResult,
-                usageMessage: nil,
-                usageUnavailableForSource: false
-            )
-        case .cliProxyAPI:
-            return RemoteCodexFetchResult(
-                accounts: accounts,
-                usageResult: .success(.zero),
-                usageMessage: "CLIProxyAPI 模式仅显示账号状态，历史用量需 CPA Manager Plus",
-                usageUnavailableForSource: true
-            )
-        }
+    static func saturatedAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (value, overflow) = max(0, lhs).addingReportingOverflow(max(0, rhs))
+        return overflow ? Int.max : value
     }
 }
 
 private struct RemoteMonitorSettingsSnapshot: Equatable {
     let remoteMonitorEnabled: Bool
-    let remoteCodexDataSource: RemoteCodexDataSource
-    let cliproxyPanelURL: String
-    let cliproxyManagementKey: String
+    let remoteAccountSources: [RemoteAccountSourceConfiguration]
     let cliproxyRefreshInterval: TimeInterval
-    let cliproxyRequestTimeout: TimeInterval
-    let cliproxyAllowInsecureTLS: Bool
 
     @MainActor
     init(settings: CodexNotchSettings) {
         remoteMonitorEnabled = settings.remoteMonitorEnabled
-        remoteCodexDataSource = settings.remoteCodexDataSource
-        cliproxyPanelURL = settings.cliproxyPanelURL
-        cliproxyManagementKey = settings.cliproxyManagementKey
+        remoteAccountSources = settings.remoteAccountSources
         cliproxyRefreshInterval = settings.cliproxyRefreshInterval
-        cliproxyRequestTimeout = settings.cliproxyRequestTimeout
-        cliproxyAllowInsecureTLS = settings.cliproxyAllowInsecureTLS
     }
 }

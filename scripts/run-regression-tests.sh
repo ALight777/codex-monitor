@@ -36,6 +36,7 @@ swiftc \
   "${ROOT_DIR}/Sources/CodexNotch/RemoteMonitorModels.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/RemoteResetCreditsLoader.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CLIProxyAPIClient.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/Sub2APIRemoteClient.swift" \
   "${ROOT_DIR}/Tests/CodexNotchRegressionTests/main.swift" \
   -o "${BUILD_DIR}/CodexNotchRegressionTests"
 

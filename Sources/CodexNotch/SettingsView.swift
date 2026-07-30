@@ -58,7 +58,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .codex:
             "Codex"
         case .remoteCodex:
-            "CLIProxyAPI"
+            "远程账号"
         case .newAPI:
             "NewAPI"
         case .subAPI:
@@ -99,6 +99,17 @@ private struct AccountEditorContext: Identifiable {
     let source: BalanceMonitorSource
 }
 
+private struct RemoteSourceEditorContext: Identifiable {
+    let id = UUID()
+    let sourceID: String?
+    let source: RemoteAccountSourceConfiguration
+}
+
+private struct RemoteSourceDeleteCandidate {
+    let id: String
+    let label: String
+}
+
 private struct SettingsDraft: Equatable {
     var activeRefreshInterval: TimeInterval = 3
     var idleRefreshInterval: TimeInterval = 6
@@ -111,12 +122,8 @@ private struct SettingsDraft: Equatable {
     var notchDisplaySource: NotchDisplaySource = .codex
     var notchWidthAdjustment: NotchPointAdjustment = 0
     var remoteMonitorEnabled = false
-    var remoteCodexDataSource: RemoteCodexDataSource = .cpaManagerPlus
-    var cliproxyPanelURL = ""
-    var cliproxyManagementKey = ""
+    var remoteAccountSources: [RemoteAccountSourceConfiguration] = []
     var cliproxyRefreshInterval: TimeInterval = 60
-    var cliproxyRequestTimeout: TimeInterval = 6
-    var cliproxyAllowInsecureTLS = false
     var newAPIMonitorEnabled = false
     var newAPIPanelURL = ""
     var newAPIManagementKey = ""
@@ -152,12 +159,8 @@ private struct SettingsDraft: Equatable {
         notchDisplaySource = settings.notchDisplaySource
         notchWidthAdjustment = settings.notchWidthAdjustment
         remoteMonitorEnabled = settings.remoteMonitorEnabled
-        remoteCodexDataSource = settings.remoteCodexDataSource
-        cliproxyPanelURL = settings.cliproxyPanelURL
-        cliproxyManagementKey = settings.cliproxyManagementKey
+        remoteAccountSources = settings.remoteAccountSources
         cliproxyRefreshInterval = settings.cliproxyRefreshInterval
-        cliproxyRequestTimeout = settings.cliproxyRequestTimeout
-        cliproxyAllowInsecureTLS = settings.cliproxyAllowInsecureTLS
         newAPIMonitorEnabled = settings.newAPIMonitorEnabled
         newAPIPanelURL = settings.newAPIPanelURL
         newAPIManagementKey = settings.newAPIManagementKey
@@ -211,6 +214,8 @@ struct SettingsView: View {
     @State private var accountEditorID: String?
     @State private var accountEditorDraft = BalanceAccountConfiguration(source: .newAPI)
     @State private var deleteCandidate: AccountDeleteCandidate?
+    @State private var remoteSourceEditorContext: RemoteSourceEditorContext?
+    @State private var remoteSourceDeleteCandidate: RemoteSourceDeleteCandidate?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -225,8 +230,10 @@ struct SettingsView: View {
                     tabContent
                 }
                 .formStyle(.grouped)
+                .disabled(!settings.secretStoreReady)
 
                 footer
+                    .disabled(!settings.secretStoreReady)
             }
             .padding(20)
             .frame(width: 710)
@@ -236,8 +243,25 @@ struct SettingsView: View {
         .onAppear {
             reloadDraft()
         }
+        .onChange(of: settings.secretStoreReady) { _, isReady in
+            if isReady {
+                reloadDraft()
+            }
+        }
         .sheet(item: $accountEditorContext, onDismiss: resetAccountEditorState) { context in
             accountEditorSheet(source: context.source)
+        }
+        .sheet(item: $remoteSourceEditorContext) { context in
+            RemoteSourceEditorForm(
+                sourceID: context.sourceID,
+                initialSource: context.source,
+                onCancel: {
+                    remoteSourceEditorContext = nil
+                },
+                onSave: { source in
+                    saveRemoteSource(source, sourceID: context.sourceID)
+                }
+            )
         }
         .alert(
             "删除账号？",
@@ -255,6 +279,22 @@ struct SettingsView: View {
         } message: {
             Text(deleteCandidate.map { "确定删除「\($0.label)」吗？删除后需要重新添加账号和密码。" } ?? "")
         }
+        .alert(
+            "删除数据源？",
+            isPresented: Binding(
+                get: { remoteSourceDeleteCandidate != nil },
+                set: { if !$0 { remoteSourceDeleteCandidate = nil } }
+            )
+        ) {
+            Button("删除", role: .destructive) {
+                deletePendingRemoteSource()
+            }
+            Button("取消", role: .cancel) {
+                remoteSourceDeleteCandidate = nil
+            }
+        } message: {
+            Text(remoteSourceDeleteCandidate.map { "确定删除「\($0.label)」吗？保存后该数据源的认证信息也会删除。" } ?? "")
+        }
     }
 
     private var currentDraft: SettingsDraft {
@@ -270,7 +310,7 @@ struct SettingsView: View {
     }
 
     private var canSaveDraft: Bool {
-        hasChanges && thresholdValidationMessage == nil
+        settings.secretStoreReady && hasChanges && thresholdValidationMessage == nil
     }
 
     private var accountEditorValidationMessage: String? {
@@ -284,12 +324,8 @@ struct SettingsView: View {
     private var hasRemoteChanges: Bool {
         let current = currentDraft
         return draft.remoteMonitorEnabled != current.remoteMonitorEnabled
-            || draft.remoteCodexDataSource != current.remoteCodexDataSource
-            || draft.cliproxyPanelURL != current.cliproxyPanelURL
-            || draft.cliproxyManagementKey != current.cliproxyManagementKey
+            || draft.remoteAccountSources != current.remoteAccountSources
             || draft.cliproxyRefreshInterval != current.cliproxyRefreshInterval
-            || draft.cliproxyRequestTimeout != current.cliproxyRequestTimeout
-            || draft.cliproxyAllowInsecureTLS != current.cliproxyAllowInsecureTLS
     }
 
     private var header: some View {
@@ -421,50 +457,17 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var remoteCodexSettingsContent: some View {
-        Section("CLIProxyAPI 设置") {
+        Section("远程账号监测") {
             Toggle(isOn: $draft.remoteMonitorEnabled) {
-                HelpLabel(title: "启用 CLIProxyAPI", help: "启用后详情页会出现 CLIProxyAPI tab，用于查看 CLIProxyAPI 或 CPA Manager Plus 中的 Codex 账号状态。")
+                HelpLabel(title: "启用远程账号监测", help: "启用后详情页会出现“远程账号”tab，用于查看 CLIProxyAPI、CPA Manager Plus 或 Sub2API 中的 Codex 账号状态与额度。")
             }
-
-            Picker(selection: $draft.remoteCodexDataSource) {
-                ForEach(RemoteCodexDataSource.allCases) { source in
-                    Text(source.label).tag(source)
-                }
-            } label: {
-                HelpLabel(title: "数据源", help: "未安装 CPA Manager Plus 时可选择 CLIProxyAPI；安装后建议选择 CPA Manager Plus，直接读取服务端巡检和用量统计。")
-            }
-            .pickerStyle(.segmented)
-            .disabled(!draft.remoteMonitorEnabled)
-
-            labeledTextField(
-                "面板地址",
-                text: $draft.cliproxyPanelURL,
-                placeholder: draft.remoteCodexDataSource == .cpaManagerPlus ? "CPA Manager Plus 地址" : "CLIProxyAPI 管理面板地址",
-                help: "填写管理面板地址。支持 https；本地 localhost 可使用 http。"
-            )
-            .disabled(!draft.remoteMonitorEnabled)
-
-            labeledSecureField(
-                "管理密钥",
-                text: $draft.cliproxyManagementKey,
-                placeholder: draft.remoteCodexDataSource == .cpaManagerPlus ? "CPA Manager Plus 管理密钥" : "CLIProxyAPI 管理密钥",
-                help: "用于调用远程管理接口。密钥只保存到 macOS Keychain，不写入 UserDefaults。"
-            )
-            .disabled(!draft.remoteMonitorEnabled)
 
             Text("地址、认证信息和刷新配置仅在点击保存后生效。")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
 
-            intervalStepper("账号刷新", value: $draft.cliproxyRefreshInterval, range: 60...3_600, help: "远程账号状态的读取间隔。CPA Manager Plus 的巡检结果由服务端产生，这里只是读取频率。")
+            intervalStepper("账号刷新", value: $draft.cliproxyRefreshInterval, range: 60...3_600, help: "所有已启用远程数据源的刷新间隔。各数据源会独立请求，单个失败不会阻断其他数据源。")
                 .disabled(!draft.remoteMonitorEnabled)
-            intervalStepper("请求超时", value: $draft.cliproxyRequestTimeout, range: 3...30, help: "单个远程管理接口请求等待的最长秒数。")
-                .disabled(!draft.remoteMonitorEnabled)
-
-            Toggle(isOn: $draft.cliproxyAllowInsecureTLS) {
-                HelpLabel(title: "允许不安全 TLS", help: "允许连接自签名或证书不完整的测试面板。开启后会信任该请求中的服务器证书，请只在你控制的面板上使用。")
-            }
-            .disabled(!draft.remoteMonitorEnabled)
 
             remoteStatusRow
 
@@ -473,6 +476,10 @@ struct SettingsView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.red.opacity(0.85))
             }
+        }
+
+        Section("远程数据源") {
+            remoteSourceList
         }
     }
 
@@ -552,7 +559,7 @@ struct SettingsView: View {
 
                 infoRow(title: "版本", value: AppInfo.displayVersion)
                 infoRow(title: "本机监测", value: "Codex 运行状态、额度和 token 用量")
-                infoRow(title: "远程监测", value: "CLIProxyAPI、CPA Manager Plus、NewAPI、Sub2API")
+                infoRow(title: "远程监测", value: "远程 Codex 账号、NewAPI 余额、Sub2API 余额")
 
                 Text("codex监测用于在 Mac 刘海屏区域展示 Codex 本机状态、额度用量和远程账号监测信息。")
                     .font(.system(size: 11, weight: .medium))
@@ -667,6 +674,119 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var remoteSourceList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("数据源列表")
+                    .font(.system(size: 12, weight: .bold))
+                Spacer()
+                Button {
+                    startAddingRemoteSource()
+                } label: {
+                    Label("添加数据源", systemImage: "plus.circle.fill")
+                }
+                .disabled(!draft.remoteMonitorEnabled)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            HStack(spacing: 10) {
+                Text("名称")
+                    .frame(width: 96, alignment: .leading)
+                Text("类型")
+                    .frame(width: 118, alignment: .leading)
+                Text("面板")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("认证")
+                    .frame(width: 112, alignment: .leading)
+                Text("操作")
+                    .frame(width: 118, alignment: .trailing)
+            }
+            .font(.system(size: 10.5, weight: .bold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            if draft.remoteAccountSources.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "network.badge.shield.half.filled")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("还没有配置远程数据源")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("添加 CLIProxyAPI、CPA Manager Plus 或 Sub2API 数据源。")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 30)
+            } else {
+                ForEach(draft.remoteAccountSources) { source in
+                    Divider()
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(source.displayLabel)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .lineLimit(1)
+                            Text(source.enabled ? "已启用" : "已停用")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(source.enabled ? Color.green : .secondary)
+                        }
+                        .frame(width: 96, alignment: .leading)
+
+                        Text(source.source.label)
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                            .frame(width: 118, alignment: .leading)
+
+                        Text(source.panelURL.isEmpty ? "未填写" : source.panelURL)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(source.panelURL.isEmpty ? .secondary : .primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text(source.credentialLabel)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(width: 112, alignment: .leading)
+
+                        HStack(spacing: 5) {
+                            Button(source.enabled ? "停用" : "启用") {
+                                toggleRemoteSourceEnabled(id: source.id)
+                            }
+                            Button("修改") {
+                                startEditingRemoteSource(source)
+                            }
+                            Button("删除", role: .destructive) {
+                                remoteSourceDeleteCandidate = RemoteSourceDeleteCandidate(
+                                    id: source.id,
+                                    label: source.displayLabel
+                                )
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .frame(width: 118, alignment: .trailing)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .opacity(draft.remoteMonitorEnabled ? 1 : 0.55)
+                }
+            }
+        }
+        .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+        .disabled(!draft.remoteMonitorEnabled)
     }
 
     @ViewBuilder
@@ -1044,6 +1164,55 @@ struct SettingsView: View {
         return copy
     }
 
+    private func startAddingRemoteSource() {
+        let source: RemoteCodexDataSource = .cpaManagerPlus
+        remoteSourceEditorContext = RemoteSourceEditorContext(
+            sourceID: nil,
+            source: RemoteAccountSourceConfiguration(
+                source: source,
+                label: "\(source.label) \(draft.remoteAccountSources.count + 1)",
+                requestTimeout: 6
+            )
+        )
+    }
+
+    private func startEditingRemoteSource(_ source: RemoteAccountSourceConfiguration) {
+        remoteSourceEditorContext = RemoteSourceEditorContext(
+            sourceID: source.id,
+            source: source
+        )
+    }
+
+    private func saveRemoteSource(
+        _ source: RemoteAccountSourceConfiguration,
+        sourceID: String?
+    ) {
+        var value = source
+        if let sourceID,
+           let index = draft.remoteAccountSources.firstIndex(where: { $0.id == sourceID }) {
+            value.id = sourceID
+            draft.remoteAccountSources[index] = value
+        } else {
+            draft.remoteAccountSources.append(value)
+        }
+        remoteSourceEditorContext = nil
+    }
+
+    private func toggleRemoteSourceEnabled(id: String) {
+        guard let index = draft.remoteAccountSources.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        draft.remoteAccountSources[index].enabled.toggle()
+    }
+
+    private func deletePendingRemoteSource() {
+        guard let candidate = remoteSourceDeleteCandidate else {
+            return
+        }
+        draft.remoteAccountSources.removeAll { $0.id == candidate.id }
+        remoteSourceDeleteCandidate = nil
+    }
+
     private func accountBinding(for source: BalanceMonitorSource) -> Binding<[BalanceAccountConfiguration]> {
         switch source {
         case .newAPI:
@@ -1169,7 +1338,7 @@ struct SettingsView: View {
         case .newAPI:
             "启用后详情页会出现 \(title) tab，通过登录接口读取 NewAPI 当前用户额度。"
         case .subAPI:
-            "启用后详情页会出现 \(title) tab，通过登录接口读取 Sub2API 当前用户余额和平台配额。"
+            "启用后详情页会出现 \(title) tab，通过登录接口读取 Sub2API 当前用户余额。"
         }
     }
 
@@ -1234,6 +1403,12 @@ struct SettingsView: View {
                 selectedPreset = .balanced
             }
 
+            if !settings.secretStoreReady {
+                Text("正在读取认证信息")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+
             if hasChanges {
                 if let thresholdValidationMessage {
                     Text(thresholdValidationMessage)
@@ -1268,13 +1443,13 @@ struct SettingsView: View {
 
     private var remoteStatusRow: some View {
         HStack {
-            HelpLabel(title: "CLIProxyAPI 状态", help: "显示当前保存配置下的 CLIProxyAPI 读取状态。修改地址、认证信息或数据源后需要先保存再刷新。")
+            HelpLabel(title: "远程账号状态", help: "显示当前保存数据源的读取状态。修改地址、认证信息或数据源后需要先保存再刷新。")
             Spacer()
             Text(hasRemoteChanges ? "保存后生效" : remoteStatusText)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(hasRemoteChanges ? .orange : remoteStatusColor)
                 .lineLimit(1)
-            Button("刷新 CLIProxyAPI") {
+            Button("刷新远程账号") {
                 remoteViewModel.refreshNow()
             }
             .disabled(!settings.remoteMonitorEnabled || hasRemoteChanges)
@@ -1403,17 +1578,16 @@ struct SettingsView: View {
         }
         let next = draft
         let current = currentDraft
-        let managementKeyForSave = CodexNotchSettings.managementKeyForSave(
-            draftKey: next.cliproxyManagementKey,
-            oldPanelURL: current.cliproxyPanelURL,
-            newPanelURL: next.cliproxyPanelURL,
-            oldAllowsInsecureTLS: current.cliproxyAllowInsecureTLS,
-            newAllowsInsecureTLS: next.cliproxyAllowInsecureTLS,
-            remoteEnabled: next.remoteMonitorEnabled,
-            oldDataSource: current.remoteCodexDataSource,
-            newDataSource: next.remoteCodexDataSource,
-            oldSavedKey: current.cliproxyManagementKey
+        let currentRemoteSources = Dictionary(
+            current.remoteAccountSources.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, _ in existing }
         )
+        let remoteSources = next.remoteAccountSources.map { source in
+            CodexNotchSettings.sanitizedRemoteAccountSourceForSave(
+                source,
+                oldSource: currentRemoteSources[source.id]
+            )
+        }
         let newAPIAccounts = sanitizedAccountsForSave(
             next.newAPIAccounts,
             current: current.newAPIAccounts,
@@ -1449,18 +1623,20 @@ struct SettingsView: View {
         settings.notchDisplaySource = next.notchDisplaySource
         settings.notchWidthAdjustment = next.notchWidthAdjustment
 
-        settings.remoteCodexDataSource = next.remoteCodexDataSource
-        settings.cliproxyPanelURL = next.cliproxyPanelURL
         settings.cliproxyRefreshInterval = next.cliproxyRefreshInterval
-        settings.cliproxyRequestTimeout = next.cliproxyRequestTimeout
-        settings.cliproxyAllowInsecureTLS = next.cliproxyAllowInsecureTLS
-        settings.cliproxyManagementKey = managementKeyForSave
+        settings.setRemoteAccountSources(remoteSources)
+        guard settings.remoteAccountSources == remoteSources else {
+            return
+        }
         if next.remoteMonitorEnabled {
             settings.remoteMonitorEnabled = true
         }
 
         settings.setBalanceDefaultThresholds(next.newAPIThresholds, for: .newAPI)
         settings.setBalanceAccounts(newAPIAccounts, for: .newAPI)
+        guard settings.balanceAccounts(for: .newAPI) == newAPIAccounts else {
+            return
+        }
         settings.newAPIPanelURL = newAPIAccounts.first?.panelURL ?? ""
         settings.newAPIUsername = next.newAPIMonitorEnabled ? (newAPIAccounts.first?.username ?? "") : ""
         settings.newAPIRefreshInterval = next.newAPIRefreshInterval
@@ -1476,6 +1652,9 @@ struct SettingsView: View {
 
         settings.setBalanceDefaultThresholds(next.subAPIThresholds, for: .subAPI)
         settings.setBalanceAccounts(subAPIAccounts, for: .subAPI)
+        guard settings.balanceAccounts(for: .subAPI) == subAPIAccounts else {
+            return
+        }
         settings.subAPIPanelURL = subAPIAccounts.first?.panelURL ?? ""
         settings.subAPIUsername = next.subAPIMonitorEnabled ? (subAPIAccounts.first?.username ?? "") : ""
         settings.subAPIRefreshInterval = next.subAPIRefreshInterval
@@ -1603,6 +1782,216 @@ private struct AppLogoMark: View {
                 .offset(y: size * 0.28)
         }
         .frame(width: size, height: size)
+    }
+}
+
+private struct RemoteSourceEditorForm: View {
+    let sourceID: String?
+    let onCancel: () -> Void
+    let onSave: (RemoteAccountSourceConfiguration) -> Void
+
+    @State private var draft: RemoteAccountSourceConfiguration
+
+    init(
+        sourceID: String?,
+        initialSource: RemoteAccountSourceConfiguration,
+        onCancel: @escaping () -> Void,
+        onSave: @escaping (RemoteAccountSourceConfiguration) -> Void
+    ) {
+        self.sourceID = sourceID
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _draft = State(initialValue: initialSource)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(sourceID == nil ? "添加远程数据源" : "修改远程数据源")
+                    .font(.system(size: 17, weight: .bold))
+                Text("配置只会在点击“保存数据源”后写入当前设置草稿。")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    editorSection("基础信息") {
+                        Toggle(isOn: $draft.enabled) {
+                            HelpLabel(title: "启用数据源", help: "关闭后不会刷新这个数据源，也不会在远程账号详情中展示其账号。")
+                        }
+
+                        Picker(selection: $draft.source) {
+                            ForEach(RemoteCodexDataSource.allCases) { source in
+                                Text(source.label).tag(source)
+                            }
+                        } label: {
+                            HelpLabel(title: "数据源类型", help: "选择远程 Codex 账号所在的管理系统。")
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: draft.source) { oldValue, newValue in
+                            guard oldValue != newValue else {
+                                return
+                            }
+                            draft.username = ""
+                            draft.secret = ""
+                            if draft.label == oldValue.label {
+                                draft.label = newValue.label
+                            } else if draft.label.hasPrefix("\(oldValue.label) ") {
+                                draft.label = newValue.label + draft.label.dropFirst(oldValue.label.count)
+                            }
+                        }
+
+                        labeledTextField(
+                            "显示名称",
+                            text: $draft.label,
+                            placeholder: draft.source.label,
+                            help: "用于区分多个相同类型的数据源，留空时显示数据源类型。"
+                        )
+
+                        labeledTextField(
+                            "面板地址",
+                            text: $draft.panelURL,
+                            placeholder: "\(draft.source.label) 面板地址",
+                            help: "填写面板根地址。支持 https；本机 localhost 可使用 http。"
+                        )
+
+                        if draft.source == .sub2API {
+                            labeledTextField(
+                                "管理员邮箱",
+                                text: $draft.username,
+                                placeholder: "Sub2API 管理员邮箱",
+                                help: "用于登录 Sub2API 管理端并读取上游 Codex 账号，不是普通用户余额账号。"
+                            )
+                            labeledSecureField(
+                                "管理员密码",
+                                text: $draft.secret,
+                                placeholder: "Sub2API 管理员密码",
+                                help: "仅用于换取管理员 Bearer Token，保存到所选密钥存储。"
+                            )
+                        } else {
+                            labeledSecureField(
+                                "管理密钥",
+                                text: $draft.secret,
+                                placeholder: "\(draft.source.label) 管理密钥",
+                                help: "用于调用远程管理接口，保存到所选密钥存储。"
+                            )
+                        }
+                    }
+
+                    editorSection("连接") {
+                        HStack {
+                            HelpLabel(title: "请求超时", help: "这个数据源单个接口请求等待的最长秒数。")
+                            Spacer()
+                            Text("\(Int(draft.requestTimeout)) 秒")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 58, alignment: .trailing)
+                            Stepper("", value: $draft.requestTimeout, in: 3...30, step: 1)
+                                .labelsHidden()
+                        }
+
+                        Toggle(isOn: $draft.allowInsecureTLS) {
+                            HelpLabel(title: "允许不安全 TLS", help: "允许连接自签名或证书不完整的测试面板。请只在你控制的面板上使用。")
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(height: 430)
+
+            if let validationMessage {
+                Text(validationMessage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.red)
+            }
+
+            HStack {
+                Button("取消", action: onCancel)
+                Spacer()
+                Button("保存数据源") {
+                    onSave(normalizedDraft)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(validationMessage != nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 620, height: 600)
+    }
+
+    private var validationMessage: String? {
+        if draft.panelURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "请填写面板地址"
+        }
+        if draft.source == .sub2API,
+           draft.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "请填写 Sub2API 管理员邮箱"
+        }
+        if draft.secret.isEmpty {
+            return draft.source == .sub2API ? "请填写管理员密码" : "请填写管理密钥"
+        }
+        return nil
+    }
+
+    private var normalizedDraft: RemoteAccountSourceConfiguration {
+        var value = draft
+        value.requestTimeout = min(30, max(3, value.requestTimeout.rounded()))
+        value.label = value.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        value.panelURL = value.panelURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        value.username = value.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !value.secret.isEmpty {
+            value.secretReadFailed = false
+        }
+        return value
+    }
+
+    private func editorSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.secondary)
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func labeledTextField(
+        _ title: String,
+        text: Binding<String>,
+        placeholder: String,
+        help: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HelpLabel(title: title, help: help)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func labeledSecureField(
+        _ title: String,
+        text: Binding<String>,
+        placeholder: String,
+        help: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HelpLabel(title: title, help: help)
+            SecureField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

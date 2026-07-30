@@ -267,9 +267,10 @@ enum TaskHistoryRange: String, CaseIterable, Identifiable {
     }
 }
 
-enum RemoteCodexDataSource: String, CaseIterable, Identifiable, Equatable {
+enum RemoteCodexDataSource: String, CaseIterable, Identifiable, Equatable, Codable, Sendable {
     case cliProxyAPI
     case cpaManagerPlus
+    case sub2API
 
     var id: String { rawValue }
 
@@ -279,6 +280,8 @@ enum RemoteCodexDataSource: String, CaseIterable, Identifiable, Equatable {
             "CLIProxyAPI"
         case .cpaManagerPlus:
             "CPA Manager Plus"
+        case .sub2API:
+            "Sub2API"
         }
     }
 
@@ -288,7 +291,155 @@ enum RemoteCodexDataSource: String, CaseIterable, Identifiable, Equatable {
             "直接从 CLIProxyAPI 读取账号状态"
         case .cpaManagerPlus:
             "从 CPA Manager Plus 读取巡检和用量"
+        case .sub2API:
+            "从 Sub2API 管理端读取上游 Codex 账号"
         }
+    }
+
+    var supportsTokenUsage: Bool {
+        switch self {
+        case .cliProxyAPI:
+            false
+        case .cpaManagerPlus, .sub2API:
+            true
+        }
+    }
+}
+
+struct RemoteAccountSourceConfiguration: Identifiable, Codable, Equatable, Sendable {
+    static let legacyID = "legacy-remote-account-source"
+
+    var id: String
+    var source: RemoteCodexDataSource
+    var enabled: Bool
+    var label: String
+    var panelURL: String
+    var username: String
+    var secret: String = ""
+    var secretReadFailed: Bool = false
+    var allowInsecureTLS: Bool
+    var requestTimeout: TimeInterval
+
+    init(
+        id: String = UUID().uuidString,
+        source: RemoteCodexDataSource = .cpaManagerPlus,
+        enabled: Bool = true,
+        label: String = "",
+        panelURL: String = "",
+        username: String = "",
+        secret: String = "",
+        allowInsecureTLS: Bool = false,
+        requestTimeout: TimeInterval = 6
+    ) {
+        self.id = id
+        self.source = source
+        self.enabled = enabled
+        self.label = label
+        self.panelURL = panelURL
+        self.username = username
+        self.secret = secret
+        self.secretReadFailed = false
+        self.allowInsecureTLS = allowInsecureTLS
+        self.requestTimeout = requestTimeout
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case source
+        case enabled
+        case label
+        case panelURL
+        case username
+        case allowInsecureTLS
+        case requestTimeout
+    }
+
+    var displayLabel: String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? source.label : trimmed
+    }
+
+    var credentialLabel: String {
+        switch source {
+        case .sub2API:
+            let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? "未填写" : trimmed
+        case .cliProxyAPI, .cpaManagerPlus:
+            return secret.isEmpty ? "未填写密钥" : "已配置密钥"
+        }
+    }
+
+    var usageScopeID: String? {
+        guard source.supportsTokenUsage,
+              let endpointIdentity else {
+            return nil
+        }
+        return "\(source.rawValue)|\(endpointIdentity)"
+    }
+
+    var credentialBindingID: String? {
+        guard let endpointIdentity else {
+            return nil
+        }
+        let principal: String
+        switch source {
+        case .sub2API:
+            principal = username
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+        case .cliProxyAPI, .cpaManagerPlus:
+            principal = ""
+        }
+        return [
+            source.rawValue,
+            endpointIdentity,
+            principal,
+            allowInsecureTLS ? "insecure-tls" : "system-tls"
+        ].joined(separator: "|")
+    }
+
+    var configurationIssue: String? {
+        let trimmed = panelURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, endpointIdentity != nil else {
+            return "面板地址无效"
+        }
+        guard !secret.isEmpty else {
+            return source == .sub2API ? "缺少管理员密码" : "缺少管理密钥"
+        }
+        if source == .sub2API,
+           username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "缺少管理员邮箱"
+        }
+        return nil
+    }
+
+    private var endpointIdentity: String? {
+        let endpoint: URL?
+        switch source {
+        case .cliProxyAPI, .cpaManagerPlus:
+            endpoint = CLIProxyAPIClient.managementBaseURL(from: panelURL)
+        case .sub2API:
+            endpoint = BalanceAPIClient.apiBaseURL(from: panelURL)
+        }
+        guard let endpoint,
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false),
+              components.scheme != nil,
+              components.host != nil else {
+            return nil
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        if (components.scheme == "https" && components.port == 443)
+            || (components.scheme == "http" && components.port == 80) {
+            components.port = nil
+        }
+        components.query = nil
+        components.fragment = nil
+        var value = components.string ?? endpoint.absoluteString
+        while value.hasSuffix("/") {
+            value.removeLast()
+        }
+        return value
     }
 }
 
@@ -308,7 +459,7 @@ enum NotchDisplaySource: String, CaseIterable, Identifiable, Equatable {
         case .codex:
             "Codex"
         case .remoteCodex:
-            "CLIProxyAPI"
+            "远程账号"
         case .newAPI:
             "NewAPI"
         case .subAPI:

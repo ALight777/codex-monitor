@@ -1,6 +1,6 @@
 import Foundation
 
-struct CLIProxyAPIConfiguration: Equatable {
+struct CLIProxyAPIConfiguration: Equatable, Sendable {
     let panelURL: String
     let managementKey: String
     let timeout: TimeInterval
@@ -445,8 +445,8 @@ final class CLIProxyAPIClient: NSObject, URLSessionDelegate {
             chatgptAccountID: file?.idToken?.chatgptAccountID,
             status: result.status ?? file?.status,
             statusMessage: statusMessage,
-            successCount: file?.success ?? 0,
-            failureCount: file?.failed ?? 0,
+            successCount: file?.success,
+            failureCount: file?.failed,
             recentFailures: recentFailures,
             state: inspectionState(from: result),
             lastRefresh: result.createdAtText ?? file?.lastRefresh,
@@ -609,8 +609,8 @@ final class CLIProxyAPIClient: NSObject, URLSessionDelegate {
             chatgptAccountID: file.idToken?.chatgptAccountID,
             status: status,
             statusMessage: statusMessage,
-            successCount: file.success ?? 0,
-            failureCount: file.failed ?? 0,
+            successCount: file.success,
+            failureCount: file.failed,
             recentFailures: recentFailures,
             state: state,
             lastRefresh: file.lastRefresh,

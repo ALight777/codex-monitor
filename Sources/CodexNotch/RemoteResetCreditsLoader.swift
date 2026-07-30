@@ -30,8 +30,8 @@ final class RemoteResetCreditsCache: @unchecked Sendable {
         self.now = now
     }
 
-    func beginRevision(panelURL: String) -> Revision {
-        let panelIdentity = Self.normalizedPanelIdentity(panelURL)
+    func beginRevision(panelURL: String, scopeID: String = "") -> Revision {
+        let panelIdentity = Self.scopedPanelIdentity(panelURL: panelURL, scopeID: scopeID)
         lock.lock()
         let nextValue = revisionsByPanel[panelIdentity, default: 0] + 1
         revisionsByPanel[panelIdentity] = nextValue
@@ -50,8 +50,12 @@ final class RemoteResetCreditsCache: @unchecked Sendable {
         return true
     }
 
-    func fresh(panelURL: String, authIndex: String) -> RateLimitResetCredits? {
-        let key = Self.key(panelURL: panelURL, authIndex: authIndex)
+    func fresh(
+        panelURL: String,
+        authIndex: String,
+        scopeID: String = ""
+    ) -> RateLimitResetCredits? {
+        let key = Self.key(panelURL: panelURL, authIndex: authIndex, scopeID: scopeID)
         let currentDate = now()
         lock.lock()
         defer { lock.unlock() }
@@ -63,8 +67,12 @@ final class RemoteResetCreditsCache: @unchecked Sendable {
         return entry.value
     }
 
-    func stale(panelURL: String, authIndex: String) -> RateLimitResetCredits? {
-        let key = Self.key(panelURL: panelURL, authIndex: authIndex)
+    func stale(
+        panelURL: String,
+        authIndex: String,
+        scopeID: String = ""
+    ) -> RateLimitResetCredits? {
+        let key = Self.key(panelURL: panelURL, authIndex: authIndex, scopeID: scopeID)
         lock.lock()
         defer { lock.unlock() }
         return entries[key]?.value
@@ -75,9 +83,10 @@ final class RemoteResetCreditsCache: @unchecked Sendable {
         _ value: RateLimitResetCredits,
         panelURL: String,
         authIndex: String,
+        scopeID: String = "",
         revision: Revision
     ) -> Bool {
-        let key = Self.key(panelURL: panelURL, authIndex: authIndex)
+        let key = Self.key(panelURL: panelURL, authIndex: authIndex, scopeID: scopeID)
         let entry = Entry(value: value, storedAt: now())
         lock.lock()
         defer { lock.unlock() }
@@ -89,11 +98,23 @@ final class RemoteResetCreditsCache: @unchecked Sendable {
         return true
     }
 
-    static func key(panelURL: String, authIndex: String) -> Key {
+    static func key(
+        panelURL: String,
+        authIndex: String,
+        scopeID: String = ""
+    ) -> Key {
         Key(
-            panelIdentity: normalizedPanelIdentity(panelURL),
+            panelIdentity: scopedPanelIdentity(panelURL: panelURL, scopeID: scopeID),
             authIndex: authIndex.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+    }
+
+    private static func scopedPanelIdentity(panelURL: String, scopeID: String) -> String {
+        let normalizedScope = scopeID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedScope.isEmpty else {
+            return normalizedPanelIdentity(panelURL)
+        }
+        return "\(normalizedPanelIdentity(panelURL))#\(normalizedScope)"
     }
 
     static func normalizedPanelIdentity(_ panelURL: String) -> String {
@@ -169,6 +190,7 @@ struct RemoteResetCreditsLoader: Sendable {
         accounts: [RemoteCodexAccount],
         dataSource: RemoteCodexDataSource,
         panelURL: String,
+        cacheScopeID: String = "",
         forceRefresh: Bool = false,
         revision suppliedRevision: RemoteResetCreditsCache.Revision? = nil,
         fetch: @escaping Fetch
@@ -195,12 +217,19 @@ struct RemoteResetCreditsLoader: Sendable {
             return accounts
         }
 
-        let revision = suppliedRevision ?? cache.beginRevision(panelURL: panelURL)
+        let revision = suppliedRevision ?? cache.beginRevision(
+            panelURL: panelURL,
+            scopeID: cacheScopeID
+        )
         var result = accounts
         var pending: [RemoteResetCreditsCandidate] = []
         for candidate in eligible {
             if !forceRefresh,
-               let cached = cache.fresh(panelURL: panelURL, authIndex: candidate.authIndex) {
+               let cached = cache.fresh(
+                   panelURL: panelURL,
+                   authIndex: candidate.authIndex,
+                   scopeID: cacheScopeID
+               ) {
                 result[candidate.accountIndex] = result[candidate.accountIndex].withResetCredits(cached)
             } else {
                 pending.append(candidate)
@@ -233,15 +262,21 @@ struct RemoteResetCreditsLoader: Sendable {
                                     fetched,
                                     panelURL: panelURL,
                                     authIndex: candidate.authIndex,
+                                    scopeID: cacheScopeID,
                                     revision: revision
                                 )
                                 resolvedCredits = stored
                                     ? fetched
-                                    : cache.stale(panelURL: panelURL, authIndex: candidate.authIndex)
+                                    : cache.stale(
+                                        panelURL: panelURL,
+                                        authIndex: candidate.authIndex,
+                                        scopeID: cacheScopeID
+                                    )
                             } else {
                                 resolvedCredits = cache.stale(
                                     panelURL: panelURL,
-                                    authIndex: candidate.authIndex
+                                    authIndex: candidate.authIndex,
+                                    scopeID: cacheScopeID
                                 )
                             }
                             outcomes.append(
@@ -261,7 +296,8 @@ struct RemoteResetCreditsLoader: Sendable {
                                     candidate: candidate,
                                     credits: cache.stale(
                                         panelURL: panelURL,
-                                        authIndex: candidate.authIndex
+                                        authIndex: candidate.authIndex,
+                                        scopeID: cacheScopeID
                                     ),
                                     succeeded: false
                                 )
@@ -301,7 +337,8 @@ struct RemoteResetCreditsLoader: Sendable {
 
     func mergingCachedCredits(
         into accounts: [RemoteCodexAccount],
-        panelURL: String
+        panelURL: String,
+        cacheScopeID: String = ""
     ) -> [RemoteCodexAccount] {
         accounts.map { account in
             guard let rawAuthIndex = account.authIndex else {
@@ -309,7 +346,11 @@ struct RemoteResetCreditsLoader: Sendable {
             }
             let authIndex = rawAuthIndex.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !authIndex.isEmpty,
-                  let cached = cache.stale(panelURL: panelURL, authIndex: authIndex) else {
+                  let cached = cache.stale(
+                      panelURL: panelURL,
+                      authIndex: authIndex,
+                      scopeID: cacheScopeID
+                  ) else {
                 return account
             }
             return account.withResetCredits(cached)
@@ -374,6 +415,7 @@ struct RemoteResetCreditsEnrichmentCoordinator: Sendable {
         accounts: [RemoteCodexAccount],
         dataSource: RemoteCodexDataSource,
         panelURL: String,
+        cacheScopeID: String = "",
         forceRefresh: Bool = false,
         fetch: @escaping RemoteResetCreditsLoader.Fetch
     ) async -> [RemoteCodexAccount] {
@@ -381,7 +423,7 @@ struct RemoteResetCreditsEnrichmentCoordinator: Sendable {
             return accounts
         }
 
-        let revision = loader.cache.beginRevision(panelURL: panelURL)
+        let revision = loader.cache.beginRevision(panelURL: panelURL, scopeID: cacheScopeID)
         let pair = AsyncStream<RemoteResetCreditsRaceGate.Completion>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
@@ -393,6 +435,7 @@ struct RemoteResetCreditsEnrichmentCoordinator: Sendable {
                         accounts: accounts,
                         dataSource: dataSource,
                         panelURL: panelURL,
+                        cacheScopeID: cacheScopeID,
                         forceRefresh: forceRefresh,
                         revision: revision,
                         fetch: fetch
@@ -430,7 +473,11 @@ struct RemoteResetCreditsEnrichmentCoordinator: Sendable {
         case .enriched(let enriched):
             return enriched
         case .timedOut, .cancelled:
-            return loader.mergingCachedCredits(into: accounts, panelURL: panelURL)
+            return loader.mergingCachedCredits(
+                into: accounts,
+                panelURL: panelURL,
+                cacheScopeID: cacheScopeID
+            )
         }
     }
 }

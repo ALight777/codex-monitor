@@ -27,6 +27,18 @@ struct SecretKey: Hashable, Codable {
     static func balanceAccount(source: BalanceMonitorSource, id: String) -> SecretKey {
         SecretKey(rawValue: "\(source.rawValue).account.\(id)")
     }
+
+    static func balanceAccountBinding(source: BalanceMonitorSource, id: String) -> SecretKey {
+        SecretKey(rawValue: "\(source.rawValue).account-binding.\(id)")
+    }
+
+    static func remoteAccountSource(id: String) -> SecretKey {
+        SecretKey(rawValue: "remote-account-source.\(id)")
+    }
+
+    static func remoteAccountSourceBinding(id: String) -> SecretKey {
+        SecretKey(rawValue: "remote-account-source-binding.\(id)")
+    }
 }
 
 struct SecretVault: Codable, Equatable {

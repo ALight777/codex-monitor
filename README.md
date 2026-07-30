@@ -11,13 +11,13 @@
 
 codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook 刘海区域，在左右两侧显示 Codex 本地运行状态、剩余额度或远程面板状态，并可以展开成类似灵动岛的详情面板。
 
-项目当前支持本机 Codex、CLIProxyAPI / CPA Manager Plus、NewAPI 和 Sub2API 多类数据源，适合需要长期观察 Codex 使用量、账号额度和远程代理面板状态的用户。
+项目当前支持本机 Codex、远程账号（CLIProxyAPI、CPA Manager Plus、Sub2API）、NewAPI 和 Sub2API 余额等多类数据源，适合需要长期观察 Codex 使用量、账号额度和远程代理面板状态的用户。
 
 ### 功能概览
 
 - 刘海区域常驻显示：左侧状态灯，右侧关键指标。
 - 点击刘海区域展开详情面板，再次点击外部区域可收起。
-- 详情页使用多 tab 模式：`Codex`、`CLIProxyAPI`、`NewAPI`、`Sub2API`。
+- 详情页使用多 tab 模式：`Codex`、`远程账号`、`NewAPI`、`Sub2API`。
 - 支持手动选择刘海区域显示来源，也支持自动模式优先展示有提醒的外部监控。
 - 支持根据 macOS 顶部安全区和辅助菜单区自动识别物理刘海尺寸，并提供物理刘海宽度微调。
 - 支持设置页独立开关每一种监控源。
@@ -47,14 +47,15 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 应用只读取这些文件，不会修改 Codex 的本地数据。
 
-### CLIProxyAPI / CPA Manager Plus 监测
+### 远程账号监测
 
-远程 Codex 账号监测支持两种数据来源：
+远程 Codex / OpenAI 账号监测支持同时配置多个数据源：
 
 - `CLIProxyAPI`：直接读取 CLIProxyAPI 管理接口中的 Codex auth 文件和账号状态。
 - `CPA Manager Plus`：读取 CPA Manager Plus 的服务端巡检结果和用量统计。
+- `Sub2API`：通过管理员接口读取 Sub2API 中的 OpenAI OAuth 账号、配额状态和用量趋势。
 
-如果你的服务端已经部署 CPA Manager Plus，建议优先选择 CPA Manager Plus。它可以复用服务端定时巡检结果，避免客户端重复触发账号检查。
+如果你的服务端已经部署 CPA Manager Plus，建议优先使用它读取巡检结果，避免客户端重复触发账号检查。多个数据源可以并存，远程账号页会合并展示已启用来源中的账号。
 
 远程页面可显示：
 
@@ -62,11 +63,13 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 账号正常、配额耗尽、异常数量。
 - 每个账号的套餐、索引、成功/失败次数。
 - Codex 账号 5h / 7d 剩余额度。
-- CPA Manager Plus 模式会在账号周额度后显示剩余重置次数，并可通过信息图标查看每次到期时间。
+- CPA Manager Plus 和 Sub2API 在接口提供数据时，会在账号周额度后显示剩余重置次数，并可通过信息图标查看每次到期时间。
 - 账号异常原因，例如登录过期、账号不可用、请求失败、5 小时额度已满、周额度已满等。
-- CPA Manager Plus 的 24 小时、7 天、30 天总 token 用量。
+- CPA Manager Plus 和 Sub2API 的 24 小时、7 天、30 天总 token 用量；Sub2API 只统计当前监测到的 OpenAI OAuth 账号。
+- 每个来源的用量覆盖状态、整轮最近更新时间和刷新失败说明；重复配置同一面板时，用量只计入一次。
+- 单个来源失败时保留其他来源的新账号结果，并沿用失败来源的上次账号快照；总用量只有在所有应提供用量的来源都成功时才会替换。
 
-账号重置次数仅在 `CPA Manager Plus` 模式下提供。应用通过 CPA Manager Plus 的 `/v0/management/api-call` 管理代理读取结果，不会从 Mac 直接查询 OpenAI。结果按账号缓存 60 分钟，手动刷新会绕过缓存；单个账号获取失败时会沿用已有旧值，并且不会因此改变账号健康状态。`CLIProxyAPI` 直连模式不提供重置次数数据。
+CPA Manager Plus 的重置次数通过 `/v0/management/api-call` 管理代理读取，并按账号缓存；手动刷新会绕过该缓存，单个账号刷新失败时会沿用已有旧值。Sub2API 每轮直接读取管理员账号配额接口返回的重置次数。两种来源都不会仅因用量接口不可用而改变账号健康状态。`CLIProxyAPI` 直连模式不提供重置次数数据。
 
 ### NewAPI 和 Sub2API 余额监测
 
@@ -86,14 +89,14 @@ NewAPI 和 Sub2API 用于监测普通用户账号余额，而不是管理员侧�
 认证方式：
 
 - NewAPI 使用 `POST /api/user/login` 登录，再读取用户信息。
-- Sub2API 使用 `POST /api/v1/auth/login` 登录，再读取用户资料和平台额度。
+- Sub2API 使用 `POST /api/v1/auth/login` 登录，再读取当前用户资料与余额。平台配额不会显示在余额页；管理员侧 OpenAI 账号配额归入“远程账号”监测。
 
 ### 设置
 
 设置窗口分为以下页面：
 
 - `Codex`：本机 Codex 刷新频率、额度来源、任务范围和历史用量显示。
-- `CLIProxyAPI`：远程 Codex 数据源、面板地址、管理密钥、刷新频率、请求超时和 TLS 设置。
+- `远程账号`：管理 CLIProxyAPI、CPA Manager Plus、Sub2API 数据源及其地址、认证信息、刷新频率、请求超时和 TLS 设置。
 - `NewAPI`：NewAPI 监测开关、刷新频率、默认阈值和账号列表。
 - `Sub2API`：Sub2API 监测开关、刷新频率、默认阈值和账号列表。
 - `启动与外观`：刘海显示来源、物理刘海微调、密钥存储方式、开机自启和指示灯动画。
@@ -138,8 +141,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.9-arm64.dmg
-dist/codex-monitor-0.1.9-amd64.dmg
+dist/codex-monitor-0.1.10-arm64.dmg
+dist/codex-monitor-0.1.10-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -196,7 +199,7 @@ dist/codex-monitor-0.1.9-amd64.dmg
 - 刘海尺寸会优先根据 macOS 暴露的顶部安全区和辅助菜单区自动推断。如果系统、缩放模式或机型导致识别偏宽或偏窄，可以在设置页使用“物理刘海微调”校准。
 - 本机 Codex 的额度和任务状态依赖 Codex 本地数据文件。如果 Codex 改变文件结构，可能需要同步适配。
 - CPA Manager Plus 模式读取的是服务端巡检结果。服务端巡检频率由 CPA Manager Plus 自身配置决定，客户端刷新只是读取最新结果。
-- 账号重置次数只在 CPA Manager Plus 数据源下显示；CLIProxyAPI 直连模式不会查询或展示该数据。
+- 账号重置次数由 CPA Manager Plus 或 Sub2API 在接口提供时显示；CLIProxyAPI 直连模式不会查询或展示该数据。
 - `允许不安全 TLS` 会信任自签名或证书不完整的面板证书。请只在你控制的测试环境中启用。
 - 当前构建脚本使用 ad-hoc 签名，适合本机使用。如果要公开发布给其他用户，建议使用 Apple Developer ID 签名并进行 notarization。
 - 请不要把任何真实面板地址、管理密钥、账号密码或本机密钥数据库提交到公开仓库。
@@ -217,13 +220,13 @@ scripts/run-regression-tests.sh  运行回归测试
 
 Codex Monitor is a native macOS notch overlay for monitoring Codex activity, local usage, and several remote account panels. It sits around the MacBook notch like a compact dynamic island, showing a small status indicator on the left and key metrics on the right.
 
-The app currently supports local Codex telemetry, CLIProxyAPI / CPA Manager Plus, NewAPI, and Sub2API. It is designed for users who want a persistent, low-friction view of Codex activity, quota status, and remote account balances.
+The app currently supports local Codex telemetry, remote accounts through CLIProxyAPI, CPA Manager Plus, and Sub2API, plus NewAPI and Sub2API balance monitoring. It is designed for users who want a persistent, low-friction view of Codex activity, quota status, and remote account balances.
 
 ### Features
 
 - Persistent notch overlay with left-side status and right-side metrics.
 - Click to expand a dynamic-island-style detail panel.
-- Multi-tab detail panel: `Codex`, `CLIProxyAPI`, `NewAPI`, and `Sub2API`.
+- Multi-tab detail panel: `Codex`, `Remote Accounts`, `NewAPI`, and `Sub2API`.
 - Per-source enable/disable switches.
 - Manual or automatic notch display source selection.
 - Automatic physical notch size inference from macOS safe-area and auxiliary menu-bar geometry, with a manual notch-width adjustment when needed.
@@ -253,14 +256,15 @@ Local data is read from Codex files under the current user account, including:
 
 The app reads these files only. It does not modify local Codex data.
 
-### CLIProxyAPI / CPA Manager Plus Monitoring
+### Remote Account Monitoring
 
-Remote Codex account monitoring supports two data sources:
+Remote Codex / OpenAI account monitoring supports multiple data sources at the same time:
 
 - `CLIProxyAPI`: reads Codex auth files and account status directly from the CLIProxyAPI management API.
 - `CPA Manager Plus`: reads server-side inspection results and usage analytics from CPA Manager Plus.
+- `Sub2API`: reads OpenAI OAuth accounts, quota status, and usage trends through Sub2API administrator APIs.
 
-If CPA Manager Plus is available, it is the recommended source because the app can reuse server-side inspection results instead of repeatedly checking every account from the client.
+If CPA Manager Plus is available, it is recommended for account inspections because the app can reuse server-side results instead of repeatedly checking every account from the client. Multiple enabled sources are merged into one remote-account view.
 
 The remote tab can show:
 
@@ -268,11 +272,13 @@ The remote tab can show:
 - Healthy, quota-exhausted, and abnormal account counts.
 - Plan, account index, success count, and failure count.
 - 5h / 7d remaining quota for each Codex account.
-- In CPA Manager Plus mode, remaining reset credits after each account's weekly quota, with an information popover listing their expiry times.
+- Remaining reset credits after each account's weekly quota when CPA Manager Plus or Sub2API provides them, with an information popover listing their expiry times.
 - Clear status reasons such as expired login, unavailable account, request failures, 5-hour quota exhausted, and weekly quota exhausted.
-- CPA Manager Plus total token usage for 24 hours, 7 days, and 30 days.
+- CPA Manager Plus and Sub2API total token usage for 24 hours, 7 days, and 30 days. Sub2API totals include only the monitored OpenAI OAuth accounts.
+- Per-source usage coverage, the latest whole-refresh timestamp, and refresh-failure details. Duplicate configurations for the same panel contribute usage only once.
+- If one source fails, successful sources still update while the failed source keeps its previous account snapshot. Aggregate usage is replaced only after every usage-capable source succeeds.
 
-Account reset-credit data is available only in `CPA Manager Plus` mode. The app retrieves it through CPA Manager Plus's `/v0/management/api-call` management proxy and does not query OpenAI directly from the Mac. Results are cached per account for 60 minutes, while manual refresh bypasses the cache. If one account fails to refresh, the last known value is retained and the failure does not change that account's health status. Direct `CLIProxyAPI` mode does not provide reset-credit data.
+CPA Manager Plus reset-credit data is retrieved through its `/v0/management/api-call` management proxy and cached per account. Manual refresh bypasses that cache, while a single-account refresh failure retains the last known value. Sub2API reads reset-credit fields directly from its administrator quota endpoint on every refresh. For either source, a usage-endpoint failure alone does not change account health. Direct `CLIProxyAPI` mode does not provide reset-credit data.
 
 ### NewAPI and Sub2API Balance Monitoring
 
@@ -292,14 +298,14 @@ Supported capabilities:
 Authentication:
 
 - NewAPI uses `POST /api/user/login`, then reads user information.
-- Sub2API uses `POST /api/v1/auth/login`, then reads user profile and platform quota data.
+- Sub2API uses `POST /api/v1/auth/login`, then reads the current user's profile and balance. Platform quota entries are excluded from the balance tab; administrator-side OpenAI account quota belongs to Remote Account Monitoring.
 
 ### Settings
 
 The settings window is split into these tabs:
 
 - `Codex`: local refresh intervals, quota source, task range, and period usage display.
-- `CLIProxyAPI`: remote Codex source, panel URL, management key, refresh interval, timeout, and TLS settings.
+- `Remote Accounts`: manages CLIProxyAPI, CPA Manager Plus, and Sub2API sources, including URLs, credentials, refresh interval, timeout, and TLS settings.
 - `NewAPI`: NewAPI monitoring, refresh interval, default thresholds, and account list.
 - `Sub2API`: Sub2API monitoring, refresh interval, default thresholds, and account list.
 - `Launch & Appearance`: notch display source, physical notch adjustment, secret storage mode, launch at login, and pulse animation.
@@ -344,8 +350,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.9-arm64.dmg
-dist/codex-monitor-0.1.9-amd64.dmg
+dist/codex-monitor-0.1.10-arm64.dmg
+dist/codex-monitor-0.1.10-amd64.dmg
 ```
 
 Install into the current user's Applications folder:
@@ -402,7 +408,7 @@ Run regression tests:
 - Notch dimensions are inferred from macOS safe-area and auxiliary menu-bar geometry. If a macOS version, display scaling mode, or MacBook model reports imperfect geometry, use the physical notch adjustment setting to fine-tune the center mask.
 - Local Codex monitoring depends on Codex's local data files. If Codex changes its file format, the app may need an update.
 - CPA Manager Plus mode reads server-side inspection results. The inspection frequency is controlled by CPA Manager Plus, while this app only controls how often it reads the latest result.
-- Account reset credits are shown only with the CPA Manager Plus data source; direct CLIProxyAPI mode does not query or display them.
+- Account reset credits are shown when CPA Manager Plus or Sub2API provides them; direct CLIProxyAPI mode does not query or display them.
 - `Allow insecure TLS` trusts self-signed or incomplete certificates for the configured panel request. Use it only for testing environments you control.
 - The current build script uses ad-hoc signing, which is suitable for local use. For public distribution, use Apple Developer ID signing and notarization.
 - Never commit real panel URLs, management keys, account passwords, or local secret database files to a public repository.

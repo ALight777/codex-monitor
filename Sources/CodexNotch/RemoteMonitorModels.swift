@@ -70,8 +70,8 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
     let chatgptAccountID: String?
     let status: String?
     let statusMessage: String?
-    let successCount: Int
-    let failureCount: Int
+    let successCount: Int?
+    let failureCount: Int?
     let recentFailures: Int
     let state: RemoteAccountState
     let lastRefresh: String?
@@ -92,8 +92,8 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
         chatgptAccountID: String?,
         status: String?,
         statusMessage: String?,
-        successCount: Int,
-        failureCount: Int,
+        successCount: Int?,
+        failureCount: Int?,
         recentFailures: Int,
         state: RemoteAccountState,
         lastRefresh: String?,
@@ -137,14 +137,21 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
 
     var detailText: String {
         var parts: [String] = []
+        if let provider, !provider.isEmpty {
+            parts.append(provider)
+        }
         if let email, !email.isEmpty, email != displayName {
             parts.append(email)
         }
         if let authIndex, !authIndex.isEmpty {
             parts.append("索引 \(authIndex)")
         }
-        parts.append("成功 \(successCount)")
-        parts.append("失败 \(failureCount)")
+        if let successCount {
+            parts.append("成功 \(successCount)")
+        }
+        if let failureCount {
+            parts.append("失败 \(failureCount)")
+        }
         return parts.joined(separator: " · ")
     }
 
@@ -350,6 +357,31 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
         )
     }
 
+    func scoped(to source: RemoteAccountSourceConfiguration) -> RemoteCodexAccount {
+        RemoteCodexAccount(
+            id: "\(source.id)::\(id)",
+            name: name,
+            email: email,
+            label: label,
+            provider: source.displayLabel,
+            accountType: accountType,
+            authIndex: authIndex,
+            chatgptAccountID: chatgptAccountID,
+            status: status,
+            statusMessage: statusMessage,
+            successCount: successCount,
+            failureCount: failureCount,
+            recentFailures: recentFailures,
+            state: state,
+            lastRefresh: lastRefresh,
+            planType: planType,
+            quotaWindows: quotaWindows,
+            quotaError: quotaError,
+            unavailable: unavailable,
+            resetCredits: resetCredits
+        )
+    }
+
     private var quotaThresholdReason: String? {
         let reachedWindows = alertQuotaWindows.filter(\.reachesThreshold)
         guard !reachedWindows.isEmpty else {
@@ -365,6 +397,10 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
             return "登录已过期"
         }
 
+        if let statusMessage, !statusMessage.isEmpty, statusMessage.lowercased() != "ok" {
+            return statusMessage.redactedForDisplay.shortReason
+        }
+
         if unavailable {
             return "账号不可用"
         }
@@ -377,15 +413,11 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
             }
         }
 
-        if let statusMessage, !statusMessage.isEmpty, statusMessage.lowercased() != "ok" {
-            return statusMessage.redactedForDisplay.shortReason
-        }
-
         if recentFailures > 0 {
             return "近期请求失败"
         }
 
-        if failureCount > 0 {
+        if let failureCount, failureCount > 0 {
             return "请求失败 \(failureCount)"
         }
 
@@ -418,10 +450,7 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
     }
 
     private var stableMergeKey: String {
-        authIndex?.lowercased()
-            ?? chatgptAccountID?.lowercased()
-            ?? email?.lowercased()
-            ?? id.lowercased()
+        id.lowercased()
     }
 }
 
@@ -671,6 +700,21 @@ private extension String {
 
 }
 
+enum RemoteUsageCoverageState: Equatable, Sendable {
+    case included
+    case duplicate
+    case unavailable
+    case failed
+}
+
+struct RemoteUsageSourceCoverage: Identifiable, Equatable, Sendable {
+    let id: String
+    let label: String
+    let source: RemoteCodexDataSource
+    let state: RemoteUsageCoverageState
+    let message: String?
+}
+
 struct RemoteMonitorSnapshot: Equatable {
     var panelState: RemotePanelState
     var accounts: [RemoteCodexAccount]
@@ -681,6 +725,7 @@ struct RemoteMonitorSnapshot: Equatable {
     var usage30d: Int = 0
     var usageMessage: String?
     var usageUnavailableForSource: Bool = false
+    var usageSources: [RemoteUsageSourceCoverage] = []
 
     static let disabled = RemoteMonitorSnapshot(
         panelState: .disabled,
@@ -692,9 +737,13 @@ struct RemoteMonitorSnapshot: Equatable {
     static let notConfigured = RemoteMonitorSnapshot(
         panelState: .notConfigured,
         accounts: [],
-        message: "请在设置中填写 CLIProxyAPI 面板地址和管理密钥",
+        message: "请在设置中填写远程账号数据源的地址和认证信息",
         lastUpdated: nil
     )
+
+    var hasIncludedUsageSource: Bool {
+        usageSources.contains { $0.state == .included }
+    }
 
     var alertSeverity: RemoteAlertSeverity {
         Self.poolAlertSeverity(for: accounts)

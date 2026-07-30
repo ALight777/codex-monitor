@@ -1,5 +1,10 @@
 import Foundation
 
+typealias BalanceAPIRequestExecutor = @Sendable (
+    _ request: URLRequest,
+    _ session: URLSession
+) async throws -> (Data, URLResponse)
+
 struct BalanceAPIConfiguration: Equatable {
     let panelURL: String
     let username: String
@@ -69,9 +74,16 @@ enum BalanceAPIError: LocalizedError {
 
 final class BalanceAPIClient: NSObject, URLSessionDelegate {
     private let configuration: BalanceAPIConfiguration
+    private let requestExecutor: BalanceAPIRequestExecutor
 
-    init(configuration: BalanceAPIConfiguration) {
+    init(
+        configuration: BalanceAPIConfiguration,
+        requestExecutor: BalanceAPIRequestExecutor? = nil
+    ) {
         self.configuration = configuration
+        self.requestExecutor = requestExecutor ?? { request, session in
+            try await session.data(for: request)
+        }
     }
 
     func fetchSnapshot(source: BalanceMonitorSource) async throws -> BalanceMonitorSnapshot {
@@ -166,41 +178,18 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
             session: session,
             timeout: configuration.timeout
         )
-        var accounts = [try Self.decodeSubAPIProfileAccount(
+        let accounts = [try Self.decodeSubAPIProfileAccount(
             profileData,
             accountID: configuration.accountID,
             accountLabel: configuration.accountLabel,
             thresholds: configuration.thresholds
         )]
-        var partialMessage: String?
-
-        let quotasEndpoint = baseURL
-            .appendingPathComponent("api")
-            .appendingPathComponent("v1")
-            .appendingPathComponent("user")
-            .appendingPathComponent("platform-quotas")
-        do {
-            let quotasData = try await requestData(
-                quotasEndpoint,
-                method: "GET",
-                headers: headers,
-                session: session,
-                timeout: configuration.timeout
-            )
-            accounts.append(contentsOf: try Self.decodeSubAPIPlatformQuotaAccounts(
-                quotasData,
-                accountID: configuration.accountID,
-                accountLabel: configuration.accountLabel
-            ))
-        } catch {
-            partialMessage = "平台配额读取失败：\(Self.localizedMessage(for: error))"
-        }
 
         return BalanceMonitorSnapshot(
             source: source,
-            panelState: Self.panelState(for: accounts, partialMessage: partialMessage),
+            panelState: Self.panelState(for: accounts, partialMessage: nil),
             accounts: accounts,
-            message: partialMessage ?? (accounts.isEmpty ? "没有找到 Sub2API 用户余额" : nil),
+            message: nil,
             lastUpdated: Date()
         )
     }
@@ -287,7 +276,7 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
             request.setValue(value, forHTTPHeaderField: name)
         }
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await requestExecutor(request, session)
         if let httpResponse = response as? HTTPURLResponse,
            !(200...299).contains(httpResponse.statusCode) {
             throw BalanceAPIError.httpStatus(
@@ -484,20 +473,6 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
             accountLabel: accountLabel,
             thresholds: thresholds
         )
-    }
-
-    static func decodeSubAPIPlatformQuotaAccounts(
-        _ data: Data,
-        accountID: String = "self",
-        accountLabel: String? = nil
-    ) throws -> [BalanceAccount] {
-        if let list = try? decodeSubAPIPayload(SubAPIPlatformQuotaListData.self, from: data) {
-            return list.platformQuotas.map { $0.balanceAccount(accountID: accountID, accountLabel: accountLabel) }
-        }
-        if let quotas = try? decodeSubAPIPayload([SubAPIPlatformQuotaData].self, from: data) {
-            return quotas.map { $0.balanceAccount(accountID: accountID, accountLabel: accountLabel) }
-        }
-        throw BalanceAPIError.unsupportedResponse("Sub2API 平台配额格式不兼容")
     }
 
     static func httpFailureMessage(statusCode: Int, data: Data) -> String {
@@ -865,106 +840,6 @@ private struct NewAPIChannelData: Decodable {
             balanceUnitKey: balance == nil ? nil : "USD",
             balanceUnitSymbol: balance == nil ? nil : "$",
             usedTokenCount: usedQuota
-        )
-    }
-}
-
-private struct SubAPIPlatformQuotaListData: Decodable {
-    let platformQuotas: [SubAPIPlatformQuotaData]
-
-    enum CodingKeys: String, CodingKey {
-        case platformQuotas = "platform_quotas"
-        case platformQuotasCamel = "platformQuotas"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        platformQuotas = (try? container.decodeIfPresent([SubAPIPlatformQuotaData].self, forKey: .platformQuotas))
-            ?? (try? container.decodeIfPresent([SubAPIPlatformQuotaData].self, forKey: .platformQuotasCamel))
-            ?? []
-    }
-}
-
-private struct SubAPIPlatformQuotaData: Decodable {
-    let platform: String?
-    let dailyUsageUSD: Double?
-    let dailyLimitUSD: Double?
-    let weeklyUsageUSD: Double?
-    let weeklyLimitUSD: Double?
-    let monthlyUsageUSD: Double?
-    let monthlyLimitUSD: Double?
-
-    enum CodingKeys: String, CodingKey {
-        case platform
-        case dailyUsageUSD = "daily_usage_usd"
-        case dailyLimitUSD = "daily_limit_usd"
-        case weeklyUsageUSD = "weekly_usage_usd"
-        case weeklyLimitUSD = "weekly_limit_usd"
-        case monthlyUsageUSD = "monthly_usage_usd"
-        case monthlyLimitUSD = "monthly_limit_usd"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        platform = container.flexibleString(for: [.platform])
-        dailyUsageUSD = container.flexibleDouble(for: [.dailyUsageUSD])
-        dailyLimitUSD = container.flexibleDouble(for: [.dailyLimitUSD])
-        weeklyUsageUSD = container.flexibleDouble(for: [.weeklyUsageUSD])
-        weeklyLimitUSD = container.flexibleDouble(for: [.weeklyLimitUSD])
-        monthlyUsageUSD = container.flexibleDouble(for: [.monthlyUsageUSD])
-        monthlyLimitUSD = container.flexibleDouble(for: [.monthlyLimitUSD])
-    }
-
-    func balanceAccount(accountID: String = "self", accountLabel: String? = nil) -> BalanceAccount {
-        let windows = [
-            ("日", dailyUsageUSD, dailyLimitUSD),
-            ("周", weeklyUsageUSD, weeklyLimitUSD),
-            ("30天", monthlyUsageUSD, monthlyLimitUSD)
-        ]
-        let remainingValues = windows.compactMap { _, usage, limit -> Double? in
-            guard let limit else {
-                return nil
-            }
-            return max(0, limit - (usage ?? 0))
-        }
-        let exhausted = windows.contains { _, usage, limit in
-            guard let limit else {
-                return false
-            }
-            return (usage ?? 0) >= limit
-        }
-        let exhaustedLabel = windows.first { _, usage, limit in
-            guard let limit else {
-                return false
-            }
-            return (usage ?? 0) >= limit
-        }?.0
-        let details = windows.compactMap { label, usage, limit -> String? in
-            guard let usage else {
-                return nil
-            }
-            if let limit {
-                return "\(label) \(BalanceMonitorSnapshot.currencyText(usage))/\(BalanceMonitorSnapshot.currencyText(limit))"
-            }
-            return "\(label) 已用 \(BalanceMonitorSnapshot.currencyText(usage))"
-        }.joined(separator: " · ")
-        let platformName = platform?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseName = platformName?.isEmpty == false ? platformName! : "平台配额"
-        let configuredLabel = accountLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayName = configuredLabel?.isEmpty == false ? "\(configuredLabel!) · \(baseName)" : baseName
-
-        return BalanceAccount(
-            id: "subapi-quota-\(accountID)-\(baseName)",
-            source: .subAPI,
-            name: displayName,
-            kind: "平台配额",
-            statusCode: nil,
-            amountText: remainingValues.min().map(BalanceMonitorSnapshot.currencyText(_:)) ?? "不限",
-            usedText: nil,
-            requestCount: nil,
-            updatedAt: details.isEmpty ? nil : details,
-            state: exhausted ? .warning : .healthy,
-            stateReason: exhaustedLabel.map { "\($0)配额已满" }
         )
     }
 }

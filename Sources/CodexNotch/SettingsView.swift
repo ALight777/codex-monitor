@@ -428,7 +428,7 @@ struct SettingsView: View {
             intervalStepper("空闲", value: $draft.idleRefreshInterval, range: 4...120, help: "Codex 没有运行中任务时的状态刷新间隔。")
             intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 120...1_800, help: "统计 Codex 24小时、7天、30天 token 用量的刷新间隔。会话文件较大时会自动延长下一次刷新，以降低功耗。")
             intervalStepper("文件监听", value: $draft.watcherRefreshInterval, range: 8...120, help: "扫描 Codex 会话文件变化的保底间隔，用于补偿文件事件丢失。")
-            intervalStepper("补刷节流", value: $draft.fileChangeRefreshMinimumGap, range: 1...30, help: "文件变化很多时，连续触发刷新之间的最小间隔。")
+            intervalStepper("补刷合并", value: $draft.fileChangeRefreshMinimumGap, range: 1...30, help: "文件持续变化时的最长合并等待时间；静默 1 秒后会立即刷新。")
         }
 
         Section("Codex 数据") {

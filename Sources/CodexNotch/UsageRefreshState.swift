@@ -87,6 +87,22 @@ enum SystemActivityRefreshCadence {
     static let debounceDelay: TimeInterval = 1
 }
 
+enum FileChangeRefreshCadence {
+    static let quietDelay: TimeInterval = 1
+
+    static func fireDate(
+        now: Date,
+        burstStartedAt: Date,
+        maximumDelay: TimeInterval
+    ) -> Date {
+        let boundedMaximumDelay = max(quietDelay, maximumDelay)
+        return min(
+            now.addingTimeInterval(quietDelay),
+            burstStartedAt.addingTimeInterval(boundedMaximumDelay)
+        )
+    }
+}
+
 enum PeriodUsageDisplay {
     static func text(tokens: Int, hasLoaded: Bool) -> String {
         hasLoaded ? Formatters.compactTokens(tokens) : "--"

@@ -97,8 +97,8 @@ runner.check(
     "expanded detail frame height should equal detail height"
 )
 
-runner.check(AppInfo.version == "0.1.10", "app info should expose version 0.1.10")
-runner.check(AppInfo.displayVersion == "0.1.10", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.1.11", "app info should expose version 0.1.11")
+runner.check(AppInfo.displayVersion == "0.1.11", "app info should fall back to source version when bundle version is unavailable")
 
 let resetCreditsNow = Date(timeIntervalSince1970: 1_784_500_000)
 let appServerResetCreditsJSON = Data(#"""
@@ -3666,6 +3666,47 @@ runner.check(localSnapshot.primaryPercent == 88, "local snapshot should expose t
 runner.check(localSnapshot.secondaryPercent == 66, "local snapshot should expose the latest Codex 7d remaining quota")
 runner.check(localSnapshot.primaryResetsAt == Date(timeIntervalSince1970: TimeInterval(primaryResetAt)), "local snapshot should expose the 5h reset time")
 runner.check(localSnapshot.secondaryResetsAt == Date(timeIntervalSince1970: TimeInterval(secondaryResetAt)), "local snapshot should expose the 7d reset time")
+
+let updatedRateLimitTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(1))
+let updatedRateLimitLine = "\n" + #"{"timestamp":"\#(updatedRateLimitTimestamp)","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":22,"resets_at":\#(primaryResetAt)},"secondary":{"used_percent":45,"resets_at":\#(secondaryResetAt)}}}}"# + "\n"
+if let handle = try? FileHandle(forWritingTo: rolloutPath) {
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data(updatedRateLimitLine.utf8))
+    try handle.close()
+}
+try FileManager.default.setAttributes(
+    [.modificationDate: now.addingTimeInterval(1)],
+    ofItemAtPath: rolloutPath.path
+)
+let updatedRateLimitSnapshot = localStore.loadSnapshot(
+    includePeriodUsage: false,
+    bypassFastCache: true,
+    rateLimitSource: .localFilesOnly,
+    taskHistoryRange: .day,
+    now: now.addingTimeInterval(1)
+)
+runner.check(updatedRateLimitSnapshot.primaryPercent == 78, "rate-limit file cache should refresh after an appended 5h update")
+runner.check(updatedRateLimitSnapshot.secondaryPercent == 55, "rate-limit file cache should refresh after an appended 7d update")
+
+if let handle = try? FileHandle(forWritingTo: rolloutPath) {
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data("{\"timestamp\":\"\(updatedRateLimitTimestamp)\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_progress\"}}\n".utf8))
+    try handle.close()
+}
+try FileManager.default.setAttributes(
+    [.modificationDate: now.addingTimeInterval(2)],
+    ofItemAtPath: rolloutPath.path
+)
+let retainedRateLimitSnapshot = localStore.loadSnapshot(
+    includePeriodUsage: false,
+    bypassFastCache: true,
+    rateLimitSource: .localFilesOnly,
+    taskHistoryRange: .day,
+    now: now.addingTimeInterval(2)
+)
+runner.check(retainedRateLimitSnapshot.primaryPercent == 78, "non-quota appends should preserve the latest cached 5h value")
+runner.check(retainedRateLimitSnapshot.secondaryPercent == 55, "non-quota appends should preserve the latest cached 7d value")
+
 let localWatchPaths = Set(localStore.rateLimitWatchPaths())
 let normalizedSessionDirectory = sessionDirectory.resolvingSymlinksInPath().path
 let normalizedRolloutPath = rolloutPath.resolvingSymlinksInPath().path
@@ -3885,8 +3926,10 @@ runner.check(
     "fast snapshot cache should invalidate when logs database activity changes"
 )
 
-runner.check(localStore.loadUsageTotals(now: now)?.day == 120743379, "session rollout token counts should contribute to local usage totals")
-runner.check(localStore.loadUsageTotals(now: now.addingTimeInterval(1))?.day == 120743379, "unchanged local usage totals should remain stable across cached refreshes")
+let firstLocalUsageTotal = localStore.loadUsageTotals(now: now)?.day
+let secondLocalUsageTotal = localStore.loadUsageTotals(now: now.addingTimeInterval(1))?.day
+runner.check(firstLocalUsageTotal == 120743379, "session rollout token counts should contribute to local usage totals")
+runner.check(secondLocalUsageTotal == 120743379, "unchanged local usage totals should remain stable across cached refreshes")
 
 let largeUsageRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchLargeUsage-\(UUID().uuidString)")

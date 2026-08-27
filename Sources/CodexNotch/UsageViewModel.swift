@@ -19,7 +19,7 @@ final class UsageViewModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var completionFollowUpTimers: [Timer] = []
     private var completionUsageRefreshTimer: Timer?
-    private var fileChangeRefreshTimers: [Timer] = []
+    private var fileChangeRefreshTimer: Timer?
     private var usageFileChangeTimer: Timer?
     private var fileWatchers: [CodexFileWatcher] = []
     private var watchedPaths: [String] = []
@@ -28,7 +28,8 @@ final class UsageViewModel: ObservableObject {
     private var pendingSnapshotRefresh = false
     private var pendingSnapshotBypassFastCache = false
     private var pendingWatchPathsRefresh = false
-    private var lastFileChangeRefreshScheduledAt: Date = .distantPast
+    private var fileChangeBurstStartedAt: Date?
+    private var fileChangeNeedsWatchPathRefresh = false
     private var lastUsageRefreshDuration: TimeInterval?
     private var periodUsageRefreshEnabled = false
     private var usageRefreshQueue = UsageRefreshQueue()
@@ -361,9 +362,12 @@ final class UsageViewModel: ObservableObject {
         var installedWatchers: [CodexFileWatcher] = []
 
         for path in normalizedPaths {
+            var isDirectory: ObjCBool = false
+            FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            let refreshWatchPaths = isDirectory.boolValue
             guard let watcher = CodexFileWatcher(path: path, onChange: { [weak self] in
                 Task { @MainActor in
-                    self?.scheduleFileChangeRefresh()
+                    self?.scheduleFileChangeRefresh(refreshWatchPaths: refreshWatchPaths)
                 }
             }) else {
                 continue
@@ -376,24 +380,37 @@ final class UsageViewModel: ObservableObject {
         fileWatchers = installedWatchers
     }
 
-    private func scheduleFileChangeRefresh() {
+    private func scheduleFileChangeRefresh(refreshWatchPaths: Bool) {
         let now = Date()
-        guard now.timeIntervalSince(lastFileChangeRefreshScheduledAt) >= settings.fileChangeRefreshMinimumGap else {
-            return
-        }
-        lastFileChangeRefreshScheduledAt = now
+        let burstStartedAt = fileChangeBurstStartedAt ?? now
+        fileChangeBurstStartedAt = burstStartedAt
+        fileChangeNeedsWatchPathRefresh = fileChangeNeedsWatchPathRefresh || refreshWatchPaths
 
-        fileChangeRefreshTimers.forEach { $0.invalidate() }
-        fileChangeRefreshTimers = [1.0, 3.2].map { delay in
-            let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-                Task { @MainActor in
-                    self?.refresh(bypassFastCache: true)
-                    self?.refreshWatchPaths()
+        let fireDate = FileChangeRefreshCadence.fireDate(
+            now: now,
+            burstStartedAt: burstStartedAt,
+            maximumDelay: settings.fileChangeRefreshMinimumGap
+        )
+        let delay = max(0.05, fireDate.timeIntervalSince(now))
+
+        fileChangeRefreshTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else {
+                    return
+                }
+                self.fileChangeRefreshTimer = nil
+                self.fileChangeBurstStartedAt = nil
+                let shouldRefreshWatchPaths = self.fileChangeNeedsWatchPathRefresh
+                self.fileChangeNeedsWatchPathRefresh = false
+                self.refresh(bypassFastCache: true)
+                if shouldRefreshWatchPaths {
+                    self.refreshWatchPaths()
                 }
             }
-            timer.tolerance = 0.2
-            return timer
         }
+        timer.tolerance = min(0.25, delay * 0.2)
+        fileChangeRefreshTimer = timer
         scheduleUsageRefreshAfterFileChange(now: now)
     }
 
@@ -467,6 +484,10 @@ final class UsageViewModel: ObservableObject {
         pendingSnapshotTimer = nil
         usageFileChangeTimer?.invalidate()
         usageFileChangeTimer = nil
+        fileChangeRefreshTimer?.invalidate()
+        fileChangeRefreshTimer = nil
+        fileChangeBurstStartedAt = nil
+        fileChangeNeedsWatchPathRefresh = false
         watcherRefreshTimer?.invalidate()
         watcherRefreshTimer = nil
 

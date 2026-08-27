@@ -119,6 +119,26 @@ func systemActivityRefreshUsesAVisibleDebounceWindow() {
     #expect(SystemActivityRefreshCadence.debounceDelay == 1)
 }
 
+@Test
+func fileChangesUseTrailingDebounceWithABoundedMaximumDelay() {
+    let burstStartedAt = Date(timeIntervalSince1970: 1_000)
+
+    #expect(
+        FileChangeRefreshCadence.fireDate(
+            now: burstStartedAt,
+            burstStartedAt: burstStartedAt,
+            maximumDelay: 3
+        ) == Date(timeIntervalSince1970: 1_001)
+    )
+    #expect(
+        FileChangeRefreshCadence.fireDate(
+            now: Date(timeIntervalSince1970: 1_002.8),
+            burstStartedAt: burstStartedAt,
+            maximumDelay: 3
+        ) == Date(timeIntervalSince1970: 1_003)
+    )
+}
+
 private func task(id: String, status: TaskStatus, now: Date) -> CodexTask {
     CodexTask(
         id: id,

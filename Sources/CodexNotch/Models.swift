@@ -48,6 +48,11 @@ struct UsageSnapshot: Equatable {
     var usage24h: Int
     var usage7d: Int
     var usage30d: Int
+    var usageToday: Int = 0
+    var usage24hSummary: TokenUsageSummary = .zero
+    var usage7dSummary: TokenUsageSummary = .zero
+    var usage30dSummary: TokenUsageSummary = .zero
+    var usageTodaySummary: TokenUsageSummary = .zero
     var tasks: [CodexTask]
     var isRunning: Bool
     var lastUpdated: Date
@@ -150,6 +155,11 @@ struct PeriodUsage: Equatable, Sendable {
     var day: Int
     var week: Int
     var month: Int
+    var today: Int = 0
+    var daySummary: TokenUsageSummary = .zero
+    var weekSummary: TokenUsageSummary = .zero
+    var monthSummary: TokenUsageSummary = .zero
+    var todaySummary: TokenUsageSummary = .zero
 
     static let zero = PeriodUsage(day: 0, week: 0, month: 0)
 }
@@ -160,6 +170,7 @@ struct CodexTask: Identifiable, Equatable {
     let status: TaskStatus
     let detailPrefix: String
     let tokenCount: Int
+    let tokenUsage: TokenUsageSummary
     let updatedAt: Date
     let activeSubagentCount: Int
 
@@ -169,6 +180,7 @@ struct CodexTask: Identifiable, Equatable {
         status: TaskStatus,
         detailPrefix: String,
         tokenCount: Int,
+        tokenUsage: TokenUsageSummary? = nil,
         updatedAt: Date,
         activeSubagentCount: Int = 0
     ) {
@@ -177,6 +189,7 @@ struct CodexTask: Identifiable, Equatable {
         self.status = status
         self.detailPrefix = detailPrefix
         self.tokenCount = tokenCount
+        self.tokenUsage = tokenUsage ?? .unpriced(totalTokens: tokenCount)
         self.updatedAt = updatedAt
         self.activeSubagentCount = activeSubagentCount
     }
@@ -556,6 +569,7 @@ struct ThreadRecord: Decodable {
     let rolloutPath: String
     let updatedAt: Int
     let activeSubagentCount: Int
+    let tokenUsage: TokenUsageSummary?
 
     init(
         id: String,
@@ -565,7 +579,8 @@ struct ThreadRecord: Decodable {
         reasoningEffort: String?,
         rolloutPath: String,
         updatedAt: Int,
-        activeSubagentCount: Int = 0
+        activeSubagentCount: Int = 0,
+        tokenUsage: TokenUsageSummary? = nil
     ) {
         self.id = id
         self.title = title
@@ -575,6 +590,7 @@ struct ThreadRecord: Decodable {
         self.rolloutPath = rolloutPath
         self.updatedAt = updatedAt
         self.activeSubagentCount = activeSubagentCount
+        self.tokenUsage = tokenUsage
     }
 
     enum CodingKeys: String, CodingKey {
@@ -598,7 +614,8 @@ struct ThreadRecord: Decodable {
             reasoningEffort: try container.decodeIfPresent(String.self, forKey: .reasoningEffort),
             rolloutPath: try container.decode(String.self, forKey: .rolloutPath),
             updatedAt: try container.decode(Int.self, forKey: .updatedAt),
-            activeSubagentCount: try container.decodeIfPresent(Int.self, forKey: .activeSubagentCount) ?? 0
+            activeSubagentCount: try container.decodeIfPresent(Int.self, forKey: .activeSubagentCount) ?? 0,
+            tokenUsage: nil
         )
     }
 }

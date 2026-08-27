@@ -34,6 +34,7 @@ final class CodexUsageStore: @unchecked Sendable {
     private let sessionIndexPath: String
     private let appServerExecutable: String?
     private let ripgrepCandidates: [String]
+    private let calendar: Calendar
     private let sessionDecoder = CodexSessionEventDecoder()
     private let tokenPattern = /tool_token_count=([0-9]+)/
     private let cacheLock = NSLock()
@@ -54,10 +55,12 @@ final class CodexUsageStore: @unchecked Sendable {
     init(
         codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"),
         ripgrepCandidates: [String] = UsageScanPolicy.ripgrepCandidates,
-        appServerExecutable: String? = nil
+        appServerExecutable: String? = nil,
+        calendar: Calendar = .autoupdatingCurrent
     ) {
         self.codexDirectory = codexDirectory
         self.ripgrepCandidates = ripgrepCandidates
+        self.calendar = calendar
         self.appServerExecutable = appServerExecutable ?? Self.resolveAppServerExecutable()
         self.stateDatabase = Self.latestSQLiteDatabase(
             in: codexDirectory,
@@ -191,6 +194,11 @@ final class CodexUsageStore: @unchecked Sendable {
                 usage24h: usage.day,
                 usage7d: usage.week,
                 usage30d: usage.month,
+                usageToday: usage.today,
+                usage24hSummary: usage.daySummary,
+                usage7dSummary: usage.weekSummary,
+                usage30dSummary: usage.monthSummary,
+                usageTodaySummary: usage.todaySummary,
                 tasks: tasks,
                 isRunning: tasks.contains { $0.status == .running },
                 lastUpdated: now,
@@ -291,6 +299,11 @@ final class CodexUsageStore: @unchecked Sendable {
             usage24h: usage.day,
             usage7d: usage.week,
             usage30d: usage.month,
+            usageToday: usage.today,
+            usage24hSummary: usage.daySummary,
+            usage7dSummary: usage.weekSummary,
+            usage30dSummary: usage.monthSummary,
+            usageTodaySummary: usage.todaySummary,
             tasks: tasks,
             isRunning: tasks.contains { $0.status == .running },
             lastUpdated: now,
@@ -565,7 +578,7 @@ final class CodexUsageStore: @unchecked Sendable {
         return mergeThreadRecords(parents)
     }
 
-    private func loadSubagentUsage(range: TaskHistoryRange, now: Date) -> [String: (count: Int, tokens: Int)] {
+    private func loadSubagentUsage(range: TaskHistoryRange, now: Date) -> [String: (count: Int, tokens: Int, summary: TokenUsageSummary)] {
         let candidates = loadRecentSessionCandidates(range: range, now: now, knownTokens: [:])
         return loadSubagentUsage(candidates: candidates, now: now)
     }
@@ -573,8 +586,8 @@ final class CodexUsageStore: @unchecked Sendable {
     private func loadSubagentUsage(
         candidates: [RecentSessionCandidate],
         now: Date
-    ) -> [String: (count: Int, tokens: Int)] {
-        var usage: [String: (count: Int, tokens: Int)] = [:]
+    ) -> [String: (count: Int, tokens: Int, summary: TokenUsageSummary)] {
+        var usage: [String: (count: Int, tokens: Int, summary: TokenUsageSummary)] = [:]
 
         for candidate in candidates {
             guard let meta = sessionMeta(from: candidate.path),
@@ -585,7 +598,7 @@ final class CodexUsageStore: @unchecked Sendable {
             }
 
             let key = parentThreadID.lowercased()
-            let current = usage[key] ?? (count: 0, tokens: 0)
+            let current = usage[key] ?? (count: 0, tokens: 0, summary: .zero)
             let isActive = sessionLooksActive(
                 path: candidate.path,
                 fallbackUpdatedAt: candidate.updatedAt,
@@ -596,9 +609,17 @@ final class CodexUsageStore: @unchecked Sendable {
                 databaseTokens: candidate.databaseTokens,
                 allowInactiveScan: false
             )
+            var tokenSummary = sessionTokenUsageSummary(from: candidate.path)
+                ?? .unpriced(totalTokens: tokenTotal)
+            if tokenSummary.totalTokens < tokenTotal {
+                tokenSummary.addUnpricedTokens(tokenTotal - tokenSummary.totalTokens)
+            }
+            var combinedSummary = current.summary
+            combinedSummary.add(tokenSummary)
             usage[key] = (
                 count: current.count + (isActive ? 1 : 0),
-                tokens: current.tokens + tokenTotal
+                tokens: current.tokens + tokenTotal,
+                summary: combinedSummary
             )
         }
 
@@ -607,7 +628,7 @@ final class CodexUsageStore: @unchecked Sendable {
 
     private func withSubagentUsage(
         _ threads: [ThreadRecord],
-        usage: [String: (count: Int, tokens: Int)]
+        usage: [String: (count: Int, tokens: Int, summary: TokenUsageSummary)]
     ) -> [ThreadRecord] {
         guard !usage.isEmpty else {
             return threads
@@ -620,6 +641,16 @@ final class CodexUsageStore: @unchecked Sendable {
             let count = summary.count
             let parentTokens = parentTokenCount(for: thread)
             let tokensUsed = max(thread.tokensUsed, parentTokens + summary.tokens)
+            var tokenUsage = thread.tokenUsage
+                ?? sessionTokenUsageSummary(from: thread.rolloutPath)
+                ?? .unpriced(totalTokens: parentTokens, model: thread.model)
+            if tokenUsage.totalTokens < parentTokens {
+                tokenUsage.addUnpricedTokens(parentTokens - tokenUsage.totalTokens, model: thread.model)
+            }
+            tokenUsage.add(summary.summary)
+            if tokenUsage.totalTokens < tokensUsed {
+                tokenUsage.addUnpricedTokens(tokensUsed - tokenUsage.totalTokens)
+            }
 
             return ThreadRecord(
                 id: thread.id,
@@ -629,7 +660,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 reasoningEffort: thread.reasoningEffort,
                 rolloutPath: thread.rolloutPath,
                 updatedAt: thread.updatedAt,
-                activeSubagentCount: count
+                activeSubagentCount: count,
+                tokenUsage: tokenUsage
             )
         }
     }
@@ -771,6 +803,17 @@ final class CodexUsageStore: @unchecked Sendable {
         let title = bestTitle(existing.title, candidate.title)
         let tokensUsed = max(existing.tokensUsed, candidate.tokensUsed)
         let rolloutPath = candidate.rolloutPath.isEmpty ? existing.rolloutPath : candidate.rolloutPath
+        let tokenUsage: TokenUsageSummary?
+        switch (existing.tokenUsage, candidate.tokenUsage) {
+        case let (lhs?, rhs?):
+            tokenUsage = lhs.totalTokens >= rhs.totalTokens ? lhs : rhs
+        case let (lhs?, nil):
+            tokenUsage = lhs
+        case let (nil, rhs?):
+            tokenUsage = rhs
+        case (nil, nil):
+            tokenUsage = nil
+        }
 
         return ThreadRecord(
             id: existing.id,
@@ -780,7 +823,8 @@ final class CodexUsageStore: @unchecked Sendable {
             reasoningEffort: existing.reasoningEffort ?? candidate.reasoningEffort,
             rolloutPath: rolloutPath,
             updatedAt: updatedAt,
-            activeSubagentCount: max(existing.activeSubagentCount, candidate.activeSubagentCount)
+            activeSubagentCount: max(existing.activeSubagentCount, candidate.activeSubagentCount),
+            tokenUsage: tokenUsage
         )
     }
 
@@ -852,7 +896,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 reasoningEffort: thread.reasoningEffort,
                 rolloutPath: thread.rolloutPath,
                 updatedAt: thread.updatedAt,
-                activeSubagentCount: thread.activeSubagentCount
+                activeSubagentCount: thread.activeSubagentCount,
+                tokenUsage: thread.tokenUsage
             )
         }
     }
@@ -917,10 +962,51 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func maxPeriodUsage(_ lhs: PeriodUsage, _ rhs: PeriodUsage) -> PeriodUsage {
-        PeriodUsage(
+        func selectedSummary(
+            lhsTokens: Int,
+            lhsSummary: TokenUsageSummary,
+            rhsTokens: Int,
+            rhsSummary: TokenUsageSummary
+        ) -> TokenUsageSummary {
+            if lhsTokens >= rhsTokens {
+                return lhsSummary.totalTokens == lhsTokens
+                    ? lhsSummary
+                    : .unpriced(totalTokens: lhsTokens)
+            }
+            return rhsSummary.totalTokens == rhsTokens
+                ? rhsSummary
+                : .unpriced(totalTokens: rhsTokens)
+        }
+
+        return PeriodUsage(
             day: max(lhs.day, rhs.day),
             week: max(lhs.week, rhs.week),
-            month: max(lhs.month, rhs.month)
+            month: max(lhs.month, rhs.month),
+            today: max(lhs.today, rhs.today),
+            daySummary: selectedSummary(
+                lhsTokens: lhs.day,
+                lhsSummary: lhs.daySummary,
+                rhsTokens: rhs.day,
+                rhsSummary: rhs.daySummary
+            ),
+            weekSummary: selectedSummary(
+                lhsTokens: lhs.week,
+                lhsSummary: lhs.weekSummary,
+                rhsTokens: rhs.week,
+                rhsSummary: rhs.weekSummary
+            ),
+            monthSummary: selectedSummary(
+                lhsTokens: lhs.month,
+                lhsSummary: lhs.monthSummary,
+                rhsTokens: rhs.month,
+                rhsSummary: rhs.monthSummary
+            ),
+            todaySummary: selectedSummary(
+                lhsTokens: lhs.today,
+                lhsSummary: lhs.todaySummary,
+                rhsTokens: rhs.today,
+                rhsSummary: rhs.todaySummary
+            )
         )
     }
 
@@ -931,6 +1017,7 @@ final class CodexUsageStore: @unchecked Sendable {
 
         guard let cache,
               cache.signature == signature,
+              calendar.isDate(cache.createdAt, inSameDayAs: now),
               now.timeIntervalSince(cache.createdAt) < UsageScanPolicy.periodUsageCacheTTL else {
             return nil
         }
@@ -957,8 +1044,10 @@ final class CodexUsageStore: @unchecked Sendable {
 
         let records = try Shell.sqliteJSON(database: logsDatabase, query: query, as: [UsageLogRecord].self)
         let dayStart = Int(now.timeIntervalSince1970) - (24 * 60 * 60)
+        let todayStart = Int(localDayStart(for: now).timeIntervalSince1970)
         let weekStart = Int(now.timeIntervalSince1970) - (7 * 24 * 60 * 60)
 
+        var today = 0
         var day = 0
         var week = 0
         var month = 0
@@ -968,6 +1057,9 @@ final class CodexUsageStore: @unchecked Sendable {
                 continue
             }
             month += tokens
+            if record.ts >= todayStart {
+                today += tokens
+            }
             if record.ts >= weekStart {
                 week += tokens
             }
@@ -976,30 +1068,56 @@ final class CodexUsageStore: @unchecked Sendable {
             }
         }
 
-        return PeriodUsage(day: day, week: week, month: month)
+        return PeriodUsage(
+            day: day,
+            week: week,
+            month: month,
+            today: today,
+            daySummary: .unpriced(totalTokens: day),
+            weekSummary: .unpriced(totalTokens: week),
+            monthSummary: .unpriced(totalTokens: month),
+            todaySummary: .unpriced(totalTokens: today)
+        )
     }
 
     private func loadPeriodUsageFromRollouts(now: Date, threads: [ThreadRecord]) -> PeriodUsage {
         let dayStart = now.addingTimeInterval(-24 * 60 * 60)
+        let todayStart = localDayStart(for: now)
         let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
         let monthStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
 
+        var today = 0
         var day = 0
         var week = 0
         var month = 0
+        var todaySummary = TokenUsageSummary.zero
+        var daySummary = TokenUsageSummary.zero
+        var weekSummary = TokenUsageSummary.zero
+        var monthSummary = TokenUsageSummary.zero
 
-        func add(tokens: Int, date: Date) {
-            guard tokens > 0, date >= monthStart else {
+        func add(summary: TokenUsageSummary, date: Date) {
+            guard summary.totalTokens > 0, date >= monthStart else {
                 return
             }
 
-            month += tokens
+            month += summary.totalTokens
+            monthSummary.add(summary)
+            if date >= todayStart {
+                today += summary.totalTokens
+                todaySummary.add(summary)
+            }
             if date >= weekStart {
-                week += tokens
+                week += summary.totalTokens
+                weekSummary.add(summary)
             }
             if date >= dayStart {
-                day += tokens
+                day += summary.totalTokens
+                daySummary.add(summary)
             }
+        }
+
+        func add(tokens: Int, model: String?, date: Date) {
+            add(summary: .unpriced(totalTokens: tokens, model: model), date: date)
         }
 
         var recordsByPath: [String: ThreadRecord] = [:]
@@ -1019,30 +1137,143 @@ final class CodexUsageStore: @unchecked Sendable {
         }.sorted()
 
         if let mainUsage = loadPeriodUsageWithRipgrep(now: now, paths: mainPaths) {
+            today = mainUsage.today
             day = mainUsage.day
             week = mainUsage.week
             month = mainUsage.month
+            todaySummary = mainUsage.todaySummary
+            daySummary = mainUsage.daySummary
+            weekSummary = mainUsage.weekSummary
+            monthSummary = mainUsage.monthSummary
 
             for thread in recordsByPath.values where sessionMeta(from: thread.rolloutPath)?.isSubagent == true {
-                add(
-                    tokens: thread.tokensUsed,
-                    date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
-                )
+                if let scanned = loadPeriodUsageFromRolloutTail(
+                    now: now,
+                    path: thread.rolloutPath,
+                    resetOnWorldState: true
+                ) {
+                    today += scanned.today
+                    day += scanned.day
+                    week += scanned.week
+                    month += scanned.month
+                    todaySummary.add(scanned.todaySummary)
+                    daySummary.add(scanned.daySummary)
+                    weekSummary.add(scanned.weekSummary)
+                    monthSummary.add(scanned.monthSummary)
+                } else {
+                    add(
+                        tokens: thread.tokensUsed,
+                        model: thread.model,
+                        date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
+                    )
+                }
             }
-            return PeriodUsage(day: day, week: week, month: month)
+            return PeriodUsage(
+                day: day,
+                week: week,
+                month: month,
+                today: today,
+                daySummary: daySummary,
+                weekSummary: weekSummary,
+                monthSummary: monthSummary,
+                todaySummary: todaySummary
+            )
         }
 
         for thread in recordsByPath.values {
+            let signature = fileSignature(thread.rolloutPath)
+            if signature.exists {
+                if let scanned = loadPeriodUsageFromRolloutTail(
+                    now: now,
+                    path: thread.rolloutPath,
+                    resetOnWorldState: sessionMeta(from: thread.rolloutPath)?.isSubagent == true
+                ) {
+                    today += scanned.today
+                    day += scanned.day
+                    week += scanned.week
+                    month += scanned.month
+                    todaySummary.add(scanned.todaySummary)
+                    daySummary.add(scanned.daySummary)
+                    weekSummary.add(scanned.weekSummary)
+                    monthSummary.add(scanned.monthSummary)
+                }
+                continue
+            }
+
             if thread.tokensUsed > 0 {
                 add(
                     tokens: thread.tokensUsed,
+                    model: thread.model,
                     date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
                 )
-                continue
             }
         }
 
-        return PeriodUsage(day: day, week: week, month: month)
+        return PeriodUsage(
+            day: day,
+            week: week,
+            month: month,
+            today: today,
+            daySummary: daySummary,
+            weekSummary: weekSummary,
+            monthSummary: monthSummary,
+            todaySummary: todaySummary
+        )
+    }
+
+    private func loadPeriodUsageFromRolloutTail(
+        now: Date,
+        path: String,
+        resetOnWorldState: Bool = false
+    ) -> PeriodUsage? {
+        guard let output = usageEventLines(
+            from: path,
+            lineLimit: UsageScanPolicy.periodUsageTailLineLimit
+        ) else {
+            return nil
+        }
+
+        let todayStart = localDayStart(for: now)
+        let dayStart = now.addingTimeInterval(-24 * 60 * 60)
+        let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let monthStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
+        var usage = PeriodUsage.zero
+        var currentModel = sessionRuntimeInfo(from: path)?.model
+
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let lineText = String(line)
+            if resetOnWorldState,
+               sessionDecoder.isWorldStateLine(lineText) {
+                usage = .zero
+                currentModel = nil
+                continue
+            }
+            if let model = sessionDecoder.turnContextModel(from: lineText) {
+                currentModel = model
+                continue
+            }
+            guard let event = sessionDecoder.tokenCountEvent(from: lineText),
+                  event.date >= monthStart else {
+                continue
+            }
+            var summary = TokenUsageSummary.zero
+            summary.add(event.usage, model: currentModel)
+            usage.month += event.tokens
+            usage.monthSummary.add(summary)
+            if event.date >= weekStart {
+                usage.week += event.tokens
+                usage.weekSummary.add(summary)
+            }
+            if event.date >= dayStart {
+                usage.day += event.tokens
+                usage.daySummary.add(summary)
+            }
+            if event.date >= todayStart {
+                usage.today += event.tokens
+                usage.todaySummary.add(summary)
+            }
+        }
+        return usage
     }
 
     private func loadPeriodUsageWithRipgrep(now: Date, paths: [String]) -> PeriodUsage? {
@@ -1099,12 +1330,14 @@ final class CodexUsageStore: @unchecked Sendable {
         cacheLock.unlock()
 
         let dayCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-24 * 60 * 60))
+        let todayCutoff = timestampSecondPrefix(for: localDayStart(for: now))
         let weekCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-7 * 24 * 60 * 60))
         let monthCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-30 * 24 * 60 * 60))
 
-        var day = 0
-        var week = 0
-        var month = 0
+        var todaySummary = TokenUsageSummary.zero
+        var daySummary = TokenUsageSummary.zero
+        var weekSummary = TokenUsageSummary.zero
+        var monthSummary = TokenUsageSummary.zero
 
         for bucket in buckets.keys.sorted() {
             guard let batch = currentBatches[bucket] else {
@@ -1115,17 +1348,33 @@ final class CodexUsageStore: @unchecked Sendable {
                     continue
                 }
 
-                month += event.tokens
+                monthSummary.add(event.summary)
+                if event.timestampPrefix >= todayCutoff {
+                    todaySummary.add(event.summary)
+                }
                 if event.timestampPrefix >= weekCutoff {
-                    week += event.tokens
+                    weekSummary.add(event.summary)
                 }
                 if event.timestampPrefix >= dayCutoff {
-                    day += event.tokens
+                    daySummary.add(event.summary)
                 }
             }
         }
 
-        return PeriodUsage(day: day, week: week, month: month)
+        return PeriodUsage(
+            day: daySummary.totalTokens,
+            week: weekSummary.totalTokens,
+            month: monthSummary.totalTokens,
+            today: todaySummary.totalTokens,
+            daySummary: daySummary,
+            weekSummary: weekSummary,
+            monthSummary: monthSummary,
+            todaySummary: todaySummary
+        )
+    }
+
+    private func localDayStart(for date: Date) -> Date {
+        calendar.startOfDay(for: date)
     }
 
     private func periodUsageEvents(
@@ -1142,7 +1391,9 @@ final class CodexUsageStore: @unchecked Sendable {
         var eventsByBucket: [Int: [PeriodUsageEvent]] = [:]
         var currentBucket: Int?
         var currentEvents: [PeriodUsageEvent] = []
+        var currentModel: String?
         let markerPrefix = "{\"__codex_notch_bucket\":"
+        let fileMarker = "{\"__codex_notch_file\":true}"
 
         func flushCurrentBucket() {
             guard let currentBucket else {
@@ -1159,6 +1410,12 @@ final class CodexUsageStore: @unchecked Sendable {
                     .dropFirst(markerPrefix.count)
                     .prefix(while: { $0.isNumber })
                 currentBucket = Int(value)
+                currentModel = nil
+                continue
+            }
+
+            if rawLine.hasPrefix(fileMarker) {
+                currentModel = nil
                 continue
             }
 
@@ -1167,20 +1424,19 @@ final class CodexUsageStore: @unchecked Sendable {
                 continue
             }
             let line = String(rawLine[jsonStart...])
-            if let event = sessionDecoder.fastTokenCountLineInfo(line),
-               let timestampPrefix = timestampSecondPrefix(from: event.timestamp) {
-                currentEvents.append(
-                    PeriodUsageEvent(timestampPrefix: timestampPrefix, tokens: event.tokens)
-                )
+            if let model = sessionDecoder.turnContextModel(from: line) {
+                currentModel = model
                 continue
             }
-            guard let event = parseTokenCountEvent(line) else {
+            guard let event = sessionDecoder.tokenCountEvent(from: line) else {
                 continue
             }
+            var summary = TokenUsageSummary.zero
+            summary.add(event.usage, model: currentModel)
             currentEvents.append(
                 PeriodUsageEvent(
                     timestampPrefix: timestampSecondPrefix(for: event.date),
-                    tokens: event.tokens
+                    summary: summary
                 )
             )
         }
@@ -1221,13 +1477,15 @@ final class CodexUsageStore: @unchecked Sendable {
                     printf '{"__codex_notch_bucket":%s,"token_count":false}\\n' "$bucket"
                     ;;
                   *)
+                    printf '{"__codex_notch_file":true}\\n'
                     /usr/bin/tail -c "$bytes" -- "$path"
                     printf '\\n'
                     ;;
                 esac
               done
             } | "$rg" --fixed-strings --no-heading --color never \\
-                -e '"token_count"' -e '"__codex_notch_bucket"' > "$out"
+                -e '"token_count"' -e '"turn_context"' \\
+                -e '"__codex_notch_bucket"' -e '"__codex_notch_file"' > "$out"
             rg_status=$?
             if [ "$rg_status" -eq 1 ]; then
               exit 0
@@ -1372,13 +1630,15 @@ final class CodexUsageStore: @unchecked Sendable {
             let model = thread.model ?? "模型未知"
             let effort = localizedEffort(thread.reasoningEffort)
             let detailPrefix = "\(model) · \(effort)"
+            let tokenUsage = taskTokenUsage(for: thread, isRunning: status == .running)
 
             return CodexTask(
                 id: thread.id,
                 title: Formatters.shortTitle(thread.title),
                 status: status,
                 detailPrefix: detailPrefix,
-                tokenCount: thread.tokensUsed,
+                tokenCount: max(thread.tokensUsed, tokenUsage.totalTokens),
+                tokenUsage: tokenUsage,
                 updatedAt: updatedAt,
                 activeSubagentCount: thread.activeSubagentCount
             )
@@ -1389,6 +1649,27 @@ final class CodexUsageStore: @unchecked Sendable {
             return running + tasks.filter { $0.status != .running }
         }
         return tasks
+    }
+
+    private func taskTokenUsage(for thread: ThreadRecord, isRunning: Bool) -> TokenUsageSummary {
+        if var summary = thread.tokenUsage {
+            if summary.totalTokens < thread.tokensUsed {
+                summary.addUnpricedTokens(thread.tokensUsed - summary.totalTokens, model: thread.model)
+            }
+            return summary
+        }
+
+        let signature = fileSignature(thread.rolloutPath)
+        if signature.exists,
+           (isRunning || signature.size <= UsageScanPolicy.largeSessionTokenScanLimit),
+           var summary = sessionTokenUsageSummary(from: thread.rolloutPath) {
+            if summary.totalTokens < thread.tokensUsed {
+                summary.addUnpricedTokens(thread.tokensUsed - summary.totalTokens, model: thread.model)
+            }
+            return summary
+        }
+
+        return .unpriced(totalTokens: thread.tokensUsed, model: thread.model)
     }
 
     private func sessionLooksActive(path: String, fallbackUpdatedAt: Int, now: Date) -> Bool {
@@ -1495,6 +1776,8 @@ final class CodexUsageStore: @unchecked Sendable {
 
         let scanStart: UInt64
         let initialTotal: Int
+        let initialSummary: TokenUsageSummary
+        let initialModel: String?
         let initialPendingLine: String
         let hadTokenEvent: Bool
         if let cached,
@@ -1502,6 +1785,8 @@ final class CodexUsageStore: @unchecked Sendable {
            cached.signature.modifiedAt <= signature.modifiedAt {
             scanStart = cached.bytesScanned
             initialTotal = cached.tokens
+            initialSummary = cached.summary
+            initialModel = cached.currentModel
             initialPendingLine = cached.pendingLine
             hadTokenEvent = cached.foundTokenEvent
         } else {
@@ -1509,6 +1794,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 ? (lastWorldStateLineOffset(in: path, endingAt: signature.size) ?? 0)
                 : 0
             initialTotal = 0
+            initialSummary = .zero
+            initialModel = sessionRuntimeInfo(from: path)?.model
             initialPendingLine = ""
             hadTokenEvent = false
         }
@@ -1518,6 +1805,8 @@ final class CodexUsageStore: @unchecked Sendable {
             startingAt: scanStart,
             endingAt: signature.size,
             initialTotal: initialTotal,
+            initialSummary: initialSummary,
+            initialModel: initialModel,
             initialPendingLine: initialPendingLine,
             hadTokenEvent: hadTokenEvent,
             resetOnWorldState: isSubagent
@@ -1530,6 +1819,8 @@ final class CodexUsageStore: @unchecked Sendable {
             signature: signature,
             bytesScanned: scan.bytesScanned,
             tokens: scan.tokens,
+            summary: scan.summary,
+            currentModel: scan.currentModel,
             pendingLine: scan.pendingLine,
             foundTokenEvent: scan.foundTokenEvent
         )
@@ -1537,11 +1828,23 @@ final class CodexUsageStore: @unchecked Sendable {
         return scan.foundTokenEvent ? scan.tokens : nil
     }
 
+    private func sessionTokenUsageSummary(from path: String) -> TokenUsageSummary? {
+        guard sessionTokenTotal(from: path) != nil else {
+            return nil
+        }
+        cacheLock.lock()
+        let summary = sessionTokenTotalCache[path]?.summary
+        cacheLock.unlock()
+        return summary
+    }
+
     private func scanSessionTokenTotal(
         from path: String,
         startingAt: UInt64 = 0,
         endingAt: UInt64,
         initialTotal: Int = 0,
+        initialSummary: TokenUsageSummary = .zero,
+        initialModel: String? = nil,
         initialPendingLine: String = "",
         hadTokenEvent: Bool = false,
         resetOnWorldState: Bool = false
@@ -1566,6 +1869,8 @@ final class CodexUsageStore: @unchecked Sendable {
 
         var pending = initialPendingLine
         var total = initialTotal
+        var summary = initialSummary
+        var currentModel = initialModel
         var foundTokenEvent = hadTokenEvent
         var bytesScanned = startingAt
 
@@ -1595,14 +1900,21 @@ final class CodexUsageStore: @unchecked Sendable {
                 if resetOnWorldState,
                    sessionDecoder.isWorldStateLine(line) {
                     total = 0
+                    summary = .zero
+                    currentModel = nil
                     foundTokenEvent = false
                     continue
                 }
-                guard line.contains(#""token_count""#),
-                      let tokens = tokenCountTokens(from: line) else {
+                if let model = sessionDecoder.turnContextModel(from: line) {
+                    currentModel = model
                     continue
                 }
-                total += tokens
+                guard line.contains(#""token_count""#),
+                      let event = sessionDecoder.tokenCountEvent(from: line) else {
+                    continue
+                }
+                total += event.tokens
+                summary.add(event.usage, model: currentModel)
                 foundTokenEvent = true
             }
         }
@@ -1610,11 +1922,17 @@ final class CodexUsageStore: @unchecked Sendable {
         if resetOnWorldState,
            sessionDecoder.isWorldStateLine(pending) {
             total = 0
+            summary = .zero
+            currentModel = nil
             foundTokenEvent = false
             pending = ""
+        } else if let model = sessionDecoder.turnContextModel(from: pending) {
+            currentModel = model
+            pending = ""
         } else if pending.contains(#""token_count""#),
-                  let tokens = tokenCountTokens(from: pending) {
-            total += tokens
+                  let event = sessionDecoder.tokenCountEvent(from: pending) {
+            total += event.tokens
+            summary.add(event.usage, model: currentModel)
             pending = ""
             foundTokenEvent = true
         }
@@ -1622,6 +1940,8 @@ final class CodexUsageStore: @unchecked Sendable {
         return SessionTokenScanResult(
             bytesScanned: bytesScanned,
             tokens: total,
+            summary: summary,
+            currentModel: currentModel,
             pendingLine: pending,
             foundTokenEvent: foundTokenEvent
         )
@@ -2318,6 +2638,38 @@ final class CodexUsageStore: @unchecked Sendable {
         }
     }
 
+    private func usageEventLines(from rolloutPath: String, lineLimit: Int) -> String? {
+        guard FileManager.default.fileExists(atPath: rolloutPath) else {
+            return nil
+        }
+
+        do {
+            let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: rolloutPath))
+            defer {
+                try? handle.close()
+            }
+
+            let fileSize = try handle.seekToEnd()
+            let bytesPerLine = UsageScanPolicy.estimatedTokenLineBytes
+            let maxBytes = min(fileSize, UInt64(lineLimit) * bytesPerLine)
+            try handle.seek(toOffset: fileSize - maxBytes)
+            let data = try handle.readToEnd() ?? Data()
+            let text = String(decoding: data, as: UTF8.self)
+            let lines = text
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .filter {
+                    $0.contains("\"token_count\"")
+                        || $0.contains("\"turn_context\"")
+                        || $0.contains("\"world_state\"")
+                }
+                .suffix(lineLimit)
+
+            return lines.joined(separator: "\n")
+        } catch {
+            return nil
+        }
+    }
+
     private func tokenCountTokens(from line: String) -> Int? {
         sessionDecoder.tokenCountTokens(from: line)
     }
@@ -2424,6 +2776,8 @@ private struct SessionTokenTotalCache {
     let signature: FileSignature
     let bytesScanned: UInt64
     let tokens: Int
+    let summary: TokenUsageSummary
+    let currentModel: String?
     let pendingLine: String
     let foundTokenEvent: Bool
 }
@@ -2431,6 +2785,8 @@ private struct SessionTokenTotalCache {
 private struct SessionTokenScanResult {
     let bytesScanned: UInt64
     let tokens: Int
+    let summary: TokenUsageSummary
+    let currentModel: String?
     let pendingLine: String
     let foundTokenEvent: Bool
 }
@@ -2471,7 +2827,7 @@ private struct PeriodUsageBatchCache {
 
 private struct PeriodUsageEvent {
     let timestampPrefix: String
-    let tokens: Int
+    let summary: TokenUsageSummary
 }
 
 private struct AppServerRateLimitResponse: Decodable {

@@ -19,6 +19,7 @@ struct CodexTokenCountEvent {
     let timestamp: String
     let date: Date
     let tokens: Int
+    let usage: TokenUsageBreakdown
 }
 
 struct CodexSessionEventDecoder {
@@ -183,6 +184,13 @@ struct CodexSessionEventDecoder {
         return nil
     }
 
+    func turnContextModel(from line: String) -> String? {
+        guard line.contains(#""turn_context""#) else {
+            return nil
+        }
+        return runtimeInfo(from: line)?.model
+    }
+
     func tokenCountTokens(from line: String) -> Int? {
         if let tokens = fastTokenCountLineInfo(line)?.tokens {
             return tokens
@@ -202,8 +210,14 @@ struct CodexSessionEventDecoder {
 
     func tokenCountEvent(from line: String) -> CodexTokenCountEvent? {
         if let event = fastTokenCountLineInfo(line),
-           let date = parseTimestamp(event.timestamp) {
-            return CodexTokenCountEvent(timestamp: event.timestamp, date: date, tokens: event.tokens)
+           let date = parseTimestamp(event.timestamp),
+           let usage = fastTokenUsageBreakdown(in: line) {
+            return CodexTokenCountEvent(
+                timestamp: event.timestamp,
+                date: date,
+                tokens: event.tokens,
+                usage: usage
+            )
         }
 
         guard let data = line.data(using: .utf8),
@@ -213,12 +227,24 @@ struct CodexSessionEventDecoder {
               let payload = object["payload"] as? [String: Any],
               payload["type"] as? String == "token_count",
               let info = payload["info"] as? [String: Any],
-              let lastUsage = info["last_token_usage"] as? [String: Any],
-              let tokens = intValue(lastUsage["total_tokens"]) else {
+              let lastUsage = info["last_token_usage"] as? [String: Any] else {
             return nil
         }
 
-        return CodexTokenCountEvent(timestamp: timestamp, date: date, tokens: tokens)
+        let input = max(0, intValue(lastUsage["input_tokens"]) ?? 0)
+        let cached = min(input, max(0, intValue(lastUsage["cached_input_tokens"]) ?? 0))
+        let output = max(0, intValue(lastUsage["output_tokens"]) ?? 0)
+        let reasoning = min(output, max(0, intValue(lastUsage["reasoning_output_tokens"]) ?? 0))
+        let tokens = max(0, intValue(lastUsage["total_tokens"]) ?? (input + output))
+        let usage = TokenUsageBreakdown(
+            inputTokens: input,
+            cachedInputTokens: cached,
+            outputTokens: output,
+            reasoningOutputTokens: reasoning,
+            totalTokens: tokens
+        )
+
+        return CodexTokenCountEvent(timestamp: timestamp, date: date, tokens: tokens, usage: usage)
     }
 
     func isWorldStateLine(_ line: String) -> Bool {
@@ -348,6 +374,48 @@ struct CodexSessionEventDecoder {
             index = line.index(after: index)
         }
 
+        guard start < index else {
+            return nil
+        }
+        return Int(line[start..<index])
+    }
+
+    private func fastTokenUsageBreakdown(in line: String) -> TokenUsageBreakdown? {
+        guard let usageRange = line.range(of: #""last_token_usage""#) else {
+            return nil
+        }
+        let usageText = String(line[usageRange.upperBound...])
+        guard let total = fastJSONIntValue(for: "total_tokens", in: usageText) else {
+            return nil
+        }
+
+        let input = max(0, fastJSONIntValue(for: "input_tokens", in: usageText) ?? 0)
+        let cached = min(input, max(0, fastJSONIntValue(for: "cached_input_tokens", in: usageText) ?? 0))
+        let output = max(0, fastJSONIntValue(for: "output_tokens", in: usageText) ?? 0)
+        let reasoning = min(output, max(0, fastJSONIntValue(for: "reasoning_output_tokens", in: usageText) ?? 0))
+        return TokenUsageBreakdown(
+            inputTokens: input,
+            cachedInputTokens: cached,
+            outputTokens: output,
+            reasoningOutputTokens: reasoning,
+            totalTokens: max(0, total)
+        )
+    }
+
+    private func fastJSONIntValue(for key: String, in line: String) -> Int? {
+        guard let keyRange = line.range(of: #"""# + key + #"""#),
+              let colonRange = line[keyRange.upperBound...].range(of: ":") else {
+            return nil
+        }
+
+        var index = colonRange.upperBound
+        while index < line.endIndex, line[index].isWhitespace {
+            index = line.index(after: index)
+        }
+        let start = index
+        while index < line.endIndex, line[index].isNumber {
+            index = line.index(after: index)
+        }
         guard start < index else {
             return nil
         }

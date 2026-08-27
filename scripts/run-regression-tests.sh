@@ -15,6 +15,7 @@ swift test -c release --build-path "${BUILD_DIR}/package-build"
 swiftc \
   -swift-version 6 \
   "${ROOT_DIR}/Sources/CodexNotch/DetailPresentation.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/TokenCostEstimator.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/Models.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/UsageRefreshState.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/IslandMetrics.swift" \

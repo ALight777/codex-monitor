@@ -35,8 +35,9 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 周额度行显示剩余重置次数；点击旁边的信息图标，可以查看每次重置次数的到期时间。
 - 正在运行和最近活动的对话列表。
 - 当前活跃任务的活跃子代理数量。
-- 每个对话的 token 用量，包含该对话下的子代理用量。
-- 24 小时、7 天、30 天 token 用量统计。
+- 每个对话的 token 用量和 API 等价花费估算，包含该对话下的子代理用量。
+- 今日、7 天、30 天 token 用量与花费估算；“今日”按电脑当前时区的自然日计算，归档会话仍计入已消耗 token。
+- Token 数字支持整块悬停和点击：悬停短暂查看、点击固定弹窗，显示未缓存输入、缓存输入和含推理输出的构成。
 
 本机数据主要来自当前用户目录下的 Codex 数据文件，例如：
 
@@ -46,6 +47,8 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 最近的 rollout JSONL 文件
 
 应用只读取这些文件，不会修改 Codex 的本地数据。
+
+花费按记录中的实际模型逐次套用 OpenAI 官方 API 单价，并分别计算未缓存输入、缓存输入和输出；长上下文模型按单次请求规则处理。该数字只是 API 等价估算，不是 Codex 订阅账单。若本地记录缺少构成、缓存写入 Token 或模型没有可匹配的公开价格，界面会显示不可估算或部分缺失，不会猜测单价。价格表版本会显示在用量卡片下方。
 
 ### 远程账号监测
 
@@ -244,8 +247,10 @@ It can show:
 - Remaining reset-credit count on the weekly quota row; click the adjacent information icon to view each credit's expiry time.
 - Running and recent conversations.
 - Active subagent count for currently running tasks.
-- Token usage per conversation, including subagent usage under the same conversation.
-- 24-hour, 7-day, and 30-day token usage totals.
+- Token usage and API-equivalent cost per conversation, including subagent usage under the same conversation.
+- Today, 7-day, and 30-day token totals with estimated API-equivalent cost.
+- Hover or click the enlarged token target to inspect uncached input, cached input, and output including reasoning; clicking pins the popover.
+- Today, 7-day, and 30-day token usage totals. Today starts at midnight in the Mac's current time zone, and archived conversations remain part of consumed-token totals.
 
 Local data is read from Codex files under the current user account, including:
 
@@ -255,6 +260,8 @@ Local data is read from Codex files under the current user account, including:
 - recent rollout JSONL files
 
 The app reads these files only. It does not modify local Codex data.
+
+Costs are estimated per recorded request using the matching official OpenAI API model price, with uncached input, cached input, output, and supported long-context rules calculated separately. This is an API-equivalent estimate, not Codex subscription billing. Missing component data, cache-write tokens, or an unknown public model price remains explicitly unavailable rather than being guessed. The pricing snapshot date appears below the local usage cells.
 
 ### Remote Account Monitoring
 

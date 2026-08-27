@@ -951,10 +951,32 @@ struct DetailPanelView: View {
     }
 
     private var periodUsage: some View {
-        HStack(spacing: 8) {
-            PeriodUsageCell(label: "24小时", value: localPeriodUsageText(snapshot.usage24h))
-            PeriodUsageCell(label: "7天", value: localPeriodUsageText(snapshot.usage7d))
-            PeriodUsageCell(label: "30天", value: localPeriodUsageText(snapshot.usage30d))
+        VStack(spacing: 5) {
+            HStack(spacing: 8) {
+                LocalPeriodUsageCell(
+                    label: "今日",
+                    value: localPeriodUsageText(snapshot.usageToday),
+                    summary: snapshot.usageTodaySummary,
+                    hasLoaded: viewModel.hasLoadedUsageTotals
+                )
+                LocalPeriodUsageCell(
+                    label: "7天",
+                    value: localPeriodUsageText(snapshot.usage7d),
+                    summary: snapshot.usage7dSummary,
+                    hasLoaded: viewModel.hasLoadedUsageTotals
+                )
+                LocalPeriodUsageCell(
+                    label: "30天",
+                    value: localPeriodUsageText(snapshot.usage30d),
+                    summary: snapshot.usage30dSummary,
+                    hasLoaded: viewModel.hasLoadedUsageTotals
+                )
+            }
+
+            Text("API 等价估算 · 价格更新 \(TokenCostCatalog.priceVersion)")
+                .font(.system(size: 8.2, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.32))
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.top, 1)
     }
@@ -1114,10 +1136,8 @@ private struct TaskRow: View {
                         )
                 }
 
-                Text(Formatters.compactTokens(task.tokenCount))
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.66))
-                    .fixedSize(horizontal: true, vertical: false)
+                Color.clear
+                    .frame(width: 108, height: 12)
             }
         }
         .padding(.horizontal, 10)
@@ -1127,6 +1147,17 @@ private struct TaskRow: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
+        .overlay(alignment: .bottomTrailing) {
+            TokenUsageTrigger(
+                title: "\(task.title) Token 构成",
+                tokenText: Formatters.compactTokens(task.tokenCount),
+                summary: task.tokenUsage,
+                style: .task
+            )
+            .frame(width: 108, height: 36)
+            .padding(.trailing, 5)
+            .padding(.bottom, 2)
+        }
     }
 
     private var statusColor: Color {
@@ -1347,5 +1378,280 @@ private struct PeriodUsageCell: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(Color.white.opacity(0.026), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct LocalPeriodUsageCell: View {
+    let label: String
+    let value: String
+    let summary: TokenUsageSummary
+    let hasLoaded: Bool
+
+    var body: some View {
+        TokenUsageTrigger(
+            title: "\(label) Token 构成",
+            tokenText: value,
+            summary: hasLoaded ? summary : .zero,
+            style: .period(label: label, hasLoaded: hasLoaded)
+        )
+        .frame(maxWidth: .infinity)
+        .frame(height: 50)
+    }
+}
+
+private enum TokenUsageTriggerStyle: Equatable {
+    case task
+    case period(label: String, hasLoaded: Bool)
+}
+
+private struct TokenUsageTrigger: View {
+    let title: String
+    let tokenText: String
+    let summary: TokenUsageSummary
+    let style: TokenUsageTriggerStyle
+
+    @State private var isTriggerHovered = false
+    @State private var isPopoverHovered = false
+    @State private var isPinned = false
+    @State private var isPresented = false
+    @State private var suppressHoverUntilExit = false
+    @State private var hoverTask: Task<Void, Never>?
+
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private var presentationBinding: Binding<Bool> {
+        Binding(
+            get: { isPresented },
+            set: { value in
+                isPresented = value
+                if !value {
+                    isPinned = false
+                    suppressHoverUntilExit = true
+                    hoverTask?.cancel()
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        Button(action: togglePinnedPresentation) {
+            label
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            Color(red: 0.22, green: 0.57, blue: 1.0)
+                .opacity(isTriggerHovered || isPinned ? 0.11 : 0),
+            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(
+                    Color(red: 0.36, green: 0.68, blue: 1.0)
+                        .opacity(isPinned ? 0.68 : (isTriggerHovered ? 0.38 : 0)),
+                    lineWidth: 1
+                )
+        }
+        .contentShape(Rectangle())
+        .onHover(perform: triggerHoverChanged)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isTriggerHovered)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isPinned)
+        .help("悬停查看 Token 构成，点击固定")
+        .accessibilityLabel(title)
+        .accessibilityValue("\(tokenText)，\(Formatters.estimatedCostUSD(summary.costUSD))")
+        .accessibilityHint("悬停查看，点击可固定弹窗")
+        .popover(isPresented: presentationBinding, arrowEdge: .bottom) {
+            TokenUsagePopover(
+                title: title,
+                summary: summary,
+                isPinned: isPinned,
+                onHoverChanged: popoverHoverChanged
+            )
+        }
+        .onDisappear {
+            hoverTask?.cancel()
+            NSCursor.arrow.set()
+        }
+    }
+
+    @ViewBuilder
+    private var label: some View {
+        switch style {
+        case .task:
+            HStack(spacing: 3) {
+                Text(tokenText)
+                    .foregroundStyle(.white.opacity(0.72))
+                Text("·")
+                    .foregroundStyle(.white.opacity(0.28))
+                Text(Formatters.estimatedCostUSD(summary.costUSD))
+                    .foregroundStyle(Color(red: 0.54, green: 0.80, blue: 1.0).opacity(0.88))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.34))
+            }
+            .font(.system(size: 9.3, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .padding(.horizontal, 4)
+
+        case .period(let label, let hasLoaded):
+            VStack(spacing: 2) {
+                Text(label)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.52))
+                Text(tokenText)
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
+                Text(hasLoaded ? Formatters.estimatedCostUSD(summary.costUSD) : "≈--")
+                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.54, green: 0.80, blue: 1.0).opacity(0.74))
+            }
+            .monospacedDigit()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.white.opacity(0.026), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private func togglePinnedPresentation() {
+        hoverTask?.cancel()
+        if isPinned {
+            isPinned = false
+            isPresented = false
+            suppressHoverUntilExit = true
+            return
+        }
+        isPinned = true
+        isPresented = true
+    }
+
+    private func triggerHoverChanged(_ hovering: Bool) {
+        isTriggerHovered = hovering
+        NSCursor.setIf(hovering: hovering)
+        hoverTask?.cancel()
+
+        if hovering {
+            guard !suppressHoverUntilExit, !isPinned else {
+                return
+            }
+            hoverTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, isTriggerHovered, !suppressHoverUntilExit else {
+                    return
+                }
+                isPresented = true
+            }
+        } else {
+            suppressHoverUntilExit = false
+            scheduleHoverDismissal()
+        }
+    }
+
+    private func popoverHoverChanged(_ hovering: Bool) {
+        isPopoverHovered = hovering
+        hoverTask?.cancel()
+        if !hovering {
+            scheduleHoverDismissal()
+        }
+    }
+
+    private func scheduleHoverDismissal() {
+        guard !isPinned else {
+            return
+        }
+        hoverTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(170))
+            guard !Task.isCancelled, !isPinned, !isTriggerHovered, !isPopoverHovered else {
+                return
+            }
+            isPresented = false
+        }
+    }
+}
+
+private struct TokenUsagePopover: View {
+    let title: String
+    let summary: TokenUsageSummary
+    let isPinned: Bool
+    let onHoverChanged: (Bool) -> Void
+
+    private var breakdown: TokenUsageBreakdown {
+        summary.breakdown
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.system(size: 13, weight: .bold))
+                Spacer(minLength: 18)
+                Text(Formatters.compactTokens(summary.totalTokens))
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+            }
+
+            VStack(spacing: 7) {
+                usageRow("输入（未缓存）", tokens: breakdown.uncachedInputTokens)
+                usageRow("缓存输入", tokens: breakdown.cachedInputTokens)
+                usageRow("输出（含推理）", tokens: breakdown.outputTokens)
+            }
+
+            Divider()
+
+            HStack {
+                Text("API 等价估算")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(Formatters.estimatedCostUSD(summary.costUSD))
+                    .fontWeight(.bold)
+                    .foregroundStyle(Color(red: 0.20, green: 0.56, blue: 0.95))
+                    .monospacedDigit()
+            }
+            .font(.system(size: 11.5, weight: .semibold))
+
+            if !summary.hasComponentData, summary.totalTokens > 0 {
+                Text("本地记录未提供完整的 Token 构成明细")
+                    .foregroundStyle(.secondary)
+            } else if !summary.unknownModels.isEmpty {
+                Text("部分模型暂无可匹配的官方价格：\(summary.unknownModels.joined(separator: "、"))")
+                    .foregroundStyle(.orange)
+            }
+
+            Text("仅按 API 单价估算，不代表 Codex 订阅实际扣费；本地记录未提供缓存写入 Token。")
+                .foregroundStyle(.secondary)
+
+            Text(isPinned ? "已固定 · 点击外部或按 Esc 关闭" : "点击固定 · 移开关闭")
+                .foregroundStyle(.tertiary)
+        }
+        .font(.system(size: 10.5, weight: .medium))
+        .padding(14)
+        .frame(width: 286, alignment: .leading)
+        .background(Color(red: 0.055, green: 0.058, blue: 0.064))
+        .onHover(perform: onHoverChanged)
+        .preferredColorScheme(.dark)
+    }
+
+    private func usageRow(_ label: String, tokens: Int) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(summary.hasComponentData ? Formatters.compactTokens(tokens) : "--")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        }
+    }
+}
+
+private extension NSCursor {
+    static func setIf(hovering: Bool) {
+        if hovering {
+            pointingHand.set()
+        } else {
+            arrow.set()
+        }
     }
 }

@@ -10,6 +10,7 @@ final class UsageViewModel: ObservableObject {
 
     private let store: CodexUsageStore
     private let settings: CodexNotchSettings
+    private let isPreviewMode: Bool
     private var fastTimer: Timer?
     private var usageTimer: Timer?
     private var pendingSnapshotTimer: Timer?
@@ -37,15 +38,28 @@ final class UsageViewModel: ObservableObject {
     private var watcherRefreshGeneration = 0
     private var observedSettings: LocalUsageSettingsSnapshot?
 
-    init(store: CodexUsageStore = CodexUsageStore(), settings: CodexNotchSettings = CodexNotchSettings()) {
+    init(
+        store: CodexUsageStore = CodexUsageStore(),
+        settings: CodexNotchSettings = CodexNotchSettings(),
+        previewSnapshot: UsageSnapshot? = nil
+    ) {
         self.store = store
         self.settings = settings
+        isPreviewMode = previewSnapshot != nil
+        if let previewSnapshot {
+            snapshot = previewSnapshot
+            hasLoadedUsageTotals = true
+            return
+        }
         refresh(bypassFastCache: true)
         refreshWatchPaths()
         observeSettings()
     }
 
     func refresh(bypassFastCache: Bool = false) {
+        guard !isPreviewMode else {
+            return
+        }
         guard !isRefreshingSnapshot else {
             pendingSnapshotRefresh = true
             pendingSnapshotBypassFastCache = pendingSnapshotBypassFastCache || bypassFastCache
@@ -76,6 +90,7 @@ final class UsageViewModel: ObservableObject {
                 mergedSnapshot.usage24h = self.snapshot.usage24h
                 mergedSnapshot.usage7d = self.snapshot.usage7d
                 mergedSnapshot.usage30d = self.snapshot.usage30d
+                mergedSnapshot.usageToday = self.snapshot.usageToday
                 self.snapshot = mergedSnapshot
                 self.isRefreshingSnapshot = false
                 self.updateRefreshingState()
@@ -101,6 +116,9 @@ final class UsageViewModel: ObservableObject {
     }
 
     func refreshAll() {
+        guard !isPreviewMode else {
+            return
+        }
         refresh(bypassFastCache: true)
         refreshUsageTotals(scheduleNext: periodUsageRefreshEnabled)
     }
@@ -118,6 +136,9 @@ final class UsageViewModel: ObservableObject {
     }
 
     func refreshUsageTotalsIfStale(maxAge: TimeInterval = 120) {
+        guard !isPreviewMode else {
+            return
+        }
         guard settings.showPeriodUsage else {
             disableUsageTotals()
             return
@@ -180,6 +201,11 @@ final class UsageViewModel: ObservableObject {
                     self.snapshot.usage24h = usage.day
                     self.snapshot.usage7d = usage.week
                     self.snapshot.usage30d = usage.month
+                    self.snapshot.usageToday = usage.today
+                    self.snapshot.usage24hSummary = usage.daySummary
+                    self.snapshot.usage7dSummary = usage.weekSummary
+                    self.snapshot.usage30dSummary = usage.monthSummary
+                    self.snapshot.usageTodaySummary = usage.todaySummary
                 }
                 self.hasLoadedUsageTotals = self.usageLoadState.hasSuccessfulValue
                 let completion = self.usageRefreshQueue.complete()
@@ -504,7 +530,12 @@ final class UsageViewModel: ObservableObject {
         PeriodUsage(
             day: snapshot.usage24h,
             week: snapshot.usage7d,
-            month: snapshot.usage30d
+            month: snapshot.usage30d,
+            today: snapshot.usageToday,
+            daySummary: snapshot.usage24hSummary,
+            weekSummary: snapshot.usage7dSummary,
+            monthSummary: snapshot.usage30dSummary,
+            todaySummary: snapshot.usageTodaySummary
         )
     }
 
@@ -526,6 +557,11 @@ final class UsageViewModel: ObservableObject {
             snapshot.usage24h = previous.usage24h
             snapshot.usage7d = previous.usage7d
             snapshot.usage30d = previous.usage30d
+            snapshot.usageToday = previous.usageToday
+            snapshot.usage24hSummary = previous.usage24hSummary
+            snapshot.usage7dSummary = previous.usage7dSummary
+            snapshot.usage30dSummary = previous.usage30dSummary
+            snapshot.usageTodaySummary = previous.usageTodaySummary
         }
 
         if snapshot.errorMessage != nil {
@@ -537,6 +573,7 @@ final class UsageViewModel: ObservableObject {
                         status: task.status == .running ? .recent : task.status,
                         detailPrefix: task.detailPrefix,
                         tokenCount: task.tokenCount,
+                        tokenUsage: task.tokenUsage,
                         updatedAt: task.updatedAt,
                         activeSubagentCount: task.activeSubagentCount
                     )

@@ -68,7 +68,7 @@ enum IslandMetrics {
     ) -> CGFloat {
         let rows = max(1, min(visibleTaskRows, taskRows))
         let taskStackHeight = CGFloat(rows) * 48 + CGFloat(max(0, rows - 1)) * 7
-        let periodHeight: CGFloat = showsPeriodUsage ? 10 + 47 : 0
+        let periodHeight: CGFloat = showsPeriodUsage ? 10 + 65 : 0
         let contentHeight = topPadding
             + detailHeaderHeight
             + 10

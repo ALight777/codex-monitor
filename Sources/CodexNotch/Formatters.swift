@@ -15,6 +15,22 @@ enum Formatters {
         return "\(value)"
     }
 
+    static func estimatedCostUSD(_ value: Double?) -> String {
+        guard let value, value.isFinite, value >= 0 else {
+            return "≈--"
+        }
+        if value == 0 {
+            return "≈$0.00"
+        }
+        if value < 0.01 {
+            return String(format: "≈$%.4f", value)
+        }
+        if value < 100 {
+            return String(format: "≈$%.2f", value)
+        }
+        return String(format: "≈$%.0f", value)
+    }
+
     static func percent(_ value: Int?) -> String {
         guard let value else {
             return "--"

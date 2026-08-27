@@ -128,6 +128,45 @@ func changingCredentialPrincipalRequiresAReplacementSecret() {
     #expect(sanitizedRemote.secret.isEmpty)
 }
 
+@MainActor
+@Test
+func codexRadarTokenUsesSecretVaultInsteadOfUserDefaults() throws {
+    let suiteName = "codex-radar-secret-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let keychainStore = MemorySecretStore()
+    let factory = SecretStoreFactory(keychain: keychainStore, database: MemorySecretStore())
+    let settings = CodexNotchSettings(
+        defaults: defaults,
+        initialManagementKey: "",
+        initialNewAPIKey: "",
+        initialSubAPIKey: "",
+        secretStores: factory,
+        launchAtLoginManager: TestLaunchAtLoginManager(),
+        loadSecretsSynchronously: true
+    )
+
+    settings.codexRadarEnabled = true
+    settings.showSparkQuota = true
+    settings.codexRadarAPIToken = "  radar-secret  "
+
+    #expect(try keychainStore.loadVault().value(for: .codexRadarAPI) == "radar-secret")
+    #expect(!defaults.dictionaryRepresentation().description.contains("radar-secret"))
+
+    let reloaded = CodexNotchSettings(
+        defaults: defaults,
+        initialManagementKey: "",
+        initialNewAPIKey: "",
+        initialSubAPIKey: "",
+        secretStores: factory,
+        launchAtLoginManager: TestLaunchAtLoginManager(),
+        loadSecretsSynchronously: true
+    )
+    #expect(reloaded.codexRadarEnabled)
+    #expect(reloaded.showSparkQuota)
+    #expect(reloaded.codexRadarAPIToken == "radar-secret")
+}
+
 private final class ToggleFailingSecretStore: SecretStore, @unchecked Sendable {
     private let lock = NSLock()
     private var vault = SecretVault()

@@ -12,6 +12,7 @@ struct IslandLayout: Equatable {
 
 enum IslandMetrics {
     static let shoulderWidth: CGFloat = 72
+    static let narrowShoulderWidth: CGFloat = 36
     static let notchWidth: CGFloat = 224
     static let minimumNotchWidth: CGFloat = 160
     static let maximumNotchWidth: CGFloat = 320
@@ -34,6 +35,15 @@ enum IslandMetrics {
 
     static var width: CGFloat {
         shoulderWidth * 2 + notchWidth
+    }
+
+    static func shoulderWidth(for displaySize: NotchDisplaySize) -> CGFloat {
+        switch displaySize {
+        case .standard:
+            shoulderWidth
+        case .narrow:
+            narrowShoulderWidth
+        }
     }
 
     static func detailObscuredTopHeight(
@@ -64,17 +74,20 @@ enum IslandMetrics {
     static func detailHeight(
         taskRows: Int,
         showsPeriodUsage: Bool,
+        showsSparkQuota: Bool = false,
         topPadding: CGFloat = detailTopPadding
     ) -> CGFloat {
         let rows = max(1, min(visibleTaskRows, taskRows))
         let taskStackHeight = CGFloat(rows) * 48 + CGFloat(max(0, rows - 1)) * 7
         let periodHeight: CGFloat = showsPeriodUsage ? 10 + 65 : 0
+        let sparkHeight: CGFloat = showsSparkQuota ? 42 : 0
         let contentHeight = topPadding
             + detailHeaderHeight
             + 10
             + detailPageSwitcherHeight
             + 10
             + taskStackHeight
+            + sparkHeight
             + periodHeight
             + detailBottomPadding
         return max(minimumDetailHeight, ceil(contentHeight))
@@ -83,12 +96,14 @@ enum IslandMetrics {
     static func combinedDetailHeight(
         accountRows: Int?,
         showsPeriodUsage: Bool,
+        showsSparkQuota: Bool = false,
         usesTallRemoteRows: Bool = false,
         topPadding: CGFloat = detailTopPadding
     ) -> CGFloat {
         let localHeight = detailHeight(
             taskRows: visibleTaskRows,
             showsPeriodUsage: showsPeriodUsage,
+            showsSparkQuota: showsSparkQuota,
             topPadding: topPadding
         )
         guard let accountRows else {

@@ -38,7 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = Self.makeMainMenu()
         overlayController = NotchOverlayController()
-        overlayController?.show()
+        overlayController?.show(
+            expanded: CommandLine.arguments.contains("--qa-expanded")
+        )
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -124,10 +126,16 @@ private final class TopAnchoredClippingView: NSView {
 @MainActor
 final class NotchOverlayController {
     private let settings = CodexNotchSettings(loadSecretsSynchronously: false)
-    private lazy var viewModel = UsageViewModel(settings: settings)
+    private lazy var viewModel = UsageViewModel(
+        settings: settings,
+        previewSnapshot: CommandLine.arguments.contains("--qa-static-preview")
+            ? Self.visualQASnapshot()
+            : nil
+    )
     private lazy var remoteViewModel = RemoteMonitorViewModel(settings: settings)
     private lazy var newAPIViewModel = BalanceMonitorViewModel(source: .newAPI, settings: settings)
     private lazy var subAPIViewModel = BalanceMonitorViewModel(source: .subAPI, settings: settings)
+    private lazy var codexRadarViewModel = CodexRadarViewModel(settings: settings)
     private let overlayState = OverlayState()
     private let window: NSPanel
     private let detailWindow: NSPanel
@@ -137,6 +145,7 @@ final class NotchOverlayController {
         remoteViewModel: remoteViewModel,
         newAPIViewModel: newAPIViewModel,
         subAPIViewModel: subAPIViewModel,
+        codexRadarViewModel: codexRadarViewModel,
         onRefresh: { [weak self] in
             self?.viewModel.refreshAll()
         }
@@ -146,9 +155,77 @@ final class NotchOverlayController {
     private var detailTransition = DetailTransitionState()
     private var pendingDetailWorkItems: [DispatchWorkItem] = []
     private var latestDetailExpandedFrame: NSRect?
+    private var isTopShellAnimating = false
     private var systemActivityResumeTimer: Timer?
 
     private static let detailSettleDuration: TimeInterval = 0.12
+
+    private static func visualQASnapshot() -> UsageSnapshot {
+        func usage(
+            input: Int,
+            cached: Int,
+            output: Int,
+            reasoning: Int
+        ) -> TokenUsageSummary {
+            let breakdown = TokenUsageBreakdown(
+                inputTokens: input,
+                cachedInputTokens: cached,
+                outputTokens: output,
+                reasoningOutputTokens: reasoning,
+                totalTokens: input + output
+            )
+            var summary = TokenUsageSummary.zero
+            summary.add(breakdown, model: "gpt-5.6-sol")
+            return summary
+        }
+
+        let first = usage(input: 149_661, cached: 148_352, output: 943, reasoning: 512)
+        let second = usage(input: 294_400, cached: 281_600, output: 7_600, reasoning: 4_900)
+        let today = usage(input: 1_420_000, cached: 1_310_000, output: 68_000, reasoning: 39_000)
+        var week = today
+        week.add(usage(input: 4_800_000, cached: 4_300_000, output: 205_000, reasoning: 121_000))
+        var month = week
+        month.add(usage(input: 9_100_000, cached: 8_250_000, output: 430_000, reasoning: 245_000))
+        let now = Date()
+
+        return UsageSnapshot(
+            primaryPercent: 82,
+            secondaryPercent: 64,
+            primaryResetsAt: now.addingTimeInterval(2 * 60 * 60),
+            secondaryResetsAt: now.addingTimeInterval(3 * 24 * 60 * 60),
+            usage24h: today.totalTokens,
+            usage7d: week.totalTokens,
+            usage30d: month.totalTokens,
+            usageToday: today.totalTokens,
+            usage24hSummary: today,
+            usage7dSummary: week,
+            usage30dSummary: month,
+            usageTodaySummary: today,
+            tasks: [
+                CodexTask(
+                    id: "qa-task-1",
+                    title: "设计 Codex Token 花费估算",
+                    status: .running,
+                    detailPrefix: "gpt-5.6-sol · 超高推理",
+                    tokenCount: first.totalTokens,
+                    tokenUsage: first,
+                    updatedAt: now.addingTimeInterval(-2 * 60 * 60)
+                ),
+                CodexTask(
+                    id: "qa-task-2",
+                    title: "优化监测页面交互",
+                    status: .recent,
+                    detailPrefix: "gpt-5.6-sol · 高推理",
+                    tokenCount: second.totalTokens,
+                    tokenUsage: second,
+                    updatedAt: now.addingTimeInterval(-3 * 60 * 60)
+                )
+            ],
+            isRunning: true,
+            lastUpdated: now,
+            errorMessage: nil
+        )
+    }
 
     init() {
         window = NSPanel(
@@ -173,8 +250,13 @@ final class NotchOverlayController {
         synchronizeFramesForGeometryChange()
     }
 
-    func show() {
+    func show(expanded: Bool = false) {
         window.orderFrontRegardless()
+        if expanded {
+            DispatchQueue.main.async { [weak self] in
+                self?.overlayState.isExpanded = true
+            }
+        }
     }
 
     private func configureWindow() {
@@ -228,6 +310,7 @@ final class NotchOverlayController {
             remoteViewModel: remoteViewModel,
             newAPIViewModel: newAPIViewModel,
             subAPIViewModel: subAPIViewModel,
+            codexRadarViewModel: codexRadarViewModel,
             overlayState: overlayState,
             settings: settings,
             onSettings: { [weak self] in
@@ -244,6 +327,9 @@ final class NotchOverlayController {
             },
             onSubAPIRefresh: { [weak self] in
                 self?.subAPIViewModel.refreshNow()
+            },
+            onCodexRadarRefresh: { [weak self] in
+                self?.codexRadarViewModel.refreshNow()
             }
         )
         let detailHostingView = NSHostingView(rootView: detailView)
@@ -278,8 +364,8 @@ final class NotchOverlayController {
             .store(in: &cancellables)
 
         settings.$taskHistoryRange
-            .combineLatest(settings.$showPeriodUsage)
-            .sink { [weak self] _, showPeriodUsage in
+            .combineLatest(settings.$showPeriodUsage, settings.$showSparkQuota)
+            .sink { [weak self] _, showPeriodUsage, _ in
                 DispatchQueue.main.async {
                     guard let self else {
                         return
@@ -301,6 +387,15 @@ final class NotchOverlayController {
             .store(in: &cancellables)
 
         settings.$notchWidthAdjustment
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.synchronizeFramesForGeometryChange()
+                }
+            }
+            .store(in: &cancellables)
+
+        settings.$notchDisplaySize
             .removeDuplicates()
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
@@ -439,9 +534,18 @@ final class NotchOverlayController {
             return
         }
 
+        if !visible, detailTransition.phase == .hidden, !detailWindow.isVisible {
+            overlayState.setDetailPresentationPhase(.hidden)
+            updateFrames()
+            return
+        }
+
         let previousPhase = detailTransition.phase
         let generation = detailTransition.begin(expanded: visible)
         if visible {
+            if settings.codexRadarEnabled {
+                codexRadarViewModel.refreshIfNeeded()
+            }
             showDetail(on: screen, previousPhase: previousPhase, generation: generation)
         } else {
             hideDetail(on: screen, generation: generation)
@@ -453,23 +557,31 @@ final class NotchOverlayController {
         previousPhase: DetailPresentationPhase,
         generation: UInt
     ) {
+        let configuredDisplaySize = settings.notchDisplaySize
         let frames = detailFrames(for: screen)
         latestDetailExpandedFrame = frames.expanded
         if previousPhase == .hidden || !detailWindow.isVisible {
             updateDetailContentSize(for: frames.expanded)
         }
+        let detailWindowWasVisible = detailWindow.isVisible
+        let shouldDeferDetailReveal = NotchPresentationGeometry.shouldDeferDetailReveal(
+            configured: configuredDisplaySize,
+            detailWindowIsVisible: detailWindowWasVisible
+        )
         overlayState.setDetailPresentationPhase(.revealing)
-
-        if window.childWindows?.contains(detailWindow) != true {
-            window.addChildWindow(detailWindow, ordered: .below)
-        }
-        if previousPhase == .hidden || !detailWindow.isVisible {
+        let topShellFrame = islandFrame(for: screen)
+        if previousPhase == .hidden || !detailWindowWasVisible {
             detailWindow.setFrame(frames.collapsed, display: false)
         }
-        detailWindow.order(.below, relativeTo: window.windowNumber)
-        window.orderFrontRegardless()
+
+        if shouldDeferDetailReveal {
+            window.removeChildWindow(detailWindow)
+            detailWindow.orderOut(nil)
+        }
 
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            applyTopShellFrame(topShellFrame)
+            presentDetailWindow()
             detailWindow.setFrame(frames.expanded, display: true)
             guard detailTransition.completeShow(generation: generation) else {
                 return
@@ -479,38 +591,72 @@ final class NotchOverlayController {
             return
         }
 
-        scheduleDetailWork(after: DetailAnimationTiming.contentDelay, generation: generation) { [weak self] in
-            self?.overlayState.setDetailPresentationPhase(.visible)
+        let revealDetail: @MainActor @Sendable () -> Void = { [weak self] in
+            guard let self else {
+                return
+            }
+            self.presentDetailWindow()
+            self.scheduleDetailWork(
+                after: DetailAnimationTiming.contentDelay(for: configuredDisplaySize),
+                generation: generation
+            ) { [weak self] in
+                self?.overlayState.setDetailPresentationPhase(.visible)
+            }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = DetailAnimationTiming.revealDuration(for: configuredDisplaySize)
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                self.detailWindow.animator().setFrame(frames.expanded, display: true)
+            } completionHandler: { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.detailTransition.isCurrent(generation) else {
+                        return
+                    }
+                    self.settleDetailAfterReveal(
+                        generation: generation,
+                        currentTarget: frames.expanded
+                    )
+                }
+            }
         }
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = DetailAnimationTiming.revealDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            detailWindow.animator().setFrame(frames.expanded, display: true)
-        } completionHandler: { [weak self] in
-            Task { @MainActor in
-                guard let self, self.detailTransition.isCurrent(generation) else {
-                    return
-                }
-                self.settleDetailAfterReveal(
-                    generation: generation,
-                    currentTarget: frames.expanded
-                )
-            }
+        if shouldDeferDetailReveal {
+            updateTopShell(
+                to: topShellFrame,
+                animated: true,
+                duration: DetailAnimationTiming.shoulderExpandDuration,
+                timingFunction: CAMediaTimingFunction(name: .easeOut),
+                generation: generation,
+                completion: revealDetail
+            )
+        } else {
+            applyTopShellFrame(topShellFrame)
+            revealDetail()
         }
     }
 
     private func hideDetail(on screen: NSScreen, generation: UInt) {
+        let configuredDisplaySize = settings.notchDisplaySize
+        let collapsedTopShellFrame = islandFrame(for: screen, displaySize: configuredDisplaySize)
         overlayState.setDetailPresentationPhase(.hiding)
         let frames = detailFrames(for: screen)
         latestDetailExpandedFrame = frames.expanded
 
+        if !detailWindow.isVisible {
+            finishHidingDetail(
+                topShellFrame: collapsedTopShellFrame,
+                generation: generation,
+                animated: configuredDisplaySize == .narrow
+            )
+            return
+        }
+
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             detailWindow.setFrame(frames.collapsed, display: false)
-            guard detailTransition.completeHide(generation: generation) else {
-                return
-            }
-            finishHidingDetail()
+            finishHidingDetail(
+                topShellFrame: collapsedTopShellFrame,
+                generation: generation,
+                animated: false
+            )
             return
         }
 
@@ -519,15 +665,19 @@ final class NotchOverlayController {
                 return
             }
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = DetailAnimationTiming.hideDuration
+                context.duration = DetailAnimationTiming.hideDuration(for: configuredDisplaySize)
                 context.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 self.detailWindow.animator().setFrame(frames.collapsed, display: true)
             } completionHandler: { [weak self] in
                 Task { @MainActor in
-                    guard let self, self.detailTransition.completeHide(generation: generation) else {
+                    guard let self, self.detailTransition.isCurrent(generation) else {
                         return
                     }
-                    self.finishHidingDetail()
+                    self.finishHidingDetail(
+                        topShellFrame: collapsedTopShellFrame,
+                        generation: generation,
+                        animated: configuredDisplaySize == .narrow
+                    )
                 }
             }
         }
@@ -566,17 +716,94 @@ final class NotchOverlayController {
         }
     }
 
-    private func finishHidingDetail() {
-        overlayState.setDetailPresentationPhase(.hidden)
+    private func finishHidingDetail(
+        topShellFrame: NSRect,
+        generation: UInt,
+        animated: Bool
+    ) {
+        guard detailTransition.isCurrent(generation), detailTransition.phase == .hiding else {
+            return
+        }
         window.removeChildWindow(detailWindow)
         detailWindow.orderOut(nil)
-        updateFrames()
+        overlayState.setDetailPresentationPhase(.hidden)
+
+        let complete: @MainActor @Sendable () -> Void = { [weak self] in
+            guard let self,
+                  self.detailTransition.completeHide(generation: generation) else {
+                return
+            }
+            self.isTopShellAnimating = false
+            self.updateFrames()
+        }
+
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            applyTopShellFrame(topShellFrame)
+            complete()
+            return
+        }
+
+        updateTopShell(
+            to: topShellFrame,
+            animated: true,
+            duration: DetailAnimationTiming.shoulderCollapseDuration,
+            timingFunction: CAMediaTimingFunction(name: .easeIn),
+            generation: generation,
+            completion: complete
+        )
+    }
+
+    private func updateTopShell(
+        to frame: NSRect,
+        animated: Bool,
+        duration: TimeInterval,
+        timingFunction: CAMediaTimingFunction,
+        generation: UInt,
+        completion: (@MainActor @Sendable () -> Void)? = nil
+    ) {
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            isTopShellAnimating = false
+            window.setFrame(frame, display: true, animate: false)
+            window.contentView?.frame = NSRect(origin: .zero, size: frame.size)
+            completion?()
+            return
+        }
+
+        isTopShellAnimating = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            context.timingFunction = timingFunction
+            window.animator().setFrame(frame, display: true)
+        } completionHandler: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.detailTransition.isCurrent(generation) else {
+                    return
+                }
+                self.isTopShellAnimating = false
+                self.window.contentView?.frame = NSRect(origin: .zero, size: frame.size)
+                completion?()
+            }
+        }
+    }
+
+    private func applyTopShellFrame(_ frame: NSRect) {
+        isTopShellAnimating = false
+        window.setFrame(frame, display: true, animate: false)
+        window.contentView?.frame = NSRect(origin: .zero, size: frame.size)
+    }
+
+    private func presentDetailWindow() {
+        if window.childWindows?.contains(detailWindow) != true {
+            window.addChildWindow(detailWindow, ordered: .below)
+        }
+        detailWindow.order(.below, relativeTo: window.windowNumber)
+        window.orderFrontRegardless()
     }
 
     private func scheduleDetailWork(
         after delay: TimeInterval,
         generation: UInt,
-        action: @escaping @MainActor () -> Void
+        action: @escaping @MainActor @Sendable () -> Void
     ) {
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor in
@@ -613,14 +840,13 @@ final class NotchOverlayController {
             return
         }
 
-        let layout = currentIslandLayout(for: screen)
-        let x = screen.frame.midX - layout.width / 2
-        let islandY = screen.frame.maxY - layout.collapsedHeight
-        let islandFrame = NSRect(x: x, y: islandY, width: layout.width, height: layout.collapsedHeight)
-        let detailFrames = detailFrames(for: screen, layout: layout)
+        let islandFrame = islandFrame(for: screen)
+        let detailFrames = detailFrames(for: screen)
 
-        window.setFrame(islandFrame, display: true, animate: false)
-        window.contentView?.frame = NSRect(x: 0, y: 0, width: layout.width, height: layout.collapsedHeight)
+        if !isTopShellAnimating {
+            window.setFrame(islandFrame, display: true, animate: false)
+            window.contentView?.frame = NSRect(origin: .zero, size: islandFrame.size)
+        }
         latestDetailExpandedFrame = detailFrames.expanded
         switch detailTransition.phase {
         case .hidden:
@@ -640,8 +866,11 @@ final class NotchOverlayController {
         }
 
         cancelPendingDetailWorkItems()
+        isTopShellAnimating = false
+        let generation = detailTransition.begin(expanded: overlayState.isExpanded)
+        overlayState.setDetailPresentationPhase(overlayState.isExpanded ? .visible : .hidden)
         let layout = currentIslandLayout(for: screen)
-        let frames = detailFrames(for: screen, layout: layout)
+        let frames = detailFrames(for: screen)
         let islandFrame = NSRect(
             x: screen.frame.midX - layout.width / 2,
             y: screen.frame.maxY - layout.collapsedHeight,
@@ -654,7 +883,6 @@ final class NotchOverlayController {
         latestDetailExpandedFrame = frames.expanded
         updateDetailContentSize(for: frames.expanded)
 
-        let generation = detailTransition.begin(expanded: overlayState.isExpanded)
         if overlayState.isExpanded {
             if window.childWindows?.contains(detailWindow) != true {
                 window.addChildWindow(detailWindow, ordered: .below)
@@ -681,7 +909,7 @@ final class NotchOverlayController {
         for screen: NSScreen,
         layout: IslandLayout? = nil
     ) -> DetailWindowFrames {
-        let layout = layout ?? currentIslandLayout(for: screen)
+        let layout = layout ?? currentDetailIslandLayout(for: screen)
         let detailHeight = currentDetailHeight(for: screen, layout: layout)
         return DetailWindowFrameCalculator.calculate(
             screenFrame: screen.frame,
@@ -697,7 +925,46 @@ final class NotchOverlayController {
     }
 
     private func currentIslandLayout(for screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first) -> IslandLayout {
-        ScreenNotchGeometry.layout(for: screen, adjustment: CGFloat(settings.notchWidthAdjustment))
+        ScreenNotchGeometry.layout(
+            for: screen,
+            adjustment: CGFloat(settings.notchWidthAdjustment),
+            displaySize: NotchPresentationGeometry.displaySize(
+                configured: settings.notchDisplaySize,
+                phase: overlayState.detailPresentationPhase
+            )
+        )
+    }
+
+    private func islandFrame(for screen: NSScreen) -> NSRect {
+        let layout = currentIslandLayout(for: screen)
+        return NSRect(
+            x: screen.frame.midX - layout.width / 2,
+            y: screen.frame.maxY - layout.collapsedHeight,
+            width: layout.width,
+            height: layout.collapsedHeight
+        )
+    }
+
+    private func islandFrame(for screen: NSScreen, displaySize: NotchDisplaySize) -> NSRect {
+        let layout = ScreenNotchGeometry.layout(
+            for: screen,
+            adjustment: CGFloat(settings.notchWidthAdjustment),
+            displaySize: displaySize
+        )
+        return NSRect(
+            x: screen.frame.midX - layout.width / 2,
+            y: screen.frame.maxY - layout.collapsedHeight,
+            width: layout.width,
+            height: layout.collapsedHeight
+        )
+    }
+
+    private func currentDetailIslandLayout(for screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first) -> IslandLayout {
+        ScreenNotchGeometry.layout(
+            for: screen,
+            adjustment: CGFloat(settings.notchWidthAdjustment),
+            displaySize: .standard
+        )
     }
 
     private func showSettings() {
@@ -724,7 +991,7 @@ final class NotchOverlayController {
         for screen: NSScreen? = NSScreen.main ?? NSScreen.screens.first,
         layout: IslandLayout? = nil
     ) -> CGFloat {
-        let layout = layout ?? currentIslandLayout(for: screen)
+        let layout = layout ?? currentDetailIslandLayout(for: screen)
         let safeAreaTop = ScreenNotchGeometry.topSafeInset(for: screen)
         let topPadding = IslandMetrics.detailContentTopPadding(
             safeAreaTop: safeAreaTop,
@@ -741,6 +1008,7 @@ final class NotchOverlayController {
         return IslandMetrics.combinedDetailHeight(
             accountRows: accountRows,
             showsPeriodUsage: settings.showPeriodUsage,
+            showsSparkQuota: settings.showSparkQuota,
             usesTallRemoteRows: usesTallRemoteRows,
             topPadding: topPadding
         )
@@ -753,6 +1021,7 @@ final class SettingsWindowController {
     private let remoteViewModel: RemoteMonitorViewModel
     private let newAPIViewModel: BalanceMonitorViewModel
     private let subAPIViewModel: BalanceMonitorViewModel
+    private let codexRadarViewModel: CodexRadarViewModel
     private let onRefresh: () -> Void
     private var window: NSWindow?
 
@@ -761,12 +1030,14 @@ final class SettingsWindowController {
         remoteViewModel: RemoteMonitorViewModel,
         newAPIViewModel: BalanceMonitorViewModel,
         subAPIViewModel: BalanceMonitorViewModel,
+        codexRadarViewModel: CodexRadarViewModel,
         onRefresh: @escaping () -> Void
     ) {
         self.settings = settings
         self.remoteViewModel = remoteViewModel
         self.newAPIViewModel = newAPIViewModel
         self.subAPIViewModel = subAPIViewModel
+        self.codexRadarViewModel = codexRadarViewModel
         self.onRefresh = onRefresh
     }
 
@@ -784,6 +1055,7 @@ final class SettingsWindowController {
             remoteViewModel: remoteViewModel,
             newAPIViewModel: newAPIViewModel,
             subAPIViewModel: subAPIViewModel,
+            codexRadarViewModel: codexRadarViewModel,
             onRefresh: onRefresh
         )
         let hostingView = NSHostingView(rootView: view)

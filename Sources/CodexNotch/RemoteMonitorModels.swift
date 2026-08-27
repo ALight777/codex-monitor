@@ -169,11 +169,11 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
     }
 
     var displayQuotaWindows: [RemoteQuotaWindow] {
-        quotaWindows.primaryDisplayWindows
+        quotaWindows.primaryDisplayWindows(for: planType)
     }
 
     var alertQuotaWindows: [RemoteQuotaWindow] {
-        quotaWindows.accountAlertWindows
+        quotaWindows.accountAlertWindows(for: planType)
     }
 
     var stateReasonText: String {
@@ -241,12 +241,16 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
         }
     }
 
-    func stateAfterMergingFreshQuota(windows: [RemoteQuotaWindow], error: String?) -> RemoteAccountState {
+    func stateAfterMergingFreshQuota(
+        windows: [RemoteQuotaWindow],
+        error: String?,
+        planType: String? = nil
+    ) -> RemoteAccountState {
         if error?.isRemoteAuthFailure == true {
             return .abnormal
         }
 
-        if windows.accountAlertWindows.contains(where: { $0.reachesThreshold }) {
+        if windows.accountAlertWindows(for: planType ?? self.planType).contains(where: { $0.reachesThreshold }) {
             return .quotaExhausted
         }
 
@@ -286,7 +290,11 @@ struct RemoteCodexAccount: Identifiable, Equatable, Sendable {
             successCount: successCount,
             failureCount: failureCount,
             recentFailures: recentFailures,
-            state: stateAfterMergingFreshQuota(windows: previous.quotaWindows, error: previous.quotaError),
+            state: stateAfterMergingFreshQuota(
+                windows: previous.quotaWindows,
+                error: previous.quotaError,
+                planType: planType ?? previous.planType
+            ),
             lastRefresh: lastRefresh,
             planType: planType ?? previous.planType,
             quotaWindows: previous.quotaWindows,
@@ -652,8 +660,8 @@ extension Array where Element == RemoteQuotaWindow {
         }
     }
 
-    var primaryDisplayWindows: [RemoteQuotaWindow] {
-        authoritativePrimaryWindows
+    func primaryDisplayWindows(for planType: String?) -> [RemoteQuotaWindow] {
+        filterPrimaryWindowsForPlan(authoritativePrimaryWindows, planType: planType)
     }
 
     private var authoritativePrimaryWindows: [RemoteQuotaWindow] {
@@ -670,11 +678,21 @@ extension Array where Element == RemoteQuotaWindow {
         }
     }
 
-    var accountAlertWindows: [RemoteQuotaWindow] {
+    func accountAlertWindows(for planType: String?) -> [RemoteQuotaWindow] {
         let nonPrimaryWindows = sortedForSummary.filter {
             $0.primaryDisplayKind == nil && $0.isAccountAlertWindow
         }
-        return authoritativePrimaryWindows + nonPrimaryWindows
+        return filterPrimaryWindowsForPlan(authoritativePrimaryWindows, planType: planType) + nonPrimaryWindows
+    }
+
+    private func filterPrimaryWindowsForPlan(
+        _ windows: [RemoteQuotaWindow],
+        planType: String?
+    ) -> [RemoteQuotaWindow] {
+        guard !CodexPlanKind(planType: planType).showsFiveHourQuota else {
+            return windows
+        }
+        return windows.filter { $0.primaryDisplayKind != .fiveHour }
     }
 }
 

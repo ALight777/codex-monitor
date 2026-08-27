@@ -68,6 +68,58 @@ runner.check(
     "rapid show-hide-show should end visible"
 )
 
+runner.check(
+    NotchPresentationGeometry.displaySize(configured: .narrow, phase: .hidden) == .narrow,
+    "narrow notch should stay narrow only while detail is hidden"
+)
+for phase in [DetailPresentationPhase.revealing, .visible, .hiding] {
+    runner.check(
+        NotchPresentationGeometry.displaySize(configured: .narrow, phase: phase) == .standard,
+        "narrow notch should use standard geometry while detail is presented"
+    )
+}
+for phase in [DetailPresentationPhase.hidden, .revealing, .visible, .hiding] {
+    runner.check(
+        NotchPresentationGeometry.displaySize(configured: .standard, phase: phase) == .standard,
+        "standard notch geometry should not change across detail phases"
+    )
+}
+runner.check(
+    DetailAnimationTiming.shoulderExpandDuration == 0.12,
+    "narrow notch shoulder expansion should finish at 120 ms"
+)
+runner.check(
+    NotchPresentationGeometry.shouldDeferDetailReveal(
+        configured: .narrow,
+        detailWindowIsVisible: false
+    ),
+    "hidden standard-width detail window should wait for narrow shoulder expansion"
+)
+runner.check(
+    !NotchPresentationGeometry.shouldDeferDetailReveal(
+        configured: .narrow,
+        detailWindowIsVisible: true
+    ),
+    "visible detail window should support an immediate reverse transition"
+)
+runner.check(
+    !NotchPresentationGeometry.shouldDeferDetailReveal(
+        configured: .standard,
+        detailWindowIsVisible: false
+    ),
+    "standard notch should reveal detail without an unnecessary lead-in"
+)
+runner.check(
+    DetailAnimationTiming.shoulderExpandDuration
+        + DetailAnimationTiming.revealDuration(for: .narrow) == 0.30,
+    "serial narrow reveal should finish within 300 ms"
+)
+runner.check(
+    DetailAnimationTiming.hideShellDelay
+        + DetailAnimationTiming.hideDuration(for: .narrow)
+        + DetailAnimationTiming.shoulderCollapseDuration <= 0.300_001,
+    "narrow detail close should finish within 300 ms"
+)
 let detailFrames = DetailWindowFrameCalculator.calculate(
     screenFrame: CGRect(x: 100, y: 50, width: 1_440, height: 900),
     layoutWidth: 720,
@@ -412,6 +464,10 @@ let snapshotFormatterSnapshot = UsageSnapshot(
     usage24h: 111,
     usage7d: 222,
     usage30d: 333,
+    usageToday: 99,
+    sparkQuotaWindows: [
+        UsageQuotaWindow(id: "spark-primary", shortLabel: "5h", remainingPercent: 77, resetsAt: Date(timeIntervalSince1970: 4_200))
+    ],
     tasks: [snapshotFormatterTask],
     isRunning: true,
     lastUpdated: Date(timeIntervalSince1970: 0),
@@ -443,6 +499,9 @@ runner.check(
     jsonResetCredits?["expires_at"] as? [Int64] == [4_000, 4_100],
     "JSON snapshot output should expose sorted reset-credit expiry epoch seconds"
 )
+runner.check(jsonSnapshot?["usage_today"] as? Int == 99, "JSON snapshot output should expose local-calendar today usage")
+let jsonSparkWindows = jsonSnapshot?["spark_quota_windows"] as? [[String: Any]]
+runner.check(jsonSparkWindows?.first?["remaining_percent"] as? Int == 77, "JSON snapshot output should expose Spark quota windows")
 let snapshotWithoutResetCredits = UsageSnapshot(
     primaryPercent: nil,
     secondaryPercent: nil,
@@ -636,6 +695,24 @@ runner.check(
     parsedAppServerRateLimits?.resetCredits?.credits.map(\.id) == ["earlier", "later"],
     "app-server parsing should use the shared reset-credit decoder and expiry ordering"
 )
+let appServerSparkOutput = #"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":12,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":34,"resetsAt":1786557546,"windowDurationMins":10080}},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":12,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":34,"resetsAt":1786557546,"windowDurationMins":10080}},"spark":{"limitId":"codex-spark","limitName":"GPT-5.3-Codex-Spark","primary":{"usedPercent":30,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":40,"resetsAt":1786557546,"windowDurationMins":10080}}}}}"#
+let parsedAppServerSpark = appServerParserStore.parseAppServerRateLimits(output: appServerSparkOutput, now: appServerParserNow)
+runner.check(
+    parsedAppServerSpark?.displaySparkWindows(now: appServerParserNow).map(\.remainingPercent) == [70, 60],
+    "app-server parsing should expose GPT-5.3-Codex-Spark quota separately"
+)
+let appServerPlusOutput = #"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","planType":"plus","primary":{"usedPercent":12,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":34,"resetsAt":1786557546,"windowDurationMins":10080}}}}"#
+let parsedAppServerPlus = appServerParserStore.parseAppServerRateLimits(output: appServerPlusOutput, now: appServerParserNow)
+runner.check(
+    parsedAppServerPlus?.displayWindows(now: appServerParserNow).map(\.shortLabel) == ["5h", "7d"],
+    "Plus subscriptions should display both 5h and 7d Codex quota windows"
+)
+let appServerProOutput = #"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","planType":"pro","primary":{"usedPercent":12,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":34,"resetsAt":1786557546,"windowDurationMins":10080}}}}"#
+let parsedAppServerPro = appServerParserStore.parseAppServerRateLimits(output: appServerProOutput, now: appServerParserNow)
+runner.check(
+    parsedAppServerPro?.displayWindows(now: appServerParserNow).map(\.shortLabel) == ["7d"],
+    "Pro subscriptions should hide the 5h Codex quota window even if upstream returns it"
+)
 var fixedCalendar = Calendar(identifier: .gregorian)
 fixedCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
 let formatterNow = fixedCalendar.date(from: DateComponents(year: 2030, month: 1, day: 1, hour: 23, minute: 0))!
@@ -663,6 +740,24 @@ runner.check(
 runner.check(
     ScreenNotchGeometry.inferredNotchWidth(leftArea: .zero, rightArea: .zero, fallback: IslandMetrics.notchWidth) == IslandMetrics.notchWidth,
     "notch width inference should fall back when auxiliary areas are unavailable"
+)
+let standardNotchLayout = ScreenNotchGeometry.layout(
+    leftArea: CGRect(x: 0, y: 1291, width: 918, height: 38),
+    rightArea: CGRect(x: 1138, y: 1291, width: 918, height: 38),
+    safeAreaTop: 38,
+    displaySize: .standard
+)
+let narrowNotchLayout = ScreenNotchGeometry.layout(
+    leftArea: CGRect(x: 0, y: 1291, width: 918, height: 38),
+    rightArea: CGRect(x: 1138, y: 1291, width: 918, height: 38),
+    safeAreaTop: 38,
+    displaySize: .narrow
+)
+runner.check(narrowNotchLayout.notchWidth == standardNotchLayout.notchWidth, "narrow mode should preserve the physical notch mask width")
+runner.check(narrowNotchLayout.shoulderWidth == IslandMetrics.narrowShoulderWidth, "narrow mode should use compact equal-width shoulders")
+runner.check(
+    narrowNotchLayout.width == standardNotchLayout.width - 2 * (IslandMetrics.shoulderWidth - IslandMetrics.narrowShoulderWidth),
+    "narrow mode should only compress the two visible shoulders"
 )
 runner.check(
     IslandMetrics.detailObscuredTopHeight(safeAreaTop: 38) == 18,
@@ -770,7 +865,8 @@ func remoteAccount(
     state: RemoteAccountState,
     quotaWindows: [RemoteQuotaWindow] = [],
     quotaError: String? = nil,
-    unavailable: Bool = false
+    unavailable: Bool = false,
+    planType: String = "plus"
 ) -> RemoteCodexAccount {
     RemoteCodexAccount(
         id: id,
@@ -788,7 +884,7 @@ func remoteAccount(
         recentFailures: state == .abnormal ? 1 : 0,
         state: state,
         lastRefresh: nil,
-        planType: "plus",
+        planType: planType,
         quotaWindows: quotaWindows,
         quotaError: quotaError,
         unavailable: unavailable
@@ -1512,10 +1608,22 @@ let proQuotaAccount = remoteAccount(
         RemoteQuotaWindow(id: "pro-5x", shortLabel: "Pro 5x", remainingPercent: 80, usedPercent: 20, resetText: nil),
         RemoteQuotaWindow(id: "spark-5h", shortLabel: "GPT-5.3-Codex-Spark 5h", remainingPercent: 100, usedPercent: 0, resetText: nil),
         RemoteQuotaWindow(id: "spark-7d", shortLabel: "GPT-5.3-Codex-Spark 7d", remainingPercent: 100, usedPercent: 0, resetText: nil)
-    ]
+    ],
+    planType: "pro"
 )
-runner.check(proQuotaAccount.displayQuotaWindows.map(\.shortLabel) == ["5h", "7d"], "CLIProxyAPI Pro account detail should only display bare 5h and 7d quota windows")
-runner.check(proQuotaAccount.quotaSummaryText == "5h 98%  7d 60%", "CLIProxyAPI Pro account quota summary should hide extra Pro quota windows")
+runner.check(proQuotaAccount.displayQuotaWindows.map(\.shortLabel) == ["7d"], "CLIProxyAPI Pro account detail should hide the 5h quota window")
+runner.check(proQuotaAccount.quotaSummaryText == "7d 60%", "CLIProxyAPI Pro account quota summary should only display the weekly window")
+let proShortWindowExhausted = remoteAccount(
+    id: "pro-short-window-exhausted",
+    state: .healthy,
+    quotaWindows: [
+        exhaustedFiveHourWindow,
+        RemoteQuotaWindow(id: "weekly-healthy", shortLabel: "7d", remainingPercent: 60, usedPercent: 40, resetText: nil)
+    ],
+    planType: "pro"
+).withQuotaExhaustion
+runner.check(proShortWindowExhausted.state == .healthy, "hidden Pro 5h windows should not trigger quota-exhausted alerts")
+runner.check(proShortWindowExhausted.alertQuotaWindows.map(\.shortLabel) == ["7d"], "Pro alerts should only evaluate the weekly window")
 let duplicateAliasQuotaAccount = remoteAccount(
     id: "duplicate-primary-aliases",
     state: .healthy,
@@ -1739,7 +1847,9 @@ runner.check(settings.remoteAccountSources.count == 1, "legacy remote settings s
 runner.check(settings.remoteAccountSources.first?.source == .cliProxyAPI, "legacy remote source type should be preserved")
 runner.check(settings.remoteAccountSources.first?.secret == "legacy-remote-secret", "legacy remote secret should migrate into the source")
 runner.check(settings.notchDisplaySource == .codex, "collapsed notch display should default to local Codex")
+runner.check(settings.notchDisplaySize == .standard, "collapsed notch display size should default to standard")
 settings.notchDisplaySource = .remoteCodex
+settings.notchDisplaySize = .narrow
 settings.notchWidthAdjustment = 8
 settings.newAPIMonitorEnabled = true
 settings.newAPIPanelURL = "https://newapi.example.com"
@@ -1760,6 +1870,7 @@ let reloadedSettings = CodexNotchSettings(
 runner.check(reloadedSettings.remoteAccountSources.count == 1, "migrated remote source list should persist")
 runner.check(reloadedSettings.remoteAccountSources.first?.source == .cliProxyAPI, "migrated remote source type should persist")
 runner.check(reloadedSettings.notchDisplaySource == .remoteCodex, "collapsed notch display source should persist")
+runner.check(reloadedSettings.notchDisplaySize == .narrow, "collapsed notch display size should persist")
 runner.check(reloadedSettings.notchWidthAdjustment == 8, "manual notch width adjustment should persist")
 reloadedSettings.notchWidthAdjustment = 200
 runner.check(reloadedSettings.notchWidthAdjustment == 40, "manual notch width adjustment should clamp high values")
@@ -2839,7 +2950,7 @@ let healthyInspection = runner.require(
 )
 runner.check(healthyInspection.state == .healthy, "action keep with status 200 and non-quota inspection should be healthy even if raw status is error")
 runner.check(healthyInspection.planLabel == "Pro 20x", "server inspection merge should preserve auth-file plan type")
-runner.check(healthyInspection.quotaSummaryText == "5h 99%  7d 33%", "server inspection quota windows should display 5h and weekly remaining quota")
+runner.check(healthyInspection.quotaSummaryText == "7d 33%", "server inspection Pro quota should hide the 5h window")
 let limitedInspection = runner.require(
     inspectionAccounts.first { $0.authIndex == "auth-limited" },
     "server inspection should include the limited account"
@@ -2949,10 +3060,11 @@ runner.check(currentWhamQuota.windows[1].remainingPercent == 62, "current wham w
 let currentWhamAccount = remoteAccount(
     id: "current-wham",
     state: .healthy,
-    quotaWindows: currentWhamQuota.windows
+    quotaWindows: currentWhamQuota.windows,
+    planType: currentWhamQuota.planType ?? ""
 ).withQuotaExhaustion
-runner.check(currentWhamAccount.displayQuotaWindows.map(\.shortLabel) == ["5h", "7d"], "decoded additional model quotas should be hidden from CLIProxyAPI detail")
-runner.check(currentWhamAccount.quotaSummaryText == "5h 79%  7d 62%", "decoded quota summary should only include bare 5h and 7d windows")
+runner.check(currentWhamAccount.displayQuotaWindows.map(\.shortLabel) == ["7d"], "decoded Pro quota should hide both 5h and additional model windows")
+runner.check(currentWhamAccount.quotaSummaryText == "7d 62%", "decoded Pro quota summary should only include the weekly window")
 runner.check(currentWhamAccount.state == .healthy, "hidden decoded model quota should not mark the account as quota exhausted")
 
 let proxyStringBodyPayload = """
@@ -3430,7 +3542,7 @@ let rolloutBody = """
 {"timestamp":"\(timestamp)","type":"turn_context","payload":{"model":"gpt-5.5","effort":"xhigh","collaboration_mode":{"settings":{"reasoning_effort":"xhigh"}}}}
 {"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"正在运行的 Codex 任务"}]}}
 {"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":90000}}}}
-{"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":12345}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":12,"resets_at":\(primaryResetAt)},"secondary":{"used_percent":34,"resets_at":\(secondaryResetAt)}}}}
+{"timestamp":"\(timestamp)","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":12345}},"rate_limits":{"limit_id":"codex","plan_type":"plus","primary":{"used_percent":12,"resets_at":\(primaryResetAt)},"secondary":{"used_percent":34,"resets_at":\(secondaryResetAt)}}}}
 """
 try rolloutBody.write(to: rolloutPath, atomically: true, encoding: .utf8)
 try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: rolloutPath.path)
@@ -3666,9 +3778,10 @@ runner.check(localSnapshot.primaryPercent == 88, "local snapshot should expose t
 runner.check(localSnapshot.secondaryPercent == 66, "local snapshot should expose the latest Codex 7d remaining quota")
 runner.check(localSnapshot.primaryResetsAt == Date(timeIntervalSince1970: TimeInterval(primaryResetAt)), "local snapshot should expose the 5h reset time")
 runner.check(localSnapshot.secondaryResetsAt == Date(timeIntervalSince1970: TimeInterval(secondaryResetAt)), "local snapshot should expose the 7d reset time")
+runner.check(localSnapshot.displayRateLimitWindows.map(\.shortLabel) == ["5h", "7d"], "local Plus quota events should display both 5h and 7d windows")
 
 let updatedRateLimitTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(1))
-let updatedRateLimitLine = "\n" + #"{"timestamp":"\#(updatedRateLimitTimestamp)","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":22,"resets_at":\#(primaryResetAt)},"secondary":{"used_percent":45,"resets_at":\#(secondaryResetAt)}}}}"# + "\n"
+let updatedRateLimitLine = "\n" + #"{"timestamp":"\#(updatedRateLimitTimestamp)","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","plan_type":"pro","primary":{"used_percent":22,"resets_at":\#(primaryResetAt)},"secondary":{"used_percent":45,"resets_at":\#(secondaryResetAt)}}}}"# + "\n"
 if let handle = try? FileHandle(forWritingTo: rolloutPath) {
     try handle.seekToEnd()
     try handle.write(contentsOf: Data(updatedRateLimitLine.utf8))
@@ -3687,6 +3800,7 @@ let updatedRateLimitSnapshot = localStore.loadSnapshot(
 )
 runner.check(updatedRateLimitSnapshot.primaryPercent == 78, "rate-limit file cache should refresh after an appended 5h update")
 runner.check(updatedRateLimitSnapshot.secondaryPercent == 55, "rate-limit file cache should refresh after an appended 7d update")
+runner.check(updatedRateLimitSnapshot.displayRateLimitWindows.map(\.shortLabel) == ["7d"], "local Pro quota events should hide the 5h window")
 
 if let handle = try? FileHandle(forWritingTo: rolloutPath) {
     try handle.seekToEnd()
@@ -3992,7 +4106,7 @@ _ = try Shell.run("/usr/bin/sqlite3", [
 let largeUsageStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [fakeRipgrepPath])
 runner.check(largeUsageStore.loadUsageTotals(now: now)?.day == 1, "large rollout usage totals should use exact token events when fast search is available")
 let largeUsageFallbackStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [])
-runner.check(largeUsageFallbackStore.loadUsageTotals(now: now)?.day == 777777, "large rollout usage totals should fall back to database tokens when fast search is unavailable")
+runner.check(largeUsageFallbackStore.loadUsageTotals(now: now)?.day == 1, "large rollout usage totals should scan recent token events instead of attributing the whole database total to today when fast search is unavailable")
 
 let tokenCacheRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchTokenCache-\(UUID().uuidString)")

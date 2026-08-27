@@ -45,6 +45,7 @@ private enum RefreshPreset: String, CaseIterable, Identifiable {
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case codex
+    case codexRadar
     case remoteCodex
     case newAPI
     case subAPI
@@ -57,6 +58,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "Codex"
+        case .codexRadar:
+            "CodexRadar"
         case .remoteCodex:
             "远程账号"
         case .newAPI:
@@ -74,6 +77,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "circle.grid.2x2.fill"
+        case .codexRadar:
+            "waveform.path.ecg"
         case .remoteCodex:
             "network"
         case .newAPI:
@@ -118,8 +123,12 @@ private struct SettingsDraft: Equatable {
     var fileChangeRefreshMinimumGap: TimeInterval = 3
     var rateLimitSource: RateLimitSourcePreference = .appServerFirst
     var showPeriodUsage = true
+    var showSparkQuota = false
+    var codexRadarEnabled = false
+    var codexRadarAPIToken = ""
     var taskHistoryRange: TaskHistoryRange = .threeDays
     var notchDisplaySource: NotchDisplaySource = .codex
+    var notchDisplaySize: NotchDisplaySize = .standard
     var notchWidthAdjustment: NotchPointAdjustment = 0
     var remoteMonitorEnabled = false
     var remoteAccountSources: [RemoteAccountSourceConfiguration] = []
@@ -155,8 +164,12 @@ private struct SettingsDraft: Equatable {
         fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
         rateLimitSource = settings.rateLimitSource
         showPeriodUsage = settings.showPeriodUsage
+        showSparkQuota = settings.showSparkQuota
+        codexRadarEnabled = settings.codexRadarEnabled
+        codexRadarAPIToken = settings.codexRadarAPIToken
         taskHistoryRange = settings.taskHistoryRange
         notchDisplaySource = settings.notchDisplaySource
+        notchDisplaySize = settings.notchDisplaySize
         notchWidthAdjustment = settings.notchWidthAdjustment
         remoteMonitorEnabled = settings.remoteMonitorEnabled
         remoteAccountSources = settings.remoteAccountSources
@@ -205,6 +218,7 @@ struct SettingsView: View {
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
     @ObservedObject var subAPIViewModel: BalanceMonitorViewModel
+    @ObservedObject var codexRadarViewModel: CodexRadarViewModel
     let onRefresh: () -> Void
 
     @State private var draft = SettingsDraft()
@@ -385,6 +399,8 @@ struct SettingsView: View {
         switch selectedTab {
         case .codex:
             codexSettingsContent
+        case .codexRadar:
+            codexRadarSettingsContent
         case .remoteCodex:
             remoteCodexSettingsContent
         case .newAPI:
@@ -426,7 +442,7 @@ struct SettingsView: View {
             presetControls
             intervalStepper("运行中", value: $draft.activeRefreshInterval, range: 2...30, help: "检测到 Codex 正在执行任务时的状态刷新间隔。数值越小越实时，功耗也越高。")
             intervalStepper("空闲", value: $draft.idleRefreshInterval, range: 4...120, help: "Codex 没有运行中任务时的状态刷新间隔。")
-            intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 120...1_800, help: "统计 Codex 24小时、7天、30天 token 用量的刷新间隔。会话文件较大时会自动延长下一次刷新，以降低功耗。")
+            intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 120...1_800, help: "统计 Codex 今日、7天、30天 token 用量的刷新间隔；今日按电脑当前时区的 00:00 开始计算。会话文件较大时会自动延长下一次刷新，以降低功耗。")
             intervalStepper("文件监听", value: $draft.watcherRefreshInterval, range: 8...120, help: "扫描 Codex 会话文件变化的保底间隔，用于补偿文件事件丢失。")
             intervalStepper("补刷合并", value: $draft.fileChangeRefreshMinimumGap, range: 1...30, help: "文件持续变化时的最长合并等待时间；静默 1 秒后会立即刷新。")
         }
@@ -442,7 +458,10 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
 
             Toggle(isOn: $draft.showPeriodUsage) {
-                HelpLabel(title: "显示 24小时 / 7天 / 30天", help: "控制详情页底部是否显示 Codex 三个时间窗口的 token 用量。")
+                HelpLabel(title: "显示 今日 / 7天 / 30天", help: "今日按电脑当前时区的自然日统计；7天和30天继续使用滚动时间窗口。")
+            }
+            Toggle(isOn: $draft.showSparkQuota) {
+                HelpLabel(title: "显示 GPT-5.3-Codex-Spark 额度", help: "在 Codex 详情页显示本机额度数据中已有的 Spark 5小时和7天窗口，不增加额外刷新请求。")
             }
             Picker(selection: $draft.taskHistoryRange) {
                 ForEach(TaskHistoryRange.allCases) { range in
@@ -452,6 +471,61 @@ struct SettingsView: View {
                 HelpLabel(title: "任务范围", help: "决定 Codex 详情页任务列表读取最近多长时间内的对话。列表会在详情页中滚动显示。")
             }
             .pickerStyle(.segmented)
+        }
+    }
+
+    @ViewBuilder
+    private var codexRadarSettingsContent: some View {
+        Section("CodexRadar") {
+            Toggle(isOn: $draft.codexRadarEnabled) {
+                HelpLabel(title: "启用 CodexRadar", help: "在展开页新增 CodexRadar 标签，展示模型评分、额度雷达和状态摘要。")
+            }
+
+            Text("每天北京时间 08:20、14:20 自动更新；手动刷新间隔为 5 分钟。没有 Token 时读取公开摘要。")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            labeledSecureField(
+                "API Token",
+                text: $draft.codexRadarAPIToken,
+                placeholder: "留空时读取公开摘要",
+                help: "Token 使用当前密钥存储模式保存；默认进入 macOS 钥匙串，不写入 UserDefaults 或缓存文件。"
+            )
+            .disabled(!draft.codexRadarEnabled)
+
+            if let error = settings.codexRadarTokenError {
+                Text("Token 保存失败：\(error)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.red)
+            }
+
+            HStack {
+                Text(codexRadarStatusText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("刷新 Radar") {
+                    codexRadarViewModel.refreshNow()
+                }
+                .disabled(!settings.codexRadarEnabled || draft.codexRadarEnabled != settings.codexRadarEnabled || codexRadarViewModel.isRefreshing)
+            }
+        }
+
+        Section("数据来源") {
+            Text(CodexRadarSnapshot.attribution)
+                .font(.system(size: 12, weight: .semibold))
+            Link("打开 codexradar.com", destination: CodexRadarSnapshot.siteURL)
+        }
+    }
+
+    private var codexRadarStatusText: String {
+        switch codexRadarViewModel.snapshot.state {
+        case .disabled: "未启用"
+        case .loading: "读取中"
+        case .ready: "已更新 · \(codexRadarViewModel.snapshot.dataSource.label)"
+        case .stale: "缓存数据"
+        case .error: "读取失败"
         }
     }
 
@@ -486,6 +560,15 @@ struct SettingsView: View {
     @ViewBuilder
     private var launchAndAppearanceContent: some View {
         Section("刘海显示") {
+            Picker(selection: $draft.notchDisplaySize) {
+                ForEach(NotchDisplaySize.allCases) { size in
+                    Text(size.label).tag(size)
+                }
+            } label: {
+                HelpLabel(title: "显示大小", help: "标准模式显示状态名称和额度标签；窄刘海模式左侧只保留状态灯，右侧只显示额度数字。展开详情始终保持标准宽度。")
+            }
+            .pickerStyle(.segmented)
+
             Picker(selection: $draft.notchDisplaySource) {
                 ForEach(NotchDisplaySource.allCases) { source in
                     Text(source.label).tag(source)
@@ -1611,6 +1694,9 @@ struct SettingsView: View {
         if !next.subAPIMonitorEnabled {
             settings.subAPIMonitorEnabled = false
         }
+        if !next.codexRadarEnabled {
+            settings.codexRadarEnabled = false
+        }
 
         settings.activeRefreshInterval = next.activeRefreshInterval
         settings.idleRefreshInterval = next.idleRefreshInterval
@@ -1619,8 +1705,14 @@ struct SettingsView: View {
         settings.fileChangeRefreshMinimumGap = next.fileChangeRefreshMinimumGap
         settings.rateLimitSource = next.rateLimitSource
         settings.showPeriodUsage = next.showPeriodUsage
+        settings.showSparkQuota = next.showSparkQuota
+        settings.codexRadarAPIToken = next.codexRadarAPIToken
+        if next.codexRadarEnabled {
+            settings.codexRadarEnabled = true
+        }
         settings.taskHistoryRange = next.taskHistoryRange
         settings.notchDisplaySource = next.notchDisplaySource
+        settings.notchDisplaySize = next.notchDisplaySize
         settings.notchWidthAdjustment = next.notchWidthAdjustment
 
         settings.cliproxyRefreshInterval = next.cliproxyRefreshInterval
@@ -1693,6 +1785,8 @@ struct SettingsView: View {
         switch selectedTab {
         case .codex, .launch, .about:
             onRefresh()
+        case .codexRadar:
+            codexRadarViewModel.refreshNow()
         case .remoteCodex:
             remoteViewModel.refreshNow()
         case .newAPI:

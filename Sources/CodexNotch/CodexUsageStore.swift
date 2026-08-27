@@ -3,6 +3,8 @@ import Darwin
 
 private enum UsageScanPolicy {
     static let ripgrepCandidates = [
+        "/Applications/Codex.app/Contents/Resources/rg",
+        "/Applications/ChatGPT.app/Contents/Resources/rg",
         "/opt/homebrew/bin/rg",
         "/usr/local/bin/rg",
         "/usr/bin/rg"
@@ -199,6 +201,7 @@ final class CodexUsageStore: @unchecked Sendable {
                 usage7dSummary: usage.weekSummary,
                 usage30dSummary: usage.monthSummary,
                 usageTodaySummary: usage.todaySummary,
+                sparkQuotaWindows: rateLimits.displaySparkWindows(now: now),
                 tasks: tasks,
                 isRunning: tasks.contains { $0.status == .running },
                 lastUpdated: now,
@@ -304,6 +307,7 @@ final class CodexUsageStore: @unchecked Sendable {
             usage7dSummary: usage.weekSummary,
             usage30dSummary: usage.monthSummary,
             usageTodaySummary: usage.todaySummary,
+            sparkQuotaWindows: cache.rateLimits.displaySparkWindows(now: now),
             tasks: tasks,
             isRunning: tasks.contains { $0.status == .running },
             lastUpdated: now,
@@ -2283,15 +2287,25 @@ final class CodexUsageStore: @unchecked Sendable {
         let snapshots = paths
             .filter { !$0.isEmpty && FileManager.default.fileExists(atPath: $0) }
             .compactMap { readRateLimitSnapshot(from: $0) }
+        let sparkWindows = mergedSparkQuotaWindows(from: snapshots)
 
         if let codexSnapshot = snapshots
             .filter(\.isPrimaryCodexLimit)
             .max(by: { ($0.capturedAt ?? .distantPast) < ($1.capturedAt ?? .distantPast) }) {
-            return codexSnapshot
+            var result = codexSnapshot
+            result.sparkWindows = sparkWindows
+            return result
         }
 
-        if let latestSnapshot = snapshots
-            .max(by: { ($0.capturedAt ?? .distantPast) < ($1.capturedAt ?? .distantPast) }) {
+        let latestNonSparkSnapshot = snapshots
+            .filter {
+                !$0.windows.isEmpty
+                    || $0.primaryPercent != nil
+                    || $0.secondaryPercent != nil
+            }
+            .max(by: { ($0.capturedAt ?? .distantPast) < ($1.capturedAt ?? .distantPast) })
+        if var latestSnapshot = latestNonSparkSnapshot {
+            latestSnapshot.sparkWindows = sparkWindows
             return latestSnapshot
         }
 
@@ -2301,8 +2315,25 @@ final class CodexUsageStore: @unchecked Sendable {
             primaryResetsAt: nil,
             secondaryResetsAt: nil,
             capturedAt: nil,
-            isPrimaryCodexLimit: false
+            isPrimaryCodexLimit: false,
+            sparkWindows: sparkWindows
         )
+    }
+
+    private func mergedSparkQuotaWindows(from snapshots: [RateLimitSnapshot]) -> [UsageQuotaWindow] {
+        Dictionary(
+            grouping: snapshots.flatMap(\.sparkWindows),
+            by: { $0.shortLabel.lowercased() }
+        )
+        .values
+        .compactMap { windows in
+            windows.max { lhs, rhs in
+                (lhs.resetsAt ?? .distantPast) < (rhs.resetsAt ?? .distantPast)
+            }
+        }
+        .sorted { lhs, rhs in
+            rateLimitSortOrder(lhs.shortLabel) < rateLimitSortOrder(rhs.shortLabel)
+        }
     }
 
     private func loadAppServerRateLimits(now: Date) -> RateLimitSnapshot? {
@@ -2379,6 +2410,25 @@ final class CodexUsageStore: @unchecked Sendable {
                 ),
                 secondary: rateLimitWindow(snapshot.secondary, fallbackID: "secondary", fallbackLabel: "7d")
             )
+            let sparkWindows = (result.rateLimitsByLimitId ?? [:])
+                .filter { key, value in
+                    isSparkRateLimit(key) || isSparkRateLimit(value.limitId) || isSparkRateLimit(value.limitName)
+                }
+                .values
+                .flatMap { sparkSnapshot in
+                    rateLimitWindows(
+                        primary: rateLimitWindow(
+                            sparkSnapshot.primary,
+                            fallbackID: "spark-primary",
+                            fallbackLabel: sparkSnapshot.secondary == nil ? "7d" : "5h"
+                        ),
+                        secondary: rateLimitWindow(
+                            sparkSnapshot.secondary,
+                            fallbackID: "spark-secondary",
+                            fallbackLabel: "7d"
+                        )
+                    )
+                }
             let resetCredits = appServerResetCredits(from: data, now: now)
             return RateLimitSnapshot(
                 primaryPercent: percent(for: "5h", in: windows),
@@ -2388,7 +2438,9 @@ final class CodexUsageStore: @unchecked Sendable {
                 capturedAt: now,
                 isPrimaryCodexLimit: true,
                 windows: windows,
-                resetCredits: resetCredits
+                sparkWindows: sparkWindows,
+                resetCredits: resetCredits,
+                planType: snapshot.planType
             )
         }
 
@@ -2445,6 +2497,10 @@ final class CodexUsageStore: @unchecked Sendable {
 
     private func parseRateLimitSnapshot(from output: String) -> RateLimitSnapshot? {
         let lines = output.split(separator: "\n", omittingEmptySubsequences: true).reversed()
+        var codexSnapshot: RateLimitSnapshot?
+        var sparkWindows: [UsageQuotaWindow] = []
+        var sparkCapturedAt: Date?
+
         for line in lines {
             guard line.contains("\"token_count\""),
                   let data = line.data(using: .utf8),
@@ -2458,6 +2514,13 @@ final class CodexUsageStore: @unchecked Sendable {
             }
 
             let limitID = rateLimits["limit_id"] as? String
+            let limitName = rateLimits["limit_name"] as? String
+            let planType = rateLimits["plan_type"] as? String
+                ?? rateLimits["planType"] as? String
+            let isSpark = isSparkRateLimit(limitID) || isSparkRateLimit(limitName)
+            guard limitID == nil || limitID == "codex" || isSpark else {
+                continue
+            }
             let primary = rateLimits["primary"] as? [String: Any]
             let secondary = rateLimits["secondary"] as? [String: Any]
             let windows = rateLimitWindows(
@@ -2473,17 +2536,47 @@ final class CodexUsageStore: @unchecked Sendable {
             let primaryResetsAt = resetTimestamp(for: "5h", in: windows)
             let secondaryResetsAt = resetTimestamp(for: "7d", in: windows)
 
-            if primaryPercent != nil || secondaryPercent != nil || !windows.isEmpty {
-                return RateLimitSnapshot(
+            guard primaryPercent != nil || secondaryPercent != nil || !windows.isEmpty else {
+                continue
+            }
+
+            if isSpark {
+                if sparkWindows.isEmpty {
+                    sparkWindows = windows
+                    sparkCapturedAt = capturedAt
+                }
+            } else if codexSnapshot == nil {
+                codexSnapshot = RateLimitSnapshot(
                     primaryPercent: primaryPercent,
                     secondaryPercent: secondaryPercent,
                     primaryResetsAt: primaryResetsAt,
                     secondaryResetsAt: secondaryResetsAt,
                     capturedAt: capturedAt,
                     isPrimaryCodexLimit: limitID == "codex",
-                    windows: windows
+                    windows: windows,
+                    planType: planType
                 )
             }
+
+            if codexSnapshot != nil, !sparkWindows.isEmpty {
+                break
+            }
+        }
+
+        if var codexSnapshot {
+            codexSnapshot.sparkWindows = sparkWindows
+            return codexSnapshot
+        }
+        if !sparkWindows.isEmpty {
+            return RateLimitSnapshot(
+                primaryPercent: nil,
+                secondaryPercent: nil,
+                primaryResetsAt: nil,
+                secondaryResetsAt: nil,
+                capturedAt: sparkCapturedAt,
+                isPrimaryCodexLimit: false,
+                sparkWindows: sparkWindows
+            )
         }
 
         return nil
@@ -2579,6 +2672,11 @@ final class CodexUsageStore: @unchecked Sendable {
             }
             return "\(durationMinutes)m"
         }
+    }
+
+    private func isSparkRateLimit(_ value: String?) -> Bool {
+        let normalized = value?.lowercased() ?? ""
+        return normalized.contains("spark")
     }
 
     private func rateLimitSortOrder(_ label: String) -> Int {
@@ -2842,8 +2940,33 @@ private struct AppServerRateLimitResult: Decodable {
 
 private struct AppServerRateLimitSnapshot: Decodable {
     let limitId: String?
+    let limitName: String?
     let primary: AppServerRateLimitWindow?
     let secondary: AppServerRateLimitWindow?
+    let planType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case limitId
+        case limitIdSnake = "limit_id"
+        case limitName
+        case limitNameSnake = "limit_name"
+        case primary
+        case secondary
+        case planType
+        case planTypeSnake = "plan_type"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        limitId = try container.decodeIfPresent(String.self, forKey: .limitId)
+            ?? container.decodeIfPresent(String.self, forKey: .limitIdSnake)
+        limitName = try container.decodeIfPresent(String.self, forKey: .limitName)
+            ?? container.decodeIfPresent(String.self, forKey: .limitNameSnake)
+        primary = try container.decodeIfPresent(AppServerRateLimitWindow.self, forKey: .primary)
+        secondary = try container.decodeIfPresent(AppServerRateLimitWindow.self, forKey: .secondary)
+        planType = try container.decodeIfPresent(String.self, forKey: .planType)
+            ?? container.decodeIfPresent(String.self, forKey: .planTypeSnake)
+    }
 }
 
 private struct AppServerRateLimitWindow: Decodable {

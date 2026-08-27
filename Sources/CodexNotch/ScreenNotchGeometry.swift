@@ -36,7 +36,8 @@ enum ScreenNotchGeometry {
         leftArea: CGRect,
         rightArea: CGRect,
         safeAreaTop: CGFloat,
-        adjustment: CGFloat = 0
+        adjustment: CGFloat = 0,
+        displaySize: NotchDisplaySize = .standard
     ) -> IslandLayout {
         let inferredWidth = inferredNotchWidth(
             leftArea: leftArea,
@@ -44,21 +45,32 @@ enum ScreenNotchGeometry {
             fallback: IslandMetrics.notchWidth
         )
         return IslandLayout(
-            shoulderWidth: IslandMetrics.shoulderWidth,
+            shoulderWidth: IslandMetrics.shoulderWidth(for: displaySize),
             notchWidth: adjustedNotchWidth(base: inferredWidth, adjustment: adjustment),
             collapsedHeight: max(IslandMetrics.collapsedHeight, safeAreaTop.rounded())
         )
     }
 
-    static func layout(for screen: NSScreen?, adjustment: CGFloat = 0) -> IslandLayout {
+    static func layout(
+        for screen: NSScreen?,
+        adjustment: CGFloat = 0,
+        displaySize: NotchDisplaySize = .standard
+    ) -> IslandLayout {
         guard let screen else {
-            return layout(leftArea: .zero, rightArea: .zero, safeAreaTop: 0, adjustment: adjustment)
+            return layout(
+                leftArea: .zero,
+                rightArea: .zero,
+                safeAreaTop: 0,
+                adjustment: adjustment,
+                displaySize: displaySize
+            )
         }
         return layout(
             leftArea: screen.auxiliaryTopLeftArea ?? .zero,
             rightArea: screen.auxiliaryTopRightArea ?? .zero,
             safeAreaTop: topSafeInset(for: screen),
-            adjustment: adjustment
+            adjustment: adjustment,
+            displaySize: displaySize
         )
     }
 

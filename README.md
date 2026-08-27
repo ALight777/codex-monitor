@@ -16,8 +16,9 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 ### 功能概览
 
 - 刘海区域常驻显示：左侧状态灯，右侧关键指标。
+- 支持标准与窄刘海两种收起尺寸；窄刘海只保留状态灯和额度数字，展开详情仍保持标准宽度。
 - 点击刘海区域展开详情面板，再次点击外部区域可收起。
-- 详情页使用多 tab 模式：`Codex`、`远程账号`、`NewAPI`、`Sub2API`。
+- 详情页使用多 tab 模式：`Codex`、可选 `Radar`、`远程账号`、`NewAPI`、`Sub2API`。
 - 支持手动选择刘海区域显示来源，也支持自动模式优先展示有提醒的外部监控。
 - 支持根据 macOS 顶部安全区和辅助菜单区自动识别物理刘海尺寸，并提供物理刘海宽度微调。
 - 支持设置页独立开关每一种监控源。
@@ -30,7 +31,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 可显示：
 
 - Codex 是否正在执行任务。
-- Codex 当前可用额度窗口的剩余百分比，例如新版 Codex 的周限额。
+- Codex 当前可用额度窗口的剩余百分比；Plus 套餐显示 5h / 7d，Pro 套餐只显示 7d。
 - 对应额度窗口的刷新时间。
 - 周额度行显示剩余重置次数；点击旁边的信息图标，可以查看每次重置次数的到期时间。
 - 正在运行和最近活动的对话列表。
@@ -38,6 +39,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 每个对话的 token 用量和 API 等价花费估算，包含该对话下的子代理用量。
 - 今日、7 天、30 天 token 用量与花费估算；“今日”按电脑当前时区的自然日计算，归档会话仍计入已消耗 token。
 - Token 数字支持整块悬停和点击：悬停短暂查看、点击固定弹窗，显示未缓存输入、缓存输入和含推理输出的构成。
+- 可选显示 GPT-5.3-Codex-Spark 专属额度窗口。
 
 本机数据主要来自当前用户目录下的 Codex 数据文件，例如：
 
@@ -49,6 +51,12 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 应用只读取这些文件，不会修改 Codex 的本地数据。
 
 花费按记录中的实际模型逐次套用 OpenAI 官方 API 单价，并分别计算未缓存输入、缓存输入和输出；长上下文模型按单次请求规则处理。该数字只是 API 等价估算，不是 Codex 订阅账单。若本地记录缺少构成、缓存写入 Token 或模型没有可匹配的公开价格，界面会显示不可估算或部分缺失，不会猜测单价。价格表版本会显示在用量卡片下方。
+
+### CodexRadar
+
+可在设置中启用独立的 `Radar` 页，展示 Codex 雷达提供的模型评分、通过数、成本、耗时、套餐额度预测与状态摘要。有 API Token 时使用授权接口，留空则使用公开摘要；数据每天北京时间 08:20 和 14:20 自动更新。
+
+Token 使用应用现有的密钥保存方式（默认 macOS 钥匙串），不写入 UserDefaults 或 CodexRadar 响应缓存。缓存文件仅当前用户可读写。数据来自 [Codex 雷达](https://codexradar.com)。
 
 ### 远程账号监测
 
@@ -65,7 +73,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 已启用 Codex 账号列表。
 - 账号正常、配额耗尽、异常数量。
 - 每个账号的套餐、索引、成功/失败次数。
-- Codex 账号 5h / 7d 剩余额度。
+- Codex 账号剩余额度；Plus 显示 5h / 7d，Pro 只显示 7d。
 - CPA Manager Plus 和 Sub2API 在接口提供数据时，会在账号周额度后显示剩余重置次数，并可通过信息图标查看每次到期时间。
 - 账号异常原因，例如登录过期、账号不可用、请求失败、5 小时额度已满、周额度已满等。
 - CPA Manager Plus 和 Sub2API 的 24 小时、7 天、30 天总 token 用量；Sub2API 只统计当前监测到的 OpenAI OAuth 账号。
@@ -99,10 +107,11 @@ NewAPI 和 Sub2API 用于监测普通用户账号余额，而不是管理员侧�
 设置窗口分为以下页面：
 
 - `Codex`：本机 Codex 刷新频率、额度来源、任务范围和历史用量显示。
+- `CodexRadar`：开关、可选 API Token、数据状态和手动刷新。
 - `远程账号`：管理 CLIProxyAPI、CPA Manager Plus、Sub2API 数据源及其地址、认证信息、刷新频率、请求超时和 TLS 设置。
 - `NewAPI`：NewAPI 监测开关、刷新频率、默认阈值和账号列表。
 - `Sub2API`：Sub2API 监测开关、刷新频率、默认阈值和账号列表。
-- `启动与外观`：刘海显示来源、物理刘海微调、密钥存储方式、开机自启和指示灯动画。
+- `启动与外观`：刘海显示大小与来源、物理刘海微调、密钥存储方式、开机自启和指示灯动画。
 - `关于`：软件简介、当前版本号和监测能力说明。
 
 设置页中的问号按钮会解释每个配置项的作用。大部分远程配置只有在点击“保存”后才会生效，避免输入密码或密钥时立即触发请求。
@@ -178,7 +187,7 @@ dist/codex-monitor-0.1.11-amd64.dmg
 .build/release/CodexNotch --print-fast-snapshot
 ```
 
-打印稳定 JSON 快照，包含每个任务的 `subagents` 活跃子代理数量：
+打印稳定 JSON 快照，包含 `usage_today`、`spark_quota_windows` 以及每个任务的 `subagents` 活跃子代理数量：
 
 ```bash
 .build/release/CodexNotch --print-snapshot-json
@@ -228,8 +237,9 @@ The app currently supports local Codex telemetry, remote accounts through CLIPro
 ### Features
 
 - Persistent notch overlay with left-side status and right-side metrics.
+- Standard and narrow collapsed sizes; narrow mode keeps only the status light and quota values while the expanded detail panel remains full width.
 - Click to expand a dynamic-island-style detail panel.
-- Multi-tab detail panel: `Codex`, `Remote Accounts`, `NewAPI`, and `Sub2API`.
+- Multi-tab detail panel: `Codex`, optional `Radar`, `Remote Accounts`, `NewAPI`, and `Sub2API`.
 - Per-source enable/disable switches.
 - Manual or automatic notch display source selection.
 - Automatic physical notch size inference from macOS safe-area and auxiliary menu-bar geometry, with a manual notch-width adjustment when needed.
@@ -242,7 +252,7 @@ The Codex tab monitors the Codex installation on the current Mac.
 It can show:
 
 - Whether Codex is currently running a task.
-- Remaining percentages for currently available Codex quota windows, such as the weekly quota in newer Codex builds.
+- Remaining percentages for currently available Codex quota windows: Plus shows 5h / 7d, while Pro shows 7d only.
 - Refresh times for the displayed quota windows.
 - Remaining reset-credit count on the weekly quota row; click the adjacent information icon to view each credit's expiry time.
 - Running and recent conversations.
@@ -251,6 +261,7 @@ It can show:
 - Today, 7-day, and 30-day token totals with estimated API-equivalent cost.
 - Hover or click the enlarged token target to inspect uncached input, cached input, and output including reasoning; clicking pins the popover.
 - Today, 7-day, and 30-day token usage totals. Today starts at midnight in the Mac's current time zone, and archived conversations remain part of consumed-token totals.
+- Optional GPT-5.3-Codex-Spark quota windows.
 
 Local data is read from Codex files under the current user account, including:
 
@@ -262,6 +273,12 @@ Local data is read from Codex files under the current user account, including:
 The app reads these files only. It does not modify local Codex data.
 
 Costs are estimated per recorded request using the matching official OpenAI API model price, with uncached input, cached input, output, and supported long-context rules calculated separately. This is an API-equivalent estimate, not Codex subscription billing. Missing component data, cache-write tokens, or an unknown public model price remains explicitly unavailable rather than being guessed. The pricing snapshot date appears below the local usage cells.
+
+### CodexRadar
+
+The optional `Radar` tab shows model scores, pass counts, cost, duration, plan-quota estimates, and status summaries from Codex Radar. It uses the authorized endpoint when an API token is configured and the public summary otherwise. Refreshes are scheduled for 08:20 and 14:20 Beijing time each day.
+
+The API token uses the app's existing secret-storage mode (macOS Keychain by default) and is not written to UserDefaults or the CodexRadar response cache. Cache files are restricted to the current user. Data comes from [Codex Radar](https://codexradar.com).
 
 ### Remote Account Monitoring
 
@@ -278,7 +295,7 @@ The remote tab can show:
 - Enabled Codex accounts.
 - Healthy, quota-exhausted, and abnormal account counts.
 - Plan, account index, success count, and failure count.
-- 5h / 7d remaining quota for each Codex account.
+- Remaining quota per Codex account: Plus shows 5h / 7d, while Pro shows 7d only.
 - Remaining reset credits after each account's weekly quota when CPA Manager Plus or Sub2API provides them, with an information popover listing their expiry times.
 - Clear status reasons such as expired login, unavailable account, request failures, 5-hour quota exhausted, and weekly quota exhausted.
 - CPA Manager Plus and Sub2API total token usage for 24 hours, 7 days, and 30 days. Sub2API totals include only the monitored OpenAI OAuth accounts.
@@ -312,10 +329,11 @@ Authentication:
 The settings window is split into these tabs:
 
 - `Codex`: local refresh intervals, quota source, task range, and period usage display.
+- `CodexRadar`: enablement, optional API token, data status, and manual refresh.
 - `Remote Accounts`: manages CLIProxyAPI, CPA Manager Plus, and Sub2API sources, including URLs, credentials, refresh interval, timeout, and TLS settings.
 - `NewAPI`: NewAPI monitoring, refresh interval, default thresholds, and account list.
 - `Sub2API`: Sub2API monitoring, refresh interval, default thresholds, and account list.
-- `Launch & Appearance`: notch display source, physical notch adjustment, secret storage mode, launch at login, and pulse animation.
+- `Launch & Appearance`: notch display size and source, physical notch adjustment, secret storage mode, launch at login, and pulse animation.
 - `About`: app summary, current version, and supported monitoring sources.
 
 Question-mark buttons next to setting labels explain what each option does. Most remote settings take effect only after clicking Save, so typing passwords or keys does not immediately trigger network requests.
@@ -391,7 +409,7 @@ Print a fast local snapshot:
 .build/release/CodexNotch --print-fast-snapshot
 ```
 
-Print a stable JSON snapshot, including each task's `subagents` active subagent count:
+Print a stable JSON snapshot, including `usage_today`, `spark_quota_windows`, and each task's `subagents` active subagent count:
 
 ```bash
 .build/release/CodexNotch --print-snapshot-json

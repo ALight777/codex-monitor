@@ -3,6 +3,7 @@ import SwiftUI
 
 private enum DetailPage: String, CaseIterable, Identifiable {
     case codex
+    case codexRadar
     case remoteCodex
     case newAPI
     case subAPI
@@ -13,6 +14,8 @@ private enum DetailPage: String, CaseIterable, Identifiable {
         switch self {
         case .codex:
             "Codex"
+        case .codexRadar:
+            "Radar"
         case .remoteCodex:
             "远程账号"
         case .newAPI:
@@ -47,7 +50,11 @@ struct NotchIslandView: View {
     private var islandLayout: IslandLayout {
         ScreenNotchGeometry.layout(
             for: NSScreen.main ?? NSScreen.screens.first,
-            adjustment: CGFloat(settings.notchWidthAdjustment)
+            adjustment: CGFloat(settings.notchWidthAdjustment),
+            displaySize: NotchPresentationGeometry.displaySize(
+                configured: settings.notchDisplaySize,
+                phase: overlayState.detailPresentationPhase
+            )
         )
     }
 
@@ -63,9 +70,7 @@ struct NotchIslandView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                overlayState.isExpanded.toggle()
-            }
+            overlayState.isExpanded.toggle()
         }
         .contextMenu {
             Button("设置") {
@@ -82,6 +87,16 @@ struct NotchIslandView: View {
         .onAppear {
             pulse = true
         }
+        .animation(topShellAnimation, value: islandLayout)
+    }
+
+    private var topShellAnimation: Animation? {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            return nil
+        }
+        return overlayState.detailPresentationPhase == .hidden
+            ? .easeIn(duration: DetailAnimationTiming.shoulderCollapseDuration)
+            : .easeOut(duration: DetailAnimationTiming.shoulderExpandDuration)
     }
 
     private var islandBackground: some View {
@@ -106,14 +121,26 @@ struct NotchIslandView: View {
 
     private var collapsedContent: some View {
         HStack(spacing: 0) {
-            statusBlock
-                .frame(width: islandLayout.shoulderWidth, height: islandLayout.collapsedHeight - 4)
+            Group {
+                if settings.notchDisplaySize == .narrow {
+                    narrowStatusBlock
+                } else {
+                    statusBlock
+                }
+            }
+            .frame(width: islandLayout.shoulderWidth, height: islandLayout.collapsedHeight - 4)
 
             Color.clear
                 .frame(width: islandLayout.notchWidth, height: islandLayout.collapsedHeight)
 
-            rateLimitBlock
-                .frame(width: islandLayout.shoulderWidth, height: islandLayout.collapsedHeight - 4)
+            Group {
+                if settings.notchDisplaySize == .narrow {
+                    narrowRateLimitBlock
+                } else {
+                    rateLimitBlock
+                }
+            }
+            .frame(width: islandLayout.shoulderWidth, height: islandLayout.collapsedHeight - 4)
         }
         .frame(width: islandLayout.width, height: islandLayout.collapsedHeight, alignment: .top)
     }
@@ -135,6 +162,17 @@ struct NotchIslandView: View {
         .padding(.trailing, 4)
     }
 
+    private var narrowStatusBlock: some View {
+        Group {
+            if effectiveDisplaySource == .codex {
+                StatusDot(isRunning: snapshot.isRunning, pulse: pulse, enablePulse: settings.enablePulse)
+            } else {
+                SeverityDot(severity: collapsedSeverity, pulse: pulse, enablePulse: settings.enablePulse)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var rateLimitBlock: some View {
         VStack(alignment: .leading, spacing: 1) {
             ForEach(collapsedMetrics) { metric in
@@ -143,6 +181,29 @@ struct NotchIslandView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 4)
+    }
+
+    private var narrowRateLimitBlock: some View {
+        VStack(alignment: .center, spacing: 1) {
+            ForEach(collapsedMetrics.prefix(2)) { metric in
+                Text(metric.value)
+                    .foregroundStyle(metric.color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.58)
+            }
+        }
+        .font(.system(size: 9.0, weight: .bold, design: .rounded))
+        .monospacedDigit()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(narrowRateLimitAccessibilityLabel)
+    }
+
+    private var narrowRateLimitAccessibilityLabel: String {
+        collapsedMetrics.prefix(2)
+            .map { "\($0.label) 剩余 \($0.value)" }
+            .joined(separator: "，")
     }
 
     private var effectiveDisplaySource: NotchDisplaySource {
@@ -284,6 +345,7 @@ struct DetailPanelView: View {
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
     @ObservedObject var subAPIViewModel: BalanceMonitorViewModel
+    @ObservedObject var codexRadarViewModel: CodexRadarViewModel
     @ObservedObject var overlayState: OverlayState
     @ObservedObject var settings: CodexNotchSettings
     let onSettings: () -> Void
@@ -291,6 +353,7 @@ struct DetailPanelView: View {
     let onRemoteRefresh: () -> Void
     let onNewAPIRefresh: () -> Void
     let onSubAPIRefresh: () -> Void
+    let onCodexRadarRefresh: () -> Void
     @State private var detailPage: DetailPage = .codex
     @State private var showsRemoteUsageInfo = false
 
@@ -301,7 +364,8 @@ struct DetailPanelView: View {
     private var islandLayout: IslandLayout {
         ScreenNotchGeometry.layout(
             for: NSScreen.main ?? NSScreen.screens.first,
-            adjustment: CGFloat(settings.notchWidthAdjustment)
+            adjustment: CGFloat(settings.notchWidthAdjustment),
+            displaySize: .standard
         )
     }
 
@@ -330,6 +394,8 @@ struct DetailPanelView: View {
                         switch selectedPage {
                         case .codex:
                             localContent
+                        case .codexRadar:
+                            codexRadarContent
                         case .remoteCodex:
                             remoteContent
                         case .newAPI:
@@ -382,6 +448,7 @@ struct DetailPanelView: View {
             return IslandMetrics.combinedDetailHeight(
                 accountRows: balanceRows.isEmpty ? nil : max(1, balanceRows.max() ?? 1),
                 showsPeriodUsage: settings.showPeriodUsage,
+                showsSparkQuota: settings.showSparkQuota,
                 topPadding: detailTopPadding
             )
         }
@@ -393,6 +460,7 @@ struct DetailPanelView: View {
         return IslandMetrics.combinedDetailHeight(
             accountRows: max(1, rows.max() ?? 1),
             showsPeriodUsage: settings.showPeriodUsage,
+            showsSparkQuota: settings.showSparkQuota,
             usesTallRemoteRows: remoteViewModel.snapshot.accounts.contains { $0.displayQuotaWindows.count > 2 },
             topPadding: detailTopPadding
         )
@@ -435,6 +503,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             snapshot.isRunning ? "正在运行" : "最近活动"
+        case .codexRadar:
+            "CodexRadar"
         case .remoteCodex:
             "远程账号"
         case .newAPI:
@@ -448,6 +518,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             return snapshot.isRunning ? "\(snapshot.tasks.filter { $0.status == .running }.count) 个任务" : "空闲"
+        case .codexRadar:
+            return codexRadarHeaderStatus
         case .remoteCodex:
             return remoteHeaderStatus
         case .newAPI:
@@ -461,6 +533,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             snapshot.isRunning ? Color(red: 0.61, green: 0.95, blue: 0.68) : .white.opacity(0.48)
+        case .codexRadar:
+            codexRadarHeaderColor
         case .remoteCodex:
             remoteStatusColor
         case .newAPI:
@@ -487,6 +561,25 @@ struct DetailPanelView: View {
         }
     }
 
+    private var codexRadarHeaderStatus: String {
+        switch codexRadarViewModel.snapshot.state {
+        case .disabled: "未启用"
+        case .loading: "读取中"
+        case .ready: "已更新"
+        case .stale: "缓存"
+        case .error: "异常"
+        }
+    }
+
+    private var codexRadarHeaderColor: Color {
+        switch codexRadarViewModel.snapshot.state {
+        case .ready: Color(red: 0.61, green: 0.95, blue: 0.68)
+        case .stale: Color(red: 1.0, green: 0.55, blue: 0.25)
+        case .error: Color(red: 1.0, green: 0.28, blue: 0.30)
+        case .disabled, .loading: .white.opacity(0.48)
+        }
+    }
+
     private var remoteStatusColor: Color {
         switch remoteViewModel.snapshot.panelSeverity {
         case .none:
@@ -502,6 +595,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             viewModel.isRefreshing
+        case .codexRadar:
+            codexRadarViewModel.isRefreshing
         case .remoteCodex:
             remoteViewModel.isRefreshing
         case .newAPI:
@@ -515,6 +610,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             "刷新 Codex"
+        case .codexRadar:
+            "刷新 CodexRadar"
         case .remoteCodex:
             "刷新远程账号"
         case .newAPI:
@@ -550,6 +647,9 @@ struct DetailPanelView: View {
 
     private var availablePages: [DetailPage] {
         var pages: [DetailPage] = [.codex]
+        if settings.codexRadarEnabled {
+            pages.append(.codexRadar)
+        }
         if settings.remoteMonitorEnabled {
             pages.append(.remoteCodex)
         }
@@ -623,6 +723,8 @@ struct DetailPanelView: View {
         switch selectedPage {
         case .codex:
             onLocalRefresh()
+        case .codexRadar:
+            onCodexRadarRefresh()
         case .remoteCodex:
             onRemoteRefresh()
         case .newAPI:
@@ -634,6 +736,9 @@ struct DetailPanelView: View {
 
     private var localContent: some View {
         VStack(spacing: 10) {
+            if settings.showSparkQuota {
+                sparkQuotaRow
+            }
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 7) {
@@ -654,6 +759,136 @@ struct DetailPanelView: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .bottom)
+    }
+
+    private var sparkQuotaRow: some View {
+        HStack(spacing: 8) {
+            Text("Spark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.72))
+
+            if snapshot.sparkQuotaWindows.isEmpty {
+                Text("暂无专属额度数据")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.38))
+            } else {
+                ForEach(snapshot.sparkQuotaWindows) { window in
+                    HStack(spacing: 4) {
+                        Text(window.shortLabel)
+                            .foregroundStyle(.white.opacity(0.46))
+                        Text(Formatters.percent(window.remainingPercent))
+                            .foregroundStyle(Color(red: 0.70, green: 0.62, blue: 1.0))
+                        Text(Formatters.quotaResetTime(window.resetsAt))
+                            .foregroundStyle(.white.opacity(0.42))
+                    }
+                    .font(.system(size: 9.2, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var codexRadarContent: some View {
+        let radar = codexRadarViewModel.snapshot
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    RadarSummaryCell(label: "状态", value: radar.status ?? "--")
+                    RadarSummaryCell(
+                        label: "更新时间",
+                        value: radar.displayUpdatedAt.map { "\(Formatters.relativeAge($0))前" } ?? "--"
+                    )
+                    RadarSummaryCell(label: "来源", value: radar.dataSource.label)
+                }
+
+                if let prediction = radar.prediction ?? radar.recommendation {
+                    Text(prediction)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                if let message = radar.message {
+                    inlineWarningMessage(message)
+                }
+
+                if radar.models.isEmpty {
+                    HStack {
+                        Text(radar.state == .loading ? "正在读取模型数据" : "暂无模型评分数据")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.45))
+                        Spacer()
+                    }
+                    .padding(10)
+                } else {
+                    LazyVGrid(
+                        columns: [GridItem(.flexible(), spacing: 7), GridItem(.flexible(), spacing: 7)],
+                        spacing: 7
+                    ) {
+                        ForEach(radar.models.prefix(8)) { model in
+                            RadarModelCard(model: model)
+                        }
+                    }
+                }
+
+                if !radar.quotaRows.isEmpty {
+                    VStack(spacing: 0) {
+                        HStack {
+                            Text("套餐").frame(maxWidth: .infinity, alignment: .leading)
+                            Text("5h").frame(width: 72, alignment: .trailing)
+                            Text("7d").frame(width: 72, alignment: .trailing)
+                        }
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .padding(.horizontal, 10)
+                        .frame(height: 24)
+
+                        ForEach(radar.quotaRows) { row in
+                            HStack {
+                                Text(row.tier).frame(maxWidth: .infinity, alignment: .leading)
+                                Text(radarQuotaText(row.fiveHour)).frame(width: 72, alignment: .trailing)
+                                Text(radarQuotaText(row.sevenDay)).frame(width: 72, alignment: .trailing)
+                            }
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .padding(.horizontal, 10)
+                            .frame(height: 27)
+                        }
+                    }
+                    .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                HStack {
+                    Text("\(radar.attributionText) · \(radar.dataSource.label)")
+                        .font(.system(size: 8.8, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.36))
+                    Spacer()
+                    Button {
+                        NSWorkspace.shared.open(radar.siteURL)
+                    } label: {
+                        Image(systemName: "arrow.up.forward.app.fill")
+                    }
+                    .buttonStyle(IconButtonStyle())
+                }
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func radarQuotaText(_ value: Double?) -> String {
+        value.map { String(format: "$%.2f", $0) } ?? "--"
     }
 
     private var remoteContent: some View {
@@ -1359,6 +1594,80 @@ private struct RemoteSummaryCell: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 7)
         .background(Color.white.opacity(0.026), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct RadarSummaryCell: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 8.6, weight: .bold))
+                .foregroundStyle(.white.opacity(0.38))
+            Text(value)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.78))
+                .lineLimit(1)
+                .minimumScaleFactor(0.68)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .frame(height: 42)
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct RadarModelCard: View {
+    let model: CodexRadarModelScore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Text(model.label)
+                    .font(.system(size: 9.7, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let status = model.status {
+                    Text(status.uppercased())
+                        .font(.system(size: 7.8, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.36))
+                }
+            }
+            HStack(spacing: 8) {
+                Text(model.score.map { String(format: "%.1f", $0) } ?? "--")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))
+                Spacer(minLength: 0)
+                if let passed = model.passed, let tasks = model.tasks {
+                    Text("\(passed)/\(tasks)")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.42))
+                }
+            }
+            if model.costUSD != nil || model.wallTime != nil {
+                HStack(spacing: 6) {
+                    if let cost = model.costUSD {
+                        Text("成本 $\(cost, specifier: "%.2f")")
+                    }
+                    if let wallTime = model.wallTime {
+                        Text(wallTime)
+                    }
+                }
+                .font(.system(size: 8.2, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.38))
+                .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 66)
+        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.07), lineWidth: 1)
+        )
     }
 }
 

@@ -434,6 +434,7 @@ final class CLIProxyAPIClient: NSObject, URLSessionDelegate {
         let email = file?.email ?? (displayAccount?.contains("@") == true ? displayAccount : nil)
         let statusMessage = result.actionReason ?? file?.statusMessage
 
+        let planType = file?.idToken?.planType ?? planType(fromFileName: result.fileName)
         return RemoteCodexAccount(
             id: stableID,
             name: file?.name ?? result.fileName ?? displayAccount ?? "Codex 账号",
@@ -448,21 +449,24 @@ final class CLIProxyAPIClient: NSObject, URLSessionDelegate {
             successCount: file?.success,
             failureCount: file?.failed,
             recentFailures: recentFailures,
-            state: inspectionState(from: result),
+            state: inspectionState(from: result, planType: planType),
             lastRefresh: result.createdAtText ?? file?.lastRefresh,
-            planType: file?.idToken?.planType ?? planType(fromFileName: result.fileName),
+            planType: planType,
             quotaWindows: inspectionQuotaWindows(from: result),
             quotaError: nil,
             unavailable: false
         )
     }
 
-    private static func inspectionState(from result: CodexInspectionResult) -> RemoteAccountState {
+    private static func inspectionState(
+        from result: CodexInspectionResult,
+        planType: String?
+    ) -> RemoteAccountState {
         let action = result.action?.lowercased() ?? ""
         let status = result.status?.lowercased() ?? ""
         let reason = result.actionReason?.lowercased() ?? ""
 
-        if inspectionQuotaWindows(from: result).accountAlertWindows.contains(where: \.reachesThreshold)
+        if inspectionQuotaWindows(from: result).accountAlertWindows(for: planType).contains(where: \.reachesThreshold)
             || result.isQuota == true
             || reasonIndicatesQuotaExhaustion(reason) {
             return .quotaExhausted

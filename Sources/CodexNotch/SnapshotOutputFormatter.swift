@@ -13,7 +13,7 @@ enum SnapshotOutputFormatter {
             .joined(separator: " ")
         var lines = [
             "quotas=\(quotaText.isEmpty ? "--" : quotaText) running=\(snapshot.isRunning)",
-            "usage24h=\(snapshot.usage24h) usage7d=\(snapshot.usage7d) usage30d=\(snapshot.usage30d)"
+            "usageToday=\(snapshot.usageToday) usage24h=\(snapshot.usage24h) usage7d=\(snapshot.usage7d) usage30d=\(snapshot.usage30d)"
         ]
 
         for task in snapshot.tasks.prefix(taskLimit) {
@@ -33,7 +33,9 @@ enum SnapshotOutputFormatter {
             secondaryPercent: snapshot.secondaryPercent,
             quotaWindows: snapshot.displayRateLimitWindows.map(SnapshotQuotaWindowJSON.init(window:)),
             resetCredits: snapshot.resetCredits.map(SnapshotResetCreditsJSON.init(resetCredits:)),
+            sparkQuotaWindows: snapshot.sparkQuotaWindows.map(SnapshotQuotaWindowJSON.init(window:)),
             running: snapshot.isRunning,
+            usageToday: snapshot.usageToday,
             usage24h: snapshot.usage24h,
             usage7d: snapshot.usage7d,
             usage30d: snapshot.usage30d,
@@ -53,7 +55,9 @@ private struct SnapshotJSON: Encodable {
     let secondaryPercent: Int?
     let quotaWindows: [SnapshotQuotaWindowJSON]
     let resetCredits: SnapshotResetCreditsJSON?
+    let sparkQuotaWindows: [SnapshotQuotaWindowJSON]
     let running: Bool
+    let usageToday: Int
     let usage24h: Int
     let usage7d: Int
     let usage30d: Int
@@ -66,7 +70,9 @@ private struct SnapshotJSON: Encodable {
         case secondaryPercent = "secondary_percent"
         case quotaWindows = "quota_windows"
         case resetCredits = "reset_credits"
+        case sparkQuotaWindows = "spark_quota_windows"
         case running
+        case usageToday = "usage_today"
         case usage24h = "usage_24h"
         case usage7d = "usage_7d"
         case usage30d = "usage_30d"

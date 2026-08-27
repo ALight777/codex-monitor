@@ -53,6 +53,7 @@ struct UsageSnapshot: Equatable {
     var usage7dSummary: TokenUsageSummary = .zero
     var usage30dSummary: TokenUsageSummary = .zero
     var usageTodaySummary: TokenUsageSummary = .zero
+    var sparkQuotaWindows: [UsageQuotaWindow] = []
     var tasks: [CodexTask]
     var isRunning: Bool
     var lastUpdated: Date
@@ -76,6 +77,9 @@ struct UsageSnapshot: Equatable {
         var copy = self
         if copy.resetCredits == nil {
             copy.resetCredits = previous.resetCredits
+        }
+        if copy.sparkQuotaWindows.isEmpty {
+            copy.sparkQuotaWindows = previous.sparkQuotaWindows
         }
 
         if !copy.rateLimitWindows.isEmpty {
@@ -149,6 +153,35 @@ struct UsageQuotaWindow: Equatable, Identifiable {
     let shortLabel: String
     let remainingPercent: Int?
     let resetsAt: Date?
+
+    var isFiveHourWindow: Bool {
+        let compactLabel = shortLabel
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        return ["5h", "5小时", "5hr", "5hrs"].contains(compactLabel)
+    }
+}
+
+enum CodexPlanKind: Equatable, Sendable {
+    case plus
+    case pro
+    case other
+
+    init(planType: String?) {
+        switch planType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "plus":
+            self = .plus
+        case "pro":
+            self = .pro
+        default:
+            self = .other
+        }
+    }
+
+    var showsFiveHourQuota: Bool {
+        self != .pro
+    }
 }
 
 struct PeriodUsage: Equatable, Sendable {
@@ -481,6 +514,22 @@ enum NotchDisplaySource: String, CaseIterable, Identifiable, Equatable {
     }
 }
 
+enum NotchDisplaySize: String, CaseIterable, Identifiable, Equatable {
+    case standard
+    case narrow
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .standard:
+            "标准"
+        case .narrow:
+            "窄刘海"
+        }
+    }
+}
+
 enum BalanceMonitorSource: String, CaseIterable, Identifiable, Equatable, Codable {
     case newAPI
     case subAPI
@@ -670,7 +719,9 @@ struct RateLimitSnapshot: Equatable {
     let capturedAt: Date?
     let isPrimaryCodexLimit: Bool
     var windows: [UsageQuotaWindow] = []
+    var sparkWindows: [UsageQuotaWindow] = []
     var resetCredits: RateLimitResetCredits? = nil
+    var planType: String? = nil
 
     static func freshest(
         appServer: RateLimitSnapshot?,
@@ -682,13 +733,26 @@ struct RateLimitSnapshot: Equatable {
 
         let appServerCapturedAt = appServer.capturedAt ?? .distantPast
         let localCapturedAt = localFiles.capturedAt ?? .distantPast
-        guard localCapturedAt > appServerCapturedAt else {
-            return appServer
+        var result = localCapturedAt > appServerCapturedAt ? localFiles : appServer
+        let sparkCandidates = appServer.sparkWindows + localFiles.sparkWindows
+        result.sparkWindows = Dictionary(
+            grouping: sparkCandidates,
+            by: { $0.shortLabel.lowercased() }
+        )
+        .values
+        .compactMap { windows in
+            windows.max { lhs, rhs in
+                (lhs.resetsAt ?? .distantPast) < (rhs.resetsAt ?? .distantPast)
+            }
         }
-
-        var result = localFiles
+        .sorted { lhs, rhs in
+            Self.quotaWindowPriority(lhs.shortLabel) < Self.quotaWindowPriority(rhs.shortLabel)
+        }
         if result.resetCredits == nil {
-            result.resetCredits = appServer.resetCredits
+            result.resetCredits = appServer.resetCredits ?? localFiles.resetCredits
+        }
+        if result.planType == nil {
+            result.planType = appServer.planType ?? localFiles.planType
         }
         return result
     }
@@ -719,7 +783,10 @@ struct RateLimitSnapshot: Equatable {
 
     func displayWindows(now: Date = Date()) -> [UsageQuotaWindow] {
         let source = windows.isEmpty ? legacyWindows() : windows
-        return source.map { window in
+        let visibleSource = CodexPlanKind(planType: planType).showsFiveHourQuota
+            ? source
+            : source.filter { !$0.isFiveHourWindow }
+        return visibleSource.map { window in
             UsageQuotaWindow(
                 id: window.id,
                 shortLabel: window.shortLabel,
@@ -727,6 +794,28 @@ struct RateLimitSnapshot: Equatable {
                 resetsAt: displayResetDate(window.resetsAt, now: now)
             )
         }
+    }
+
+    func displaySparkWindows(now: Date = Date()) -> [UsageQuotaWindow] {
+        sparkWindows.map { window in
+            UsageQuotaWindow(
+                id: window.id,
+                shortLabel: window.shortLabel,
+                remainingPercent: displayPercent(window.remainingPercent, resetsAt: window.resetsAt, now: now),
+                resetsAt: displayResetDate(window.resetsAt, now: now)
+            )
+        }
+    }
+
+    private static func quotaWindowPriority(_ label: String) -> Int {
+        let normalized = label.lowercased()
+        if normalized.contains("5h") || normalized.contains("5小时") {
+            return 0
+        }
+        if normalized.contains("7d") || normalized.contains("7天") {
+            return 1
+        }
+        return 2
     }
 
     private func displayPercent(_ percent: Int?, resetsAt: Int?, now: Date) -> Int? {

@@ -12,6 +12,22 @@ enum DetailPresentationPhase: Equatable {
     }
 }
 
+enum NotchPresentationGeometry {
+    static func displaySize(
+        configured: NotchDisplaySize,
+        phase: DetailPresentationPhase
+    ) -> NotchDisplaySize {
+        phase == .hidden ? configured : .standard
+    }
+
+    static func shouldDeferDetailReveal(
+        configured: NotchDisplaySize,
+        detailWindowIsVisible: Bool
+    ) -> Bool {
+        configured == .narrow && !detailWindowIsVisible
+    }
+}
+
 struct DetailTransitionState {
     private(set) var phase: DetailPresentationPhase = .hidden
     private(set) var generation: UInt = 0
@@ -77,10 +93,27 @@ enum DetailWindowFrameCalculator {
 }
 
 enum DetailAnimationTiming {
-    static let revealDuration: TimeInterval = 0.26
-    static let contentDelay: TimeInterval = 0.06
+    static let shoulderExpandDuration: TimeInterval = 0.12
+    static let narrowRevealDuration: TimeInterval = 0.18
+    static let standardRevealDuration: TimeInterval = 0.26
+    static let narrowContentDelay: TimeInterval = 0.05
+    static let standardContentDelay: TimeInterval = 0.06
     static let contentDuration: TimeInterval = 0.14
     static let hideContentDuration: TimeInterval = 0.10
     static let hideShellDelay: TimeInterval = 0.04
-    static let hideDuration: TimeInterval = 0.20
+    static let narrowHideDuration: TimeInterval = 0.14
+    static let standardHideDuration: TimeInterval = 0.20
+    static let shoulderCollapseDuration: TimeInterval = 0.12
+
+    static func revealDuration(for displaySize: NotchDisplaySize) -> TimeInterval {
+        displaySize == .narrow ? narrowRevealDuration : standardRevealDuration
+    }
+
+    static func contentDelay(for displaySize: NotchDisplaySize) -> TimeInterval {
+        displaySize == .narrow ? narrowContentDelay : standardContentDelay
+    }
+
+    static func hideDuration(for displaySize: NotchDisplaySize) -> TimeInterval {
+        displaySize == .narrow ? narrowHideDuration : standardHideDuration
+    }
 }

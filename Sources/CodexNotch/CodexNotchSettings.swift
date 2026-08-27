@@ -37,9 +37,12 @@ final class CodexNotchSettings: ObservableObject {
         static let fileChangeRefreshMinimumGap = "fileChangeRefreshMinimumGap"
         static let rateLimitSource = "rateLimitSource"
         static let showPeriodUsage = "showPeriodUsage"
+        static let showSparkQuota = "showSparkQuota"
+        static let codexRadarEnabled = "codexRadarEnabled"
         static let enablePulse = "enablePulse"
         static let taskHistoryRange = "taskHistoryRange"
         static let notchDisplaySource = "notchDisplaySource"
+        static let notchDisplaySize = "notchDisplaySize"
         static let notchWidthAdjustment = "notchWidthAdjustment"
         static let remoteMonitorEnabled = "remoteMonitorEnabled"
         static let remoteCodexDataSource = "remoteCodexDataSource"
@@ -122,6 +125,24 @@ final class CodexNotchSettings: ObservableObject {
         }
     }
 
+    @Published var showSparkQuota: Bool {
+        didSet {
+            defaults.set(showSparkQuota, forKey: Keys.showSparkQuota)
+        }
+    }
+
+    @Published var codexRadarEnabled: Bool {
+        didSet {
+            defaults.set(codexRadarEnabled, forKey: Keys.codexRadarEnabled)
+        }
+    }
+
+    @Published var codexRadarAPIToken: String {
+        didSet {
+            persistCodexRadarAPIToken(codexRadarAPIToken)
+        }
+    }
+
     @Published var enablePulse: Bool {
         didSet {
             defaults.set(enablePulse, forKey: Keys.enablePulse)
@@ -137,6 +158,12 @@ final class CodexNotchSettings: ObservableObject {
     @Published var notchDisplaySource: NotchDisplaySource {
         didSet {
             defaults.set(notchDisplaySource.rawValue, forKey: Keys.notchDisplaySource)
+        }
+    }
+
+    @Published var notchDisplaySize: NotchDisplaySize {
+        didSet {
+            defaults.set(notchDisplaySize.rawValue, forKey: Keys.notchDisplaySize)
         }
     }
 
@@ -323,6 +350,7 @@ final class CodexNotchSettings: ObservableObject {
     @Published private(set) var cliproxyKeychainError: String?
     @Published private(set) var newAPIKeychainError: String?
     @Published private(set) var subAPIKeychainError: String?
+    @Published private(set) var codexRadarTokenError: String?
     @Published private(set) var secretStorageMode: SecretStorageMode
     @Published private(set) var secretStorageError: String?
     @Published private(set) var secretStoreReady: Bool
@@ -361,9 +389,13 @@ final class CodexNotchSettings: ObservableObject {
         self.fileChangeRefreshMinimumGap = Self.clamped(defaults.object(forKey: Keys.fileChangeRefreshMinimumGap) as? TimeInterval ?? 3, min: 1, max: 30)
         self.rateLimitSource = RateLimitSourcePreference(rawValue: defaults.string(forKey: Keys.rateLimitSource) ?? "") ?? .appServerFirst
         self.showPeriodUsage = defaults.object(forKey: Keys.showPeriodUsage) as? Bool ?? true
+        self.showSparkQuota = defaults.object(forKey: Keys.showSparkQuota) as? Bool ?? false
+        self.codexRadarEnabled = defaults.object(forKey: Keys.codexRadarEnabled) as? Bool ?? false
+        self.codexRadarAPIToken = loadedVault.value(for: .codexRadarAPI)
         self.enablePulse = defaults.object(forKey: Keys.enablePulse) as? Bool ?? true
         self.taskHistoryRange = TaskHistoryRange(rawValue: defaults.string(forKey: Keys.taskHistoryRange) ?? "") ?? .threeDays
         self.notchDisplaySource = NotchDisplaySource(rawValue: defaults.string(forKey: Keys.notchDisplaySource) ?? "") ?? .codex
+        self.notchDisplaySize = NotchDisplaySize(rawValue: defaults.string(forKey: Keys.notchDisplaySize) ?? "") ?? .standard
         self.notchWidthAdjustment = Self.clamped(
             defaults.object(forKey: Keys.notchWidthAdjustment) as? NotchPointAdjustment ?? 0,
             min: -NotchPointAdjustment(IslandMetrics.notchAdjustmentLimit),
@@ -697,6 +729,7 @@ final class CodexNotchSettings: ObservableObject {
         }
         newAPIManagementKey = result.vault.value(for: .newAPIManagement)
         subAPIManagementKey = result.vault.value(for: .subAPIManagement)
+        codexRadarAPIToken = result.vault.value(for: .codexRadarAPI)
         newAPIAccounts = result.newAPIAccounts.accounts
         newAPIKeychainError = result.newAPIAccounts.keychainError
         subAPIAccounts = result.subAPIAccounts.accounts
@@ -1129,6 +1162,20 @@ final class CodexNotchSettings: ObservableObject {
             } else {
                 subAPIKeychainError = error.localizedDescription
             }
+        }
+    }
+
+    private func persistCodexRadarAPIToken(_ value: String) {
+        guard !isInitializing && !isApplyingSecretVault else {
+            return
+        }
+        markSecretConfigurationEdited()
+        secretVault.set(value.trimmingCharacters(in: .whitespacesAndNewlines), for: .codexRadarAPI)
+        do {
+            try persistSecretVault()
+            codexRadarTokenError = nil
+        } catch {
+            codexRadarTokenError = error.localizedDescription
         }
     }
 

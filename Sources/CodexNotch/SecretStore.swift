@@ -23,6 +23,7 @@ struct SecretKey: Hashable, Codable {
     static let cliproxyManagement = SecretKey(rawValue: "cliproxy.management")
     static let newAPIManagement = SecretKey(rawValue: "newapi.management")
     static let subAPIManagement = SecretKey(rawValue: "subapi.management")
+    static let codexRadarAPI = SecretKey(rawValue: "codexradar.api")
 
     static func balanceAccount(source: BalanceMonitorSource, id: String) -> SecretKey {
         SecretKey(rawValue: "\(source.rawValue).account.\(id)")

@@ -34,6 +34,8 @@ final class UsageViewModel: ObservableObject {
     private var lastUsageRefreshDuration: TimeInterval?
     private var periodUsageRefreshEnabled = false
     private var usageRefreshQueue = UsageRefreshQueue()
+    private var usageRefreshTask: Task<Void, Never>?
+    private var usageRefreshGeneration = 0
     private var usageLoadState = PeriodUsageLoadState()
     private var watcherRefreshGeneration = 0
     private var observedSettings: LocalUsageSettingsSnapshot?
@@ -159,6 +161,9 @@ final class UsageViewModel: ObservableObject {
         usageTimer = nil
         usageFileChangeTimer?.invalidate()
         usageFileChangeTimer = nil
+        usageRefreshQueue.cancelPending()
+        usageRefreshGeneration += 1
+        usageRefreshTask?.cancel()
     }
 
     func disableUsageTotals() {
@@ -187,11 +192,34 @@ final class UsageViewModel: ObservableObject {
         updateRefreshingState()
 
         let refreshStartedAt = Date()
-        Task.detached(priority: .utility) { [store] in
-            let usage = store.loadUsageTotals()
+        usageRefreshGeneration += 1
+        let generation = usageRefreshGeneration
+        let task = Task.detached(priority: .utility) { [store] in
+            let cancellationCheck: @Sendable () -> Bool = {
+                withUnsafeCurrentTask { $0?.isCancelled ?? false }
+            }
+            let usage = store.loadUsageTotals(isCancelled: cancellationCheck)
+            let taskWasCancelled = cancellationCheck()
             let duration = Date().timeIntervalSince(refreshStartedAt)
             await MainActor.run {
+                let wasCancelled = taskWasCancelled || generation != self.usageRefreshGeneration
+                self.usageRefreshTask = nil
                 self.lastUsageRefreshDuration = duration
+                let completion = self.usageRefreshQueue.complete()
+                self.isRefreshingUsage = false
+                self.updateRefreshingState()
+                if wasCancelled {
+                    if case .schedulePending(let scheduleNext) = completion,
+                       self.settings.showPeriodUsage,
+                       self.periodUsageRefreshEnabled {
+                        self.schedulePendingUsageRefresh(
+                            scheduleNext: scheduleNext,
+                            delay: 0.1
+                        )
+                    }
+                    return
+                }
+
                 let completedAt = Date()
                 let succeeded = self.usageLoadState.record(
                     usage,
@@ -208,9 +236,6 @@ final class UsageViewModel: ObservableObject {
                     self.snapshot.usageTodaySummary = usage.todaySummary
                 }
                 self.hasLoadedUsageTotals = self.usageLoadState.hasSuccessfulValue
-                let completion = self.usageRefreshQueue.complete()
-                self.isRefreshingUsage = false
-                self.updateRefreshingState()
                 switch completion {
                 case .schedulePending(let scheduleNext):
                     let delay = succeeded
@@ -238,6 +263,7 @@ final class UsageViewModel: ObservableObject {
                 }
             }
         }
+        usageRefreshTask = task
     }
 
     private func scheduleFastRefresh() {

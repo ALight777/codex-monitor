@@ -22,6 +22,311 @@ struct CodexTokenCountEvent {
     let usage: TokenUsageBreakdown
 }
 
+struct CodexTokenUsageRecord {
+    let timestamp: String
+    let timestampPrefix: String
+    let tokens: Int
+    let usage: TokenUsageBreakdown
+}
+
+enum CodexUsageTailEvent: Equatable {
+    case tokenCount(timestampPrefix: String, usage: TokenUsageBreakdown)
+    case turnContext(model: String?)
+    case worldState
+}
+
+struct CodexUsageEventLineScanner {
+    private static let typeKey = Array(#""type""#.utf8)
+    private static let modelKey = Array(#""model""#.utf8)
+    private static let timestampKey = Array(#""timestamp""#.utf8)
+    private static let lastTokenUsageKey = Array(#""last_token_usage""#.utf8)
+    private static let inputTokensKey = Array(#""input_tokens""#.utf8)
+    private static let cachedInputTokensKey = Array(#""cached_input_tokens""#.utf8)
+    private static let outputTokensKey = Array(#""output_tokens""#.utf8)
+    private static let reasoningOutputTokensKey = Array(#""reasoning_output_tokens""#.utf8)
+    private static let totalTokensKey = Array(#""total_tokens""#.utf8)
+    private static let compactWorldStateMarker = Array(#""type":"world_state""#.utf8)
+
+    static func events(
+        in data: Data,
+        lineLimit: Int,
+        dropLeadingPartialLine: Bool,
+        startingAt requestedStart: Int = 0,
+        resetAfterLastWorldState: Bool = false
+    ) -> [CodexUsageTailEvent] {
+        guard !data.isEmpty, lineLimit > 0 else {
+            return []
+        }
+
+        return data.withUnsafeBytes { bytes in
+            var lineStart = min(max(0, requestedStart), bytes.count)
+            var shouldDropLeadingLine = dropLeadingPartialLine
+            var skippedWorldState = false
+            if resetAfterLastWorldState,
+               let markerIndex = lastIndex(
+                of: compactWorldStateMarker,
+                in: bytes,
+                from: lineStart,
+                to: bytes.count
+               ),
+               let newlineIndex = firstByte(
+                0x0A,
+                in: bytes,
+                from: markerIndex + compactWorldStateMarker.count,
+                to: bytes.count
+               ) {
+                lineStart = newlineIndex + 1
+                shouldDropLeadingLine = false
+                skippedWorldState = true
+            }
+            if shouldDropLeadingLine {
+                while lineStart < bytes.count, bytes[lineStart] != 0x0A {
+                    lineStart += 1
+                }
+                if lineStart < bytes.count {
+                    lineStart += 1
+                }
+            }
+
+            var matches: [CodexUsageTailEvent] = []
+            var index = lineStart
+
+            func appendLine(endingAt rawEnd: Int) {
+                var end = rawEnd
+                if end > lineStart, bytes[end - 1] == 0x0D {
+                    end -= 1
+                }
+                guard end > lineStart,
+                      let event = event(in: bytes, from: lineStart, to: end) else {
+                    return
+                }
+                matches.append(event)
+            }
+
+            while index < bytes.count {
+                if bytes[index] == 0x0A {
+                    appendLine(endingAt: index)
+                    lineStart = index + 1
+                }
+                index += 1
+            }
+            if lineStart < bytes.count {
+                appendLine(endingAt: bytes.count)
+            }
+
+            if skippedWorldState {
+                matches.insert(.worldState, at: 0)
+            }
+            if matches.count > lineLimit {
+                matches.removeFirst(matches.count - lineLimit)
+            }
+            return matches
+        }
+    }
+
+    private static func event(
+        in bytes: UnsafeRawBufferPointer,
+        from start: Int,
+        to end: Int
+    ) -> CodexUsageTailEvent? {
+        switch jsonStringValue(for: typeKey, in: bytes, from: start, to: end) {
+        case "world_state":
+            return .worldState
+        case "turn_context":
+            return .turnContext(
+                model: jsonStringValue(for: modelKey, in: bytes, from: start, to: end)
+            )
+        default:
+            break
+        }
+
+        guard let usageKeyIndex = firstIndex(
+            of: lastTokenUsageKey,
+            in: bytes,
+            from: start,
+            to: end
+        ),
+        let timestamp = jsonStringValue(
+            for: timestampKey,
+            in: bytes,
+            from: start,
+            to: usageKeyIndex
+        ),
+        timestamp.utf8.count >= 19,
+        let usageStart = firstByte(0x7B, in: bytes, from: usageKeyIndex + lastTokenUsageKey.count, to: end),
+        let usageEnd = firstByte(0x7D, in: bytes, from: usageStart + 1, to: end),
+        let total = jsonIntValue(for: totalTokensKey, in: bytes, from: usageStart, to: usageEnd) else {
+            return nil
+        }
+
+        let input = max(0, jsonIntValue(for: inputTokensKey, in: bytes, from: usageStart, to: usageEnd) ?? 0)
+        let cached = min(
+            input,
+            max(0, jsonIntValue(for: cachedInputTokensKey, in: bytes, from: usageStart, to: usageEnd) ?? 0)
+        )
+        let output = max(0, jsonIntValue(for: outputTokensKey, in: bytes, from: usageStart, to: usageEnd) ?? 0)
+        let reasoning = min(
+            output,
+            max(0, jsonIntValue(for: reasoningOutputTokensKey, in: bytes, from: usageStart, to: usageEnd) ?? 0)
+        )
+        return .tokenCount(
+            timestampPrefix: String(decoding: timestamp.utf8.prefix(19), as: UTF8.self),
+            usage: TokenUsageBreakdown(
+                inputTokens: input,
+                cachedInputTokens: cached,
+                outputTokens: output,
+                reasoningOutputTokens: reasoning,
+                totalTokens: max(0, total)
+            )
+        )
+    }
+
+    private static func jsonStringValue(
+        for key: [UInt8],
+        in bytes: UnsafeRawBufferPointer,
+        from start: Int,
+        to end: Int
+    ) -> String? {
+        guard let keyIndex = firstIndex(of: key, in: bytes, from: start, to: end) else {
+            return nil
+        }
+        var index = keyIndex + key.count
+        skipWhitespace(in: bytes, index: &index, end: end)
+        guard index < end, bytes[index] == 0x3A else {
+            return nil
+        }
+        index += 1
+        skipWhitespace(in: bytes, index: &index, end: end)
+        guard index < end, bytes[index] == 0x22 else {
+            return nil
+        }
+        index += 1
+        let valueStart = index
+        while index < end {
+            if bytes[index] == 0x5C {
+                return nil
+            }
+            if bytes[index] == 0x22 {
+                return String(decoding: bytes[valueStart..<index], as: UTF8.self)
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func jsonIntValue(
+        for key: [UInt8],
+        in bytes: UnsafeRawBufferPointer,
+        from start: Int,
+        to end: Int
+    ) -> Int? {
+        guard let keyIndex = firstIndex(of: key, in: bytes, from: start, to: end) else {
+            return nil
+        }
+        var index = keyIndex + key.count
+        skipWhitespace(in: bytes, index: &index, end: end)
+        guard index < end, bytes[index] == 0x3A else {
+            return nil
+        }
+        index += 1
+        skipWhitespace(in: bytes, index: &index, end: end)
+        let numberStart = index
+        while index < end, bytes[index] >= 0x30, bytes[index] <= 0x39 {
+            index += 1
+        }
+        guard numberStart < index else {
+            return nil
+        }
+        return Int(String(decoding: bytes[numberStart..<index], as: UTF8.self))
+    }
+
+    private static func firstIndex(
+        of needle: [UInt8],
+        in bytes: UnsafeRawBufferPointer,
+        from start: Int,
+        to end: Int
+    ) -> Int? {
+        guard !needle.isEmpty, end - start >= needle.count else {
+            return nil
+        }
+        let lastStart = end - needle.count
+        var index = start
+        while index <= lastStart {
+            if bytes[index] == needle[0] {
+                var needleIndex = 1
+                while needleIndex < needle.count,
+                      bytes[index + needleIndex] == needle[needleIndex] {
+                    needleIndex += 1
+                }
+                if needleIndex == needle.count {
+                    return index
+                }
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func lastIndex(
+        of needle: [UInt8],
+        in bytes: UnsafeRawBufferPointer,
+        from start: Int,
+        to end: Int
+    ) -> Int? {
+        guard !needle.isEmpty, end - start >= needle.count else {
+            return nil
+        }
+        var index = end - needle.count
+        while true {
+            if bytes[index] == needle[0] {
+                var needleIndex = 1
+                while needleIndex < needle.count,
+                      bytes[index + needleIndex] == needle[needleIndex] {
+                    needleIndex += 1
+                }
+                if needleIndex == needle.count {
+                    return index
+                }
+            }
+            guard index > start else {
+                return nil
+            }
+            index -= 1
+        }
+    }
+
+    private static func firstByte(
+        _ value: UInt8,
+        in bytes: UnsafeRawBufferPointer,
+        from start: Int,
+        to end: Int
+    ) -> Int? {
+        var index = start
+        while index < end {
+            if bytes[index] == value {
+                return index
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func skipWhitespace(
+        in bytes: UnsafeRawBufferPointer,
+        index: inout Int,
+        end: Int
+    ) {
+        while index < end {
+            switch bytes[index] {
+            case 0x20, 0x09, 0x0A, 0x0D:
+                index += 1
+            default:
+                return
+            }
+        }
+    }
+}
+
 struct CodexSessionEventDecoder {
     private struct SessionLineEvent {
         let timestamp: Date
@@ -188,6 +493,9 @@ struct CodexSessionEventDecoder {
         guard line.contains(#""turn_context""#) else {
             return nil
         }
+        if let model = fastJSONStringValue(for: "model", in: line) {
+            return model
+        }
         return runtimeInfo(from: line)?.model
     }
 
@@ -209,12 +517,25 @@ struct CodexSessionEventDecoder {
     }
 
     func tokenCountEvent(from line: String) -> CodexTokenCountEvent? {
+        guard let record = tokenUsageRecord(from: line),
+              let date = parseTimestamp(record.timestamp) else {
+            return nil
+        }
+        return CodexTokenCountEvent(
+            timestamp: record.timestamp,
+            date: date,
+            tokens: record.tokens,
+            usage: record.usage
+        )
+    }
+
+    func tokenUsageRecord(from line: String) -> CodexTokenUsageRecord? {
         if let event = fastTokenCountLineInfo(line),
-           let date = parseTimestamp(event.timestamp),
+           let timestampPrefix = timestampSecondPrefix(from: event.timestamp),
            let usage = fastTokenUsageBreakdown(in: line) {
-            return CodexTokenCountEvent(
+            return CodexTokenUsageRecord(
                 timestamp: event.timestamp,
-                date: date,
+                timestampPrefix: timestampPrefix,
                 tokens: event.tokens,
                 usage: usage
             )
@@ -223,7 +544,7 @@ struct CodexSessionEventDecoder {
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let timestamp = object["timestamp"] as? String,
-              let date = parseTimestamp(timestamp),
+              let timestampPrefix = timestampSecondPrefix(from: timestamp),
               let payload = object["payload"] as? [String: Any],
               payload["type"] as? String == "token_count",
               let info = payload["info"] as? [String: Any],
@@ -244,7 +565,12 @@ struct CodexSessionEventDecoder {
             totalTokens: tokens
         )
 
-        return CodexTokenCountEvent(timestamp: timestamp, date: date, tokens: tokens, usage: usage)
+        return CodexTokenUsageRecord(
+            timestamp: timestamp,
+            timestampPrefix: timestampPrefix,
+            tokens: tokens,
+            usage: usage
+        )
     }
 
     func isWorldStateLine(_ line: String) -> Bool {

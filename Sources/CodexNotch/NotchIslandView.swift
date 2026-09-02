@@ -1925,7 +1925,7 @@ private struct TokenUsagePopover: View {
                 Text("本地记录未提供完整的 Token 构成明细")
                     .foregroundStyle(.secondary)
             } else if !summary.unknownModels.isEmpty {
-                Text("部分模型暂无可匹配的官方价格：\(summary.unknownModels.joined(separator: "、"))")
+                Text("部分 Token 未计入估算：\(summary.unknownModels.joined(separator: "、"))")
                     .foregroundStyle(.orange)
             }
 

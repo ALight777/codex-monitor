@@ -45,6 +45,30 @@ import Testing
     #expect(summary.unknownModels == ["private-preview-model"])
 }
 
+@Test func knownModelsRemainEstimatedWhenUnknownUsageIsPresent() {
+    let knownUsage = TokenUsageBreakdown(
+        inputTokens: 150_000,
+        cachedInputTokens: 140_000,
+        outputTokens: 10_000,
+        reasoningOutputTokens: 8_000,
+        totalTokens: 160_000
+    )
+    let unknownUsage = TokenUsageBreakdown(
+        inputTokens: 1_000,
+        outputTokens: 100,
+        totalTokens: 1_100
+    )
+    var summary = TokenUsageSummary.zero
+    summary.add(knownUsage, model: "gpt-5.6-sol")
+    summary.add(unknownUsage, model: nil)
+
+    #expect(abs((summary.costUSD ?? 0) - 0.296) < 0.000_000_1)
+    #expect(summary.pricedTokens == 160_000)
+    #expect(summary.unpricedTokens == 1_100)
+    #expect(summary.unknownModels == ["模型未知"])
+    #expect(!summary.isComplete)
+}
+
 @Test func decoderReadsLocalCodexTokenComposition() {
     let decoder = CodexSessionEventDecoder()
     let line = #"{"timestamp":"2026-08-27T12:00:00.000Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":149661,"cached_input_tokens":148352,"output_tokens":943,"reasoning_output_tokens":512,"total_tokens":150604}}}}"#
@@ -68,4 +92,23 @@ import Testing
     let plain = TokenCostCatalog.estimatedCostUSD(for: usage, model: "gpt-5.4")
     let dated = TokenCostCatalog.estimatedCostUSD(for: usage, model: "openai/gpt-5.4-2026-08-01")
     #expect(plain == dated)
+}
+
+@Test func codexAutoReviewUsesGPT56SolPricing() {
+    let usage = TokenUsageBreakdown(
+        inputTokens: 300_000,
+        cachedInputTokens: 250_000,
+        outputTokens: 20_000,
+        reasoningOutputTokens: 12_000,
+        totalTokens: 320_000
+    )
+    let sol = TokenCostCatalog.estimatedCostUSD(for: usage, model: "gpt-5.6-sol")
+    let autoReview = TokenCostCatalog.estimatedCostUSD(for: usage, model: "codex-auto-review")
+    let prefixedAutoReview = TokenCostCatalog.estimatedCostUSD(
+        for: usage,
+        model: "openai/codex-auto-review"
+    )
+
+    #expect(autoReview == sol)
+    #expect(prefixedAutoReview == sol)
 }

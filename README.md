@@ -50,7 +50,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 应用只读取这些文件，不会修改 Codex 的本地数据。
 
-花费按记录中的实际模型逐次套用 OpenAI 官方 API 单价，并分别计算未缓存输入、缓存输入和输出；长上下文模型按单次请求规则处理。该数字只是 API 等价估算，不是 Codex 订阅账单。若本地记录缺少构成、缓存写入 Token 或模型没有可匹配的公开价格，界面会显示不可估算或部分缺失，不会猜测单价。价格表版本会显示在用量卡片下方。
+花费按记录中的实际模型逐次套用 OpenAI 官方 API 单价，并分别计算未缓存输入、缓存输入和输出；长上下文模型按单次请求规则处理。`codex-auto-review` 按 `gpt-5.6-sol` 的同一套价格和长上下文规则估算。对于模型未知或无可匹配价格的 Token，应用会将其排除后继续估算已知部分，并在界面中明确提示未计入的部分。该数字只是 API 等价估算，不是 Codex 订阅账单。价格表版本会显示在用量卡片下方。
 
 ### CodexRadar
 
@@ -153,8 +153,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.12-arm64.dmg
-dist/codex-monitor-0.1.12-amd64.dmg
+dist/codex-monitor-0.1.13-arm64.dmg
+dist/codex-monitor-0.1.13-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -272,7 +272,7 @@ Local data is read from Codex files under the current user account, including:
 
 The app reads these files only. It does not modify local Codex data.
 
-Costs are estimated per recorded request using the matching official OpenAI API model price, with uncached input, cached input, output, and supported long-context rules calculated separately. This is an API-equivalent estimate, not Codex subscription billing. Missing component data, cache-write tokens, or an unknown public model price remains explicitly unavailable rather than being guessed. The pricing snapshot date appears below the local usage cells.
+Costs are estimated per recorded request using the matching official OpenAI API model price, with uncached input, cached input, output, and supported long-context rules calculated separately. `codex-auto-review` uses the same price and long-context rules as `gpt-5.6-sol`. Tokens whose model is missing or has no matching price are excluded while the known portion remains estimated, and the omitted portion stays explicitly identified in the UI. This is an API-equivalent estimate, not Codex subscription billing. The pricing snapshot date appears below the local usage cells.
 
 ### CodexRadar
 
@@ -375,8 +375,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.12-arm64.dmg
-dist/codex-monitor-0.1.12-amd64.dmg
+dist/codex-monitor-0.1.13-arm64.dmg
+dist/codex-monitor-0.1.13-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

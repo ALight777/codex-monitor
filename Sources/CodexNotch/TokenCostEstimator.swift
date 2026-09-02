@@ -56,8 +56,12 @@ struct TokenUsageSummary: Equatable, Sendable {
         breakdown.totalTokens
     }
 
+    var pricedTokens: Int {
+        max(0, totalTokens - unpricedTokens)
+    }
+
     var costUSD: Double? {
-        guard totalTokens > 0, unpricedTokens == 0 else {
+        guard pricedTokens > 0 else {
             return nil
         }
         return estimatedCostUSD
@@ -120,8 +124,11 @@ struct ModelTokenPrice: Equatable, Sendable {
 }
 
 enum TokenCostCatalog {
-    static let priceVersion = "2026-08-27"
+    static let priceVersion = "2026-08-28"
     static let longContextThreshold = 272_000
+    private static let modelAliases = [
+        "codex-auto-review": "gpt-5.6-sol"
+    ]
 
     static func price(for model: String?) -> ModelTokenPrice? {
         guard let normalized = normalizedModel(model) else {
@@ -185,6 +192,6 @@ enum TokenCostCatalog {
         if value.hasPrefix("openai/") {
             value.removeFirst("openai/".count)
         }
-        return value
+        return modelAliases[value] ?? value
     }
 }

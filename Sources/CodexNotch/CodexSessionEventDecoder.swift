@@ -656,6 +656,8 @@ struct CodexSessionEventDecoder {
     private func lineMarksActivity(_ line: String) -> Bool {
         line.contains(#""type":"response_item""#)
             || line.contains(#""type": "response_item""#)
+            || line.contains(#""type":"task_started""#)
+            || line.contains(#""type": "task_started""#)
             || line.contains("response.output_item.added")
             || line.contains("response.output_text.delta")
             || line.contains(#""status":"in_progress""#)

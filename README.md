@@ -153,8 +153,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.13-arm64.dmg
-dist/codex-monitor-0.1.13-amd64.dmg
+dist/codex-monitor-0.1.14-arm64.dmg
+dist/codex-monitor-0.1.14-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -375,8 +375,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.13-arm64.dmg
-dist/codex-monitor-0.1.13-amd64.dmg
+dist/codex-monitor-0.1.14-arm64.dmg
+dist/codex-monitor-0.1.14-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

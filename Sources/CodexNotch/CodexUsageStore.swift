@@ -171,7 +171,7 @@ final class CodexUsageStore: @unchecked Sendable {
                 usage: subagentUsage
             )
             let activeThreadIDs = ((try? loadActiveThreadIDs(now: now)) ?? [])
-                .union(activeSessionThreadIDs(from: sessionThreads, now: now))
+                .union(activeSessionThreadIDs(from: threads, now: now))
                 .union(activeSubagentParents.map(\.id))
             let usage = includePeriodUsage
                 ? (loadUsageTotals(now: now, fallbackThreads: threads) ?? fallbackUsage ?? .zero)
@@ -838,7 +838,18 @@ final class CodexUsageStore: @unchecked Sendable {
         let updatedAt = max(existing.updatedAt, candidate.updatedAt)
         let title = bestTitle(existing.title, candidate.title)
         let tokensUsed = max(existing.tokensUsed, candidate.tokensUsed)
-        let rolloutPath = candidate.rolloutPath.isEmpty ? existing.rolloutPath : candidate.rolloutPath
+        let rolloutPath: String
+        if existing.rolloutPath.isEmpty
+            || !FileManager.default.fileExists(atPath: existing.rolloutPath) {
+            rolloutPath = candidate.rolloutPath
+        } else if candidate.rolloutPath.isEmpty
+            || !FileManager.default.fileExists(atPath: candidate.rolloutPath) {
+            rolloutPath = existing.rolloutPath
+        } else {
+            rolloutPath = candidate.updatedAt > existing.updatedAt
+                ? candidate.rolloutPath
+                : existing.rolloutPath
+        }
         let tokenUsage: TokenUsageSummary?
         switch (existing.tokenUsage, candidate.tokenUsage) {
         case let (lhs?, rhs?):
@@ -1726,6 +1737,8 @@ final class CodexUsageStore: @unchecked Sendable {
         let activityCondition = """
         feedback_log_body like '%response.output_item.added%'
               or feedback_log_body like '%response.output_text.delta%'
+              or feedback_log_body like '%"type":"task_started"%'
+              or feedback_log_body like '%"type": "task_started"%'
               or feedback_log_body like '%"status":"in_progress"%'
         """
         let completionCondition = """
@@ -1885,23 +1898,24 @@ final class CodexUsageStore: @unchecked Sendable {
 
     private func sessionID(from path: String) -> String? {
         let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-        let pieces = name.split(separator: "-", omittingEmptySubsequences: false)
+        let pieces = name.split { character in
+            character == "-" || character == "_"
+        }
         guard pieces.count >= 5 else {
             return nil
         }
 
-        let suffix = pieces.suffix(5).joined(separator: "-")
-        let idPieces = suffix.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
-        guard idPieces.map(\.count) == [8, 4, 4, 4, 12] else {
-            return nil
-        }
-
         let hex = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
-        guard idPieces.joined().unicodeScalars.allSatisfy({ hex.contains($0) }) else {
-            return nil
+        for start in 0...(pieces.count - 5) {
+            let idPieces = pieces[start..<(start + 5)].map(String.init)
+            guard idPieces.map(\.count) == [8, 4, 4, 4, 12],
+                  idPieces.joined().unicodeScalars.allSatisfy({ hex.contains($0) }) else {
+                continue
+            }
+            return idPieces.joined(separator: "-").lowercased()
         }
 
-        return suffix.lowercased()
+        return nil
     }
 
     private func sessionTokenTotal(from path: String) -> Int? {

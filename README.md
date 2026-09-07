@@ -58,7 +58,9 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 ### CodexRadar
 
-可在设置中启用独立的 `Radar` 页，展示 Codex 雷达提供的模型评分、通过数、成本、耗时、套餐额度预测与状态摘要。有 API Token 时使用授权接口，留空则使用公开摘要；数据每天北京时间 08:20 和 14:20 自动更新。
+可在设置中启用独立的 `Radar` 页。Token 留空时读取官网持续更新的 DeepSWE 软件工程众测评分，展示包括 GPT-6 Astra 在内的全部 Codex 模型档位。通过数按有效样本统计，成本与耗时为平均值；界面标明“评测维度：软件工程”，并分别显示数据时间和最近检查时间。有 API Token 时使用授权摘要接口，可展示该接口提供的套餐额度预测与状态摘要。
+
+每小时及北京时间 08:20、14:20 自动检查；失败时保留最后有效数据，5 分钟后自动重试。手动刷新会请求官网刷新共享缓存，成功后间隔 5 分钟，失败可立即重试。升级后旧 `current.json` 摘要缓存会在首次成功获取众测数据后自动迁移。
 
 Token 使用应用现有的密钥保存方式（默认 macOS 钥匙串），不写入 UserDefaults 或 CodexRadar 响应缓存。缓存文件仅当前用户可读写。数据来自 [Codex 雷达](https://codexradar.com)。
 
@@ -158,8 +160,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.15-arm64.dmg
-dist/codex-monitor-0.1.15-amd64.dmg
+dist/codex-monitor-0.1.16-arm64.dmg
+dist/codex-monitor-0.1.16-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -281,7 +283,7 @@ Costs are estimated per recorded request using the matching standard API model p
 
 ### CodexRadar
 
-The optional `Radar` tab shows model scores, pass counts, cost, duration, plan-quota estimates, and status summaries from Codex Radar. It uses the authorized endpoint when an API token is configured and the public summary otherwise. Refreshes are scheduled for 08:20 and 14:20 Beijing time each day.
+The optional `Radar` tab shows Codex model scores from the website's live DeepSWE community feed, including GPT-6 Astra and all available reasoning tiers. Pass counts represent samples; cost and duration are averages. An optional API token selects the authorized summary endpoint, which can also provide plan-quota estimates and status summaries. Data timestamps are shown separately from the last successful check. Refreshes run hourly and at 08:20 and 14:20 Beijing time; failures keep the last valid data and retry after five minutes. Manual refresh requests the website's shared-cache refresh and has a five-minute cooldown after success; failed requests can be retried immediately. Old `current.json` caches are migrated on the first successful refresh.
 
 The API token uses the app's existing secret-storage mode (macOS Keychain by default) and is not written to UserDefaults or the CodexRadar response cache. Cache files are restricted to the current user. Data comes from [Codex Radar](https://codexradar.com).
 
@@ -381,8 +383,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.15-arm64.dmg
-dist/codex-monitor-0.1.15-amd64.dmg
+dist/codex-monitor-0.1.16-arm64.dmg
+dist/codex-monitor-0.1.16-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

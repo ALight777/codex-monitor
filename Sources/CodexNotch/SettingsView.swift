@@ -525,7 +525,7 @@ struct SettingsView: View {
                 HelpLabel(title: "启用 CodexRadar", help: "在展开页新增 CodexRadar 标签，展示模型评分、额度雷达和状态摘要。")
             }
 
-            Text("每天北京时间 08:20、14:20 自动更新；手动刷新间隔为 5 分钟。没有 Token 时读取公开摘要。")
+            Text("每小时及北京时间 08:20、14:20 自动检查；失败后 5 分钟重试。手动刷新成功后间隔 5 分钟，失败可立即重试。没有 Token 时读取官网众测数据。")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -533,7 +533,7 @@ struct SettingsView: View {
             labeledSecureField(
                 "API Token",
                 text: $draft.codexRadarAPIToken,
-                placeholder: "留空时读取公开摘要",
+                placeholder: "留空时读取官网众测数据",
                 help: "Token 使用当前密钥存储模式保存；默认进入 macOS 钥匙串，不写入 UserDefaults 或缓存文件。"
             )
             .disabled(!draft.codexRadarEnabled)
@@ -553,6 +553,22 @@ struct SettingsView: View {
                     codexRadarViewModel.refreshNow()
                 }
                 .disabled(!settings.codexRadarEnabled || draft.codexRadarEnabled != settings.codexRadarEnabled || codexRadarViewModel.isRefreshing)
+            }
+            if let checkedAt = codexRadarViewModel.snapshot.fetchedAt {
+                Text("最近检查：\(checkedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            if let next = codexRadarViewModel.nextRefreshAt {
+                Text("下次检查：\(next.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            if let message = codexRadarViewModel.snapshot.message {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
 

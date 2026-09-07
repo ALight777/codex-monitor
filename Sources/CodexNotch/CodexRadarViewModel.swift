@@ -6,10 +6,12 @@ import Foundation
 final class CodexRadarViewModel: ObservableObject {
     @Published private(set) var snapshot: CodexRadarSnapshot = .disabled
     @Published private(set) var isRefreshing = false
+    @Published private(set) var nextRefreshAt: Date?
 
     private let settings: CodexNotchSettings
     private let client: CodexRadarClient
     private let cacheDirectory: URL
+    private let now: @MainActor () -> Date
     private var refreshTimer: Timer?
     private var settingsTimer: Timer?
     private var refreshTask: Task<Void, Never>?
@@ -18,15 +20,18 @@ final class CodexRadarViewModel: ObservableObject {
     private var observedEnabled: Bool
     private var observedToken: String
     private var lastManualRefreshAt: Date?
+    private var retryAt: Date?
 
     init(
         settings: CodexNotchSettings,
         client: CodexRadarClient = CodexRadarClient(),
-        cacheDirectory: URL = CodexRadarCache.defaultDirectory()
+        cacheDirectory: URL = CodexRadarCache.defaultDirectory(),
+        now: @escaping @MainActor () -> Date = Date.init
     ) {
         self.settings = settings
         self.client = client
         self.cacheDirectory = cacheDirectory
+        self.now = now
         observedEnabled = settings.codexRadarEnabled
         observedToken = settings.codexRadarAPIToken
         observeSettings()
@@ -34,79 +39,90 @@ final class CodexRadarViewModel: ObservableObject {
     }
 
     func refreshNow() {
-        guard settings.codexRadarEnabled else { return }
-        let now = Date()
+        guard settings.codexRadarEnabled, !isRefreshing else { return }
+        let now = now()
         guard CodexRadarRefreshPolicy.canManualRefresh(lastRefreshAt: lastManualRefreshAt, now: now) else {
-            snapshot = snapshot.withState(snapshot.hasData ? .stale : .error, message: "手动刷新间隔为 5 分钟")
+            snapshot = snapshot.withState(snapshot.state, message: "刚刚已刷新；手动刷新间隔为 5 分钟")
             return
         }
-        lastManualRefreshAt = now
-        refreshFromNetwork(cancelCurrent: true)
+        refreshFromNetwork(manual: true)
     }
 
     func refreshIfNeeded() {
         guard settings.codexRadarEnabled else { return }
+        let date = now()
+        if let retryAt, date < retryAt {
+            scheduleNextRefresh()
+            return
+        }
         let wantsAuthorizedAPI = !settings.codexRadarAPIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let desiredSource: CodexRadarDataSource = wantsAuthorizedAPI ? .authorizedAPI : .publicSummary
-        if snapshot.dataSource != desiredSource
-            || CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: snapshot.fetchedAt) {
+        let desiredSource: CodexRadarDataSource = wantsAuthorizedAPI ? .authorizedAPI : .publicMetrics
+        if retryAt != nil || snapshot.dataSource != desiredSource
+            || CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: snapshot.fetchedAt, now: date) {
             refreshFromNetwork()
         } else {
             scheduleNextRefresh()
         }
     }
 
-    private func loadCacheAndSchedule() {
+    private func loadCacheAndSchedule(forceRefresh: Bool = false) {
         refreshTimer?.invalidate()
+        nextRefreshAt = nil
         guard settings.codexRadarEnabled else {
             cancelRefresh()
             snapshot = .disabled
             return
         }
         if let cached = CodexRadarCache.load(from: cacheDirectory) {
-            let stale = CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: cached.fetchedAt)
+            let stale = cached.dataSource == .publicSummary
+                || CodexRadarRefreshPolicy.shouldRefresh(lastFetchAt: cached.fetchedAt, now: now())
             snapshot = cached.withState(stale ? .stale : .ready, message: stale ? "缓存已过期，正在后台更新" : nil)
         } else {
             snapshot = .loading
         }
-        refreshIfNeeded()
+        if forceRefresh { refreshFromNetwork() }
+        else { refreshIfNeeded() }
     }
 
-    private func refreshFromNetwork(cancelCurrent: Bool = false) {
-        if cancelCurrent { cancelRefresh() }
+    private func refreshFromNetwork(manual: Bool = false) {
         guard settings.codexRadarEnabled, !isRefreshing else { return }
+        refreshTimer?.invalidate()
+        nextRefreshAt = nil
         isRefreshing = true
         generation += 1
         let currentGeneration = generation
         let token = settings.codexRadarAPIToken
         let previous = snapshot
         let client = client
-        let directory = cacheDirectory
-
-        refreshTask = Task.detached(priority: .utility) {
+        refreshTask = Task { [weak self] in
             do {
-                let result = try await client.fetch(token: token)
-                let fetchedAt = Date()
+                let result = try await client.fetch(token: token, forceRefresh: manual)
+                try Task.checkCancellation()
+                guard let self, currentGeneration == self.generation else { return }
+                let fetchedAt = self.now()
                 let next = try CodexRadarSnapshot.decode(data: result.data, fetchedAt: fetchedAt, source: result.source)
-                try CodexRadarCache.save(data: result.data, fetchedAt: fetchedAt, source: result.source, to: directory)
-                await MainActor.run {
-                    guard currentGeneration == self.generation else { return }
-                    self.isRefreshing = false
-                    self.refreshTask = nil
-                    self.snapshot = next
-                    self.scheduleNextRefresh(now: fetchedAt)
+                self.isRefreshing = false
+                self.refreshTask = nil
+                self.retryAt = nil
+                if manual { self.lastManualRefreshAt = fetchedAt }
+                self.snapshot = next
+                do {
+                    try CodexRadarCache.save(data: result.data, fetchedAt: fetchedAt, source: result.source, to: self.cacheDirectory)
+                } catch {
+                    self.snapshot = next.withState(.ready, message: "数据已获取，但本地缓存保存失败")
                 }
+                self.scheduleNextRefresh()
             } catch {
-                await MainActor.run {
-                    guard currentGeneration == self.generation else { return }
-                    self.isRefreshing = false
-                    self.refreshTask = nil
-                    let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription.redactedForDisplay
-                    self.snapshot = previous.hasData
-                        ? previous.withState(.stale, message: message)
-                        : CodexRadarSnapshot.loading.withState(.error, message: message)
-                    self.scheduleNextRefresh()
-                }
+                guard let self, currentGeneration == self.generation else { return }
+                self.isRefreshing = false
+                self.refreshTask = nil
+                self.lastManualRefreshAt = nil
+                self.retryAt = self.now().addingTimeInterval(CodexRadarRefreshPolicy.retryInterval)
+                let message = ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription).redactedForDisplay
+                self.snapshot = previous.hasData
+                    ? previous.withState(.stale, message: "\(message)；5 分钟后自动重试，可手动重试")
+                    : CodexRadarSnapshot.loading.withState(.error, message: "\(message)；5 分钟后自动重试，可手动重试")
+                self.scheduleNextRefresh()
             }
         }
     }
@@ -125,22 +141,31 @@ final class CodexRadarViewModel: ObservableObject {
         guard enabled != observedEnabled || token != observedToken else { return }
         observedEnabled = enabled
         observedToken = token
+        cancelRefresh()
+        retryAt = nil
+        lastManualRefreshAt = nil
+        refreshTimer?.invalidate()
+        nextRefreshAt = nil
+        if !enabled { snapshot = .disabled }
         settingsTimer?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.loadCacheAndSchedule() }
+            Task { @MainActor in self?.loadCacheAndSchedule(forceRefresh: true) }
         }
         timer.tolerance = 0.15
         settingsTimer = timer
     }
 
-    private func scheduleNextRefresh(now: Date = Date()) {
-        guard settings.codexRadarEnabled else { return }
+    private func scheduleNextRefresh() {
+        guard settings.codexRadarEnabled, !isRefreshing else { return }
         refreshTimer?.invalidate()
-        let interval = max(60, CodexRadarRefreshPolicy.nextScheduledRefresh(after: now).timeIntervalSince(now))
+        let now = now()
+        let next = CodexRadarRefreshPolicy.nextRefresh(after: now, lastFetchAt: snapshot.fetchedAt, retryAt: retryAt)
+        nextRefreshAt = next
+        let interval = max(1, next.timeIntervalSince(now))
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.refreshIfNeeded() }
         }
-        timer.tolerance = min(300, interval * 0.1)
+        timer.tolerance = min(30, interval * 0.1)
         refreshTimer = timer
     }
 

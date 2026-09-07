@@ -801,12 +801,22 @@ struct DetailPanelView: View {
         return ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    RadarSummaryCell(label: "状态", value: radar.status ?? "--")
                     RadarSummaryCell(
-                        label: "更新时间",
+                        label: radar.dataSource == .publicMetrics ? "评测维度" : "状态",
+                        value: radar.status ?? "--"
+                    )
+                    RadarSummaryCell(
+                        label: "数据时间",
                         value: radar.displayUpdatedAt.map { "\(Formatters.relativeAge($0))前" } ?? "--"
                     )
                     RadarSummaryCell(label: "来源", value: radar.dataSource.label)
+                }
+
+                if let fetchedAt = radar.fetchedAt {
+                    Text("最近检查：\(fetchedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 if let prediction = radar.prediction ?? radar.recommendation {
@@ -837,8 +847,8 @@ struct DetailPanelView: View {
                         columns: [GridItem(.flexible(), spacing: 7), GridItem(.flexible(), spacing: 7)],
                         spacing: 7
                     ) {
-                        ForEach(radar.models.prefix(8)) { model in
-                            RadarModelCard(model: model)
+                        ForEach(radar.models) { model in
+                            RadarModelCard(model: model, usesAverages: radar.dataSource == .publicMetrics)
                         }
                     }
                 }
@@ -1621,6 +1631,7 @@ private struct RadarSummaryCell: View {
 
 private struct RadarModelCard: View {
     let model: CodexRadarModelScore
+    let usesAverages: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1650,7 +1661,7 @@ private struct RadarModelCard: View {
             if model.costUSD != nil || model.wallTime != nil {
                 HStack(spacing: 6) {
                     if let cost = model.costUSD {
-                        Text("成本 $\(cost, specifier: "%.2f")")
+                        Text("\(usesAverages ? "均费" : "成本") $\(cost, specifier: "%.2f")")
                     }
                     if let wallTime = model.wallTime {
                         Text(wallTime)

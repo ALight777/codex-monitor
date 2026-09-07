@@ -3,9 +3,14 @@ import Foundation
 enum CodexRadarDataSource: String, Codable, Equatable, Sendable {
     case authorizedAPI
     case publicSummary
+    case publicMetrics
 
     var label: String {
-        self == .authorizedAPI ? "授权 API" : "公开摘要"
+        switch self {
+        case .authorizedAPI: "授权 API"
+        case .publicSummary: "旧版摘要"
+        case .publicMetrics: "官网众测"
+        }
     }
 }
 
@@ -91,7 +96,8 @@ struct CodexRadarSnapshot: Equatable, Sendable {
     }
 
     var displayUpdatedAt: Date? {
-        [monitoredAt, quotaUpdatedAt, fetchedAt].compactMap { $0 }.max()
+        // Fetching an unchanged response must not make the source data look newer.
+        monitoredAt ?? quotaUpdatedAt
     }
 
     func withState(_ state: CodexRadarPanelState, message: String? = nil) -> CodexRadarSnapshot {
@@ -106,6 +112,9 @@ struct CodexRadarSnapshot: Equatable, Sendable {
         fetchedAt: Date,
         source: CodexRadarDataSource
     ) throws -> CodexRadarSnapshot {
+        if source == .publicMetrics {
+            return try decodeMetrics(data: data, fetchedAt: fetchedAt)
+        }
         let summary = try JSONDecoder().decode(CodexRadarSummaryDTO.self, from: data)
         let modelIQ = summary.modelIQ
         let modelCards = modelIQ?.modelCards ?? []
@@ -123,7 +132,7 @@ struct CodexRadarSnapshot: Equatable, Sendable {
             state: .ready,
             models: modelCards,
             quotaRows: quotaRows,
-            monitoredAt: summary.monitoredAt.flatMap(CodexRadarDateParser.parse),
+            monitoredAt: (modelIQ?.updatedAt ?? summary.monitoredAt).flatMap(CodexRadarDateParser.parse),
             quotaUpdatedAt: modelIQ?.quotaRadar?.updatedAt.flatMap(CodexRadarDateParser.parse),
             fetchedAt: fetchedAt,
             status: summary.status?.nonBlank,
@@ -135,10 +144,43 @@ struct CodexRadarSnapshot: Equatable, Sendable {
             message: nil
         )
     }
+
+    private static func decodeMetrics(data: Data, fetchedAt: Date) throws -> CodexRadarSnapshot {
+        let metrics = try JSONDecoder().decode(CodexRadarMetricsDTO.self, from: data)
+        guard [2, 3].contains(metrics.schema), metrics.benchmarkID == "deep-swe",
+              let updatedAt = CodexRadarDateParser.parse(metrics.sourceUpdatedAt) else {
+            throw CodexRadarClientError.invalidResponse
+        }
+        var seen = Set<String>()
+        let cards = metrics.points.compactMap { point -> CodexRadarModelScore? in
+            let id = "\(point.model)|\(point.effort)"
+            guard point.model.hasPrefix("gpt-"), let score = point.iq, score.isFinite,
+                  seen.insert(id).inserted else { return nil }
+            return CodexRadarModelScore(
+                id: id, label: "\(point.model) \(point.effort)", score: score, status: nil,
+                passed: point.passed, tasks: point.total,
+                costUSD: point.averagePriceUSD,
+                wallTime: point.averageMinutes.map { String(format: "均时 %.1f 分钟", $0) }
+            )
+        }.sorted {
+            if $0.score == $1.score { return $0.id < $1.id }
+            return ($0.score ?? 0) > ($1.score ?? 0)
+        }
+        guard !cards.isEmpty else { throw CodexRadarClientError.emptyResponse }
+        return CodexRadarSnapshot(
+            state: .ready, models: cards, quotaRows: [], monitoredAt: updatedAt,
+            quotaUpdatedAt: nil, fetchedAt: fetchedAt, status: "软件工程",
+            recommendation: "DeepSWE 软件工程能力评分；通过数按有效样本统计，成本与耗时为平均值。",
+            prediction: nil, dataSource: .publicMetrics, attributionText: attribution,
+            siteURL: siteURL, message: nil
+        )
+    }
 }
 
 enum CodexRadarRefreshPolicy {
     static let refreshTimes = [(hour: 8, minute: 20), (hour: 14, minute: 20)]
+    static let maximumAge: TimeInterval = 3600
+    static let retryInterval: TimeInterval = 300
 
     static var beijingCalendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -148,7 +190,13 @@ enum CodexRadarRefreshPolicy {
 
     static func shouldRefresh(lastFetchAt: Date?, now: Date = Date()) -> Bool {
         guard let lastFetchAt else { return true }
-        return lastFetchAt < lastScheduledRefresh(before: now)
+        return lastFetchAt > now || now.timeIntervalSince(lastFetchAt) >= maximumAge
+            || lastFetchAt < lastScheduledRefresh(before: now)
+    }
+
+    static func nextRefresh(after now: Date, lastFetchAt: Date?, retryAt: Date? = nil) -> Date {
+        if let retryAt { return max(now, retryAt) }
+        return min(nextScheduledRefresh(after: now), (lastFetchAt ?? now).addingTimeInterval(maximumAge))
     }
 
     static func canManualRefresh(lastRefreshAt: Date?, now: Date = Date()) -> Bool {
@@ -192,6 +240,46 @@ private enum CodexRadarDateParser {
     }
 }
 
+private struct CodexRadarMetricsDTO: Decodable {
+    let schema: Int
+    let benchmarkID: String?
+    let sourceUpdatedAt: String
+    let points: [Point]
+
+    enum CodingKeys: String, CodingKey {
+        case schema, points
+        case benchmarkID = "benchmark_id"
+        case sourceUpdatedAt = "source_updated_at"
+    }
+
+    struct Point: Decodable {
+        let model: String
+        let effort: String
+        let iq: Double?
+        let passed: Int?
+        let total: Int?
+        let averagePriceUSD: Double?
+        let averageMinutes: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case model, effort, iq, passed, total
+            case averagePriceUSD = "average_price_usd"
+            case averageMinutes = "average_minutes"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            model = try container.decode(String.self, forKey: .model)
+            effort = try container.decode(String.self, forKey: .effort)
+            iq = container.flexibleDouble(.iq)
+            passed = container.flexibleInt(.passed)
+            total = container.flexibleInt(.total)
+            averagePriceUSD = container.flexibleDouble(.averagePriceUSD)
+            averageMinutes = container.flexibleDouble(.averageMinutes)
+        }
+    }
+}
+
 private struct CodexRadarSummaryDTO: Decodable {
     let monitoredAt: String?
     let status: String?
@@ -222,11 +310,13 @@ private struct RequirementsDTO: Decodable {
 }
 
 private struct ModelIQDTO: Decodable {
+    let updatedAt: String?
     let latest: ModelResultDTO?
     let comparisons: [String: ComparisonDTO]?
     let quotaRadar: QuotaRadarDTO?
 
     enum CodingKeys: String, CodingKey {
+        case updatedAt = "updated_at"
         case latest
         case comparisons
         case quotaRadar = "quota_radar"

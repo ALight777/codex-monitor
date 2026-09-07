@@ -224,12 +224,14 @@ final class BalanceMonitorViewModel: ObservableObject {
                 let username = account.username.trimmingCharacters(in: .whitespacesAndNewlines)
                 let secret = account.secret.trimmingCharacters(in: .whitespacesAndNewlines)
                 let missing: String?
-                if panelURL.isEmpty {
+                if snapshot.source == .newAPI && account.newAPIUsesAccessToken != true {
+                    missing = BalanceAPIError.newAPITokenRequired.localizedDescription
+                } else if panelURL.isEmpty {
                     missing = "缺少面板地址"
-                } else if username.isEmpty {
+                } else if username.isEmpty && snapshot.source == .subAPI {
                     missing = snapshot.source == .subAPI ? "缺少登录邮箱" : "缺少用户名"
                 } else if secret.isEmpty {
-                    missing = "缺少密码"
+                    missing = snapshot.source == .newAPI ? "缺少个人访问令牌（PAT）" : "缺少密码"
                 } else {
                     missing = nil
                 }
@@ -242,7 +244,9 @@ final class BalanceMonitorViewModel: ObservableObject {
                         allowInsecureTLS: account.allowInsecureTLS,
                         accountID: account.id,
                         accountLabel: account.configuredLabel,
-                        thresholds: account.effectiveThresholds(defaults: snapshot.defaultThresholds)
+                        thresholds: account.effectiveThresholds(defaults: snapshot.defaultThresholds),
+                        newAPIUsesAccessToken: account.newAPIUsesAccessToken == true,
+                        newAPIUserID: account.newAPIUserID ?? ""
                     )
                     : nil
                 return BalanceRefreshTarget(

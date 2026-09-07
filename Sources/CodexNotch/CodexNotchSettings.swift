@@ -1343,6 +1343,11 @@ final class CodexNotchSettings: ObservableObject {
         guard let oldAccount else {
             return copy
         }
+        if (oldAccount.newAPIUsesAccessToken != copy.newAPIUsesAccessToken
+            || oldAccount.newAPIUserID != copy.newAPIUserID), copy.secret == oldAccount.secret {
+            copy.secret = ""
+            copy.secretReadFailed = false
+        }
         let originChanged = Self.originChanged(
             oldURL: oldAccount.panelURL,
             newURL: copy.panelURL,

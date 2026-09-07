@@ -56,6 +56,10 @@ final class UsageViewModel: ObservableObject {
         refresh(bypassFastCache: true)
         refreshWatchPaths()
         observeSettings()
+        NotificationCenter.default.publisher(for: .tokenPricingDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
     func refresh(bypassFastCache: Bool = false) {
@@ -126,6 +130,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     func resumeAfterSystemActivity() {
+        TokenPricingUpdater.shared.refreshIfDue()
         fastTimer?.invalidate()
         fastTimer = nil
         pendingSnapshotTimer?.invalidate()

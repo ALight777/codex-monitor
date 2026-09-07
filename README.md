@@ -50,7 +50,11 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 应用只读取这些文件，不会修改 Codex 的本地数据。
 
-花费按记录中的实际模型逐次套用 OpenAI 官方 API 单价，并分别计算未缓存输入、缓存输入和输出；长上下文模型按单次请求规则处理。`codex-auto-review` 按 `gpt-5.6-sol` 的同一套价格和长上下文规则估算。对于模型未知或无可匹配价格的 Token，应用会将其排除后继续估算已知部分，并在界面中明确提示未计入的部分。该数字只是 API 等价估算，不是 Codex 订阅账单。价格表版本会显示在用量卡片下方。
+花费按记录中的实际模型逐次套用当前价格表中的标准 API 单价，并分别计算未缓存输入、缓存输入和输出；长上下文模型按单次请求规则处理。`codex-auto-review` 按 `gpt-5.6-sol` 的同一套价格和长上下文规则估算。对于模型未知或无可匹配价格的 Token，应用会将其排除后继续估算已知部分，并在界面中明确提示未计入的部分。该数字只是 API 等价估算，不是 Codex 订阅账单。价格源和同步时间会显示在用量卡片下方。
+
+模型价格默认每日从 [LiteLLM 公开价格表](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) 检查更新；这是社区维护的数据源，并非 OpenAI 官方实时接口。可在「设置 → Codex → 模型价格」调整自动更新开关、每小时/6 小时/每天/每周频率、HTTPS JSON 更新源，并手动更新。自定义源须使用同一 LiteLLM JSON 格式。只导入含完整输入、缓存输入、输出及支持的长上下文费率的 OpenAI 文本模型；失败保留上次成功缓存，未覆盖的模型回退内置价格。应用启动或从睡眠恢复时检查是否到期。价格变化直接重估内存中的分模型 Token 明细，不重新扫描完整历史文件。估算采用当前标准费率，不还原历史成交价，也不包括 Priority/Flex 等服务档位。
+
+缓存：`~/Library/Application Support/codex监测/ModelPricing/current.json`。
 
 ### CodexRadar
 
@@ -89,7 +93,7 @@ NewAPI 和 Sub2API 用于监测普通用户账号余额，而不是管理员侧�
 支持：
 
 - 多账号管理。
-- 每个账号单独配置面板地址、用户名、密码、请求超时和 TLS 行为。
+- 每个账号单独配置面板地址、认证信息、请求超时和 TLS 行为。
 - 默认余额阈值，也可为单个账号配置自定义阈值。
 - 提醒阈值和告警阈值两级状态。
 - 余额低于提醒阈值时显示黄色提醒。
@@ -99,7 +103,8 @@ NewAPI 和 Sub2API 用于监测普通用户账号余额，而不是管理员侧�
 
 认证方式：
 
-- NewAPI 使用 `POST /api/user/login` 登录，再读取用户信息。
+- NewAPI 使用个人访问令牌（PAT）调用 `GET /api/user/self`，并用公开 `GET /api/status` 读取货币换算；不调用登录、刷新会话或登出接口，不存储 Cookie。新版站点无需用户 ID；旧版需要时填写可选的数字用户 ID。PAT 与模型调用的 `sk-` API Key 不同，也不能用浏览器短期 Access Token 替代。
+- 升级后，旧 NewAPI 密码配置暂停请求，保留账号资料。打开账号「修改」后重新填写 PAT 并保存；旧密码不会当作令牌发送。若已经出现「活跃会话已满」，需在仍已登录设备的安全设置中撤销多余会话；无法登录时联系站点管理员。应用不自动撤销其他设备会话。参考 [NewAPI 鉴权契约](https://github.com/QuantumNous/new-api/blob/main/docs/authentication.md)。
 - Sub2API 使用 `POST /api/v1/auth/login` 登录，再读取当前用户资料与余额。平台配额不会显示在余额页；管理员侧 OpenAI 账号配额归入“远程账号”监测。
 
 ### 设置
@@ -153,8 +158,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.14-arm64.dmg
-dist/codex-monitor-0.1.14-amd64.dmg
+dist/codex-monitor-0.1.15-arm64.dmg
+dist/codex-monitor-0.1.15-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -272,7 +277,7 @@ Local data is read from Codex files under the current user account, including:
 
 The app reads these files only. It does not modify local Codex data.
 
-Costs are estimated per recorded request using the matching official OpenAI API model price, with uncached input, cached input, output, and supported long-context rules calculated separately. `codex-auto-review` uses the same price and long-context rules as `gpt-5.6-sol`. Tokens whose model is missing or has no matching price are excluded while the known portion remains estimated, and the omitted portion stays explicitly identified in the UI. This is an API-equivalent estimate, not Codex subscription billing. The pricing snapshot date appears below the local usage cells.
+Costs are estimated per recorded request using the matching standard API model price from the active catalog, with uncached input, cached input, output, and supported long-context rules calculated separately. `codex-auto-review` uses the same price and long-context rules as `gpt-5.6-sol`. Tokens whose model is missing or has no matching price are excluded while the known portion remains estimated, and the omitted portion stays explicitly identified in the UI. This is an API-equivalent estimate, not Codex subscription billing. The pricing source and sync time appear below the local usage cells. Prices refresh daily from the community-maintained LiteLLM JSON catalog by default. Settings → Codex → Model prices includes automatic updates, cadence, a custom HTTPS LiteLLM JSON source, and manual refresh. Failed updates preserve the last valid disk cache; missing entries fall back to bundled prices. Cached token components are repriced without rescanning rollout files. Estimates use current standard rates, not historical billing or Priority/Flex tiers.
 
 ### CodexRadar
 
@@ -321,7 +326,8 @@ Supported capabilities:
 
 Authentication:
 
-- NewAPI uses `POST /api/user/login`, then reads user information.
+- NewAPI reads `GET /api/user/self` with a personal access token (PAT), plus public `GET /api/status` for currency settings. It never logs in, refreshes sessions, logs out, or stores cookies. An optional numeric user ID supports older servers. Model API keys and short-lived browser access tokens are not PATs.
+- Existing password configurations pause until edited and supplied with a PAT. Existing session-limit errors require revoking surplus sessions from an already signed-in device or contacting the site administrator.
 - Sub2API uses `POST /api/v1/auth/login`, then reads the current user's profile and balance. Platform quota entries are excluded from the balance tab; administrator-side OpenAI account quota belongs to Remote Account Monitoring.
 
 ### Settings
@@ -375,8 +381,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.14-arm64.dmg
-dist/codex-monitor-0.1.14-amd64.dmg
+dist/codex-monitor-0.1.15-arm64.dmg
+dist/codex-monitor-0.1.15-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

@@ -128,6 +128,9 @@ struct BalanceAccountConfiguration: Identifiable, Codable, Equatable {
     var label: String
     var panelURL: String
     var username: String
+    // Missing flags in older saved accounts mean password login and must pause.
+    var newAPIUsesAccessToken: Bool? = nil
+    var newAPIUserID: String? = nil
     var secret: String = ""
     var secretReadFailed: Bool = false
     var allowInsecureTLS: Bool
@@ -144,6 +147,8 @@ struct BalanceAccountConfiguration: Identifiable, Codable, Equatable {
         panelURL: String = "",
         username: String = "",
         secret: String = "",
+        newAPIUsesAccessToken: Bool? = nil,
+        newAPIUserID: String? = nil,
         allowInsecureTLS: Bool = false,
         requestTimeout: TimeInterval = 6,
         usesDefaultThresholds: Bool = true,
@@ -156,6 +161,8 @@ struct BalanceAccountConfiguration: Identifiable, Codable, Equatable {
         self.label = label
         self.panelURL = panelURL
         self.username = username
+        self.newAPIUsesAccessToken = newAPIUsesAccessToken
+        self.newAPIUserID = newAPIUserID
         self.secret = secret
         self.secretReadFailed = false
         self.allowInsecureTLS = allowInsecureTLS
@@ -172,6 +179,8 @@ struct BalanceAccountConfiguration: Identifiable, Codable, Equatable {
         case label
         case panelURL
         case username
+        case newAPIUsesAccessToken
+        case newAPIUserID
         case allowInsecureTLS
         case requestTimeout
         case usesDefaultThresholds
@@ -241,12 +250,15 @@ struct BalanceAccountConfiguration: Identifiable, Codable, Equatable {
         while endpoint.hasSuffix("/") {
             endpoint.removeLast()
         }
-        return [
+        let binding = [
             source.rawValue,
             endpoint,
             username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
             allowInsecureTLS ? "insecure-tls" : "system-tls"
         ].joined(separator: "|")
+        return source == .newAPI && newAPIUsesAccessToken == true
+            ? binding + "|pat|" + (newAPIUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            : binding
     }
 
     func thresholdSummary(defaults: BalanceThresholdConfiguration) -> String {

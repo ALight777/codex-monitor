@@ -102,6 +102,7 @@ private struct AccountDeleteCandidate {
 private struct AccountEditorContext: Identifiable {
     let id = UUID()
     let source: BalanceMonitorSource
+    var accountID: String? = nil
 }
 
 private struct RemoteSourceEditorContext: Identifiable {
@@ -122,6 +123,7 @@ private struct SettingsDraft: Equatable {
     var watcherRefreshInterval: TimeInterval = 12
     var fileChangeRefreshMinimumGap: TimeInterval = 3
     var rateLimitSource: RateLimitSourcePreference = .appServerFirst
+    var pricing = TokenPricingSettings()
     var showPeriodUsage = true
     var showSparkQuota = false
     var codexRadarEnabled = false
@@ -163,6 +165,7 @@ private struct SettingsDraft: Equatable {
         watcherRefreshInterval = settings.watcherRefreshInterval
         fileChangeRefreshMinimumGap = settings.fileChangeRefreshMinimumGap
         rateLimitSource = settings.rateLimitSource
+        pricing = TokenPricingUpdater.shared.settings
         showPeriodUsage = settings.showPeriodUsage
         showSparkQuota = settings.showSparkQuota
         codexRadarEnabled = settings.codexRadarEnabled
@@ -214,6 +217,7 @@ private struct SettingsDraft: Equatable {
 }
 
 struct SettingsView: View {
+    @ObservedObject private var pricingUpdater = TokenPricingUpdater.shared
     @ObservedObject var settings: CodexNotchSettings
     @ObservedObject var remoteViewModel: RemoteMonitorViewModel
     @ObservedObject var newAPIViewModel: BalanceMonitorViewModel
@@ -225,7 +229,6 @@ struct SettingsView: View {
     @State private var selectedPreset: RefreshPreset = .balanced
     @State private var selectedTab: SettingsTab = .codex
     @State private var accountEditorContext: AccountEditorContext?
-    @State private var accountEditorID: String?
     @State private var accountEditorDraft = BalanceAccountConfiguration(source: .newAPI)
     @State private var deleteCandidate: AccountDeleteCandidate?
     @State private var remoteSourceEditorContext: RemoteSourceEditorContext?
@@ -263,7 +266,7 @@ struct SettingsView: View {
             }
         }
         .sheet(item: $accountEditorContext, onDismiss: resetAccountEditorState) { context in
-            accountEditorSheet(source: context.source)
+            accountEditorSheet(context: context)
         }
         .sheet(item: $remoteSourceEditorContext) { context in
             RemoteSourceEditorForm(
@@ -328,7 +331,14 @@ struct SettingsView: View {
     }
 
     private var accountEditorValidationMessage: String? {
-        accountEditorDraft.thresholdOrderValidationMessage
+        if accountEditorDraft.source == .newAPI, !accountEditorDraft.secret.isEmpty {
+            do {
+                _ = try BalanceAPIClient.newAPIAccessTokenHeaders(
+                    token: accountEditorDraft.secret, userID: accountEditorDraft.newAPIUserID ?? ""
+                )
+            } catch { return error.localizedDescription }
+        }
+        return accountEditorDraft.thresholdOrderValidationMessage
     }
 
     private var canSaveAccountEditor: Bool {
@@ -445,6 +455,40 @@ struct SettingsView: View {
             intervalStepper("历史用量", value: $draft.usageRefreshInterval, range: 120...1_800, help: "统计 Codex 今日、7天、30天 token 用量的刷新间隔；今日按电脑当前时区的 00:00 开始计算。会话文件较大时会自动延长下一次刷新，以降低功耗。")
             intervalStepper("文件监听", value: $draft.watcherRefreshInterval, range: 8...120, help: "扫描 Codex 会话文件变化的保底间隔，用于补偿文件事件丢失。")
             intervalStepper("补刷合并", value: $draft.fileChangeRefreshMinimumGap, range: 1...30, help: "文件持续变化时的最长合并等待时间；静默 1 秒后会立即刷新。")
+        }
+
+        Section("模型价格") {
+            Toggle("自动更新模型价格", isOn: $draft.pricing.automatic)
+            Picker("检查频率", selection: $draft.pricing.intervalHours) {
+                Text("每小时").tag(1)
+                Text("每 6 小时").tag(6)
+                Text("每天").tag(24)
+                Text("每周").tag(168)
+            }
+            .disabled(!draft.pricing.automatic)
+            labeledTextField("价格源", text: $draft.pricing.sourceURL,
+                             placeholder: "HTTPS JSON 地址",
+                             help: "支持 LiteLLM 价格 JSON。默认是社区维护的公开价格表，按标准 API 费率估算；不包含 Priority、Flex 或实际订阅扣费。")
+            HStack {
+                Button("恢复默认源") { draft.pricing.sourceURL = TokenPricingSettings.defaultSource }
+                Spacer()
+                Button(pricingUpdater.isRefreshing ? "正在更新…" : "立即更新") {
+                    pricingUpdater.refreshNow()
+                }
+                .disabled(pricingUpdater.isRefreshing || draft.pricing != pricingUpdater.settings)
+            }
+            Text("先保存价格配置，再立即更新。更新失败时保留上次有效价格，未覆盖模型使用内置价格。")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(pricingUpdater.status).font(.caption).textSelection(.enabled)
+            if let activeSource = pricingUpdater.activeSource {
+                Text("当前生效来源：\(activeSource)")
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let lastChecked = pricingUpdater.lastChecked {
+                Text("上次成功检查：\(lastChecked.formatted(date: .numeric, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text(TokenCostCatalog.priceVersion).font(.caption).foregroundStyle(.secondary)
         }
 
         Section("Codex 数据") {
@@ -888,6 +932,14 @@ struct SettingsView: View {
                 HelpLabel(title: "启用 \(title)", help: balanceMonitorEnableHelp(title: title, source: source))
             }
 
+            if source == .newAPI {
+                Text("使用个人设置中的访问令牌（PAT）读取余额，不创建登录会话。旧密码接入已暂停，请修改账号并填写 PAT。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if accounts.wrappedValue.contains(where: { $0.newAPIUsesAccessToken != true }) {
+                    Text("如网页登录仍提示会话已满，请在已登录设备的安全设置中撤销多余会话；签发频率限制需等待站点窗口恢复。")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            }
             Text("地址、认证信息和刷新配置仅在点击保存后生效。")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -1035,7 +1087,7 @@ struct SettingsView: View {
                 Text(account.displayLabel)
                     .font(.system(size: 11.5, weight: .semibold))
                     .lineLimit(1)
-                Text(account.enabled ? "已启用" : "已停用")
+                Text(account.enabled ? (source == .newAPI && account.newAPIUsesAccessToken != true ? "待改用 PAT" : "已启用") : "已停用")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(account.enabled ? Color.green : .secondary)
             }
@@ -1075,11 +1127,12 @@ struct SettingsView: View {
         .opacity(enabled ? 1 : 0.55)
     }
 
-    private func accountEditorSheet(source: BalanceMonitorSource) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+    private func accountEditorSheet(context: AccountEditorContext) -> some View {
+        let source = context.source
+        return VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(accountEditorID == nil ? "添加 \(source.title) 账号" : "修改 \(source.title) 账号")
+                    Text(context.accountID == nil ? "添加 \(source.title) 账号" : "修改 \(source.title) 账号")
                         .font(.system(size: 17, weight: .bold))
                     Text("账号配置只会在点击“保存账号”后写入当前设置草稿。")
                         .font(.system(size: 11, weight: .medium))
@@ -1116,6 +1169,15 @@ struct SettingsView: View {
                             help: balanceUsernameHelp(source: source)
                         )
 
+                        if source == .newAPI {
+                            labeledTextField("兼容用户 ID（可选）", text: Binding(
+                                get: { accountEditorDraft.newAPIUserID ?? "" },
+                                set: { accountEditorDraft.newAPIUserID = $0 }
+                            ), placeholder: "旧版 NewAPI 的数字用户 ID",
+                            help: "新版留空即可。仅当旧版站点要求 New-Api-User 时填写你的数字用户 ID。")
+                            Text("请填写个人设置生成的访问令牌（PAT）。模型调用密钥和浏览器短期令牌不能用于持续监测。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         labeledSecureField(
                             balanceCredentialTitle(source: source),
                             text: $accountEditorDraft.secret,
@@ -1165,7 +1227,7 @@ struct SettingsView: View {
                 }
                 Spacer()
                 Button("保存账号") {
-                    saveAccountEditor()
+                    saveAccountEditor(context: context)
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSaveAccountEditor)
@@ -1307,7 +1369,6 @@ struct SettingsView: View {
 
     private func startAddingAccount(source: BalanceMonitorSource) {
         let count = accountBinding(for: source).wrappedValue.count
-        accountEditorID = nil
         accountEditorDraft = BalanceAccountConfiguration(
             source: source,
             label: "\(source.title) \(count + 1)",
@@ -1317,9 +1378,13 @@ struct SettingsView: View {
     }
 
     private func startEditingAccount(source: BalanceMonitorSource, account: BalanceAccountConfiguration) {
-        accountEditorID = account.id
         accountEditorDraft = account
-        accountEditorContext = AccountEditorContext(source: source)
+        if source == .newAPI && account.newAPIUsesAccessToken != true {
+            accountEditorDraft.secret = ""
+            accountEditorDraft.secretReadFailed = false
+            accountEditorDraft.newAPIUsesAccessToken = true
+        }
+        accountEditorContext = AccountEditorContext(source: source, accountID: account.id)
     }
 
     private func closeAccountEditor() {
@@ -1328,22 +1393,19 @@ struct SettingsView: View {
     }
 
     private func resetAccountEditorState() {
-        accountEditorID = nil
         accountEditorDraft = BalanceAccountConfiguration(source: .newAPI)
     }
 
-    private func saveAccountEditor() {
+    private func saveAccountEditor(context: AccountEditorContext) {
         guard canSaveAccountEditor else {
             return
         }
-        guard let source = accountEditorContext?.source else {
-            closeAccountEditor()
-            return
-        }
+        let source = context.source
+        if source == .newAPI { accountEditorDraft.newAPIUsesAccessToken = true }
         let accounts = accountBinding(for: source)
-        if let accountEditorID {
+        if let accountID = context.accountID {
             updateAccount(
-                id: accountEditorID,
+                id: accountID,
                 newValue: accountEditorDraft,
                 source: source,
                 accounts: accounts
@@ -1419,7 +1481,7 @@ struct SettingsView: View {
     private func balanceMonitorEnableHelp(title: String, source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "启用后详情页会出现 \(title) tab，通过登录接口读取 NewAPI 当前用户额度。"
+            "使用个人访问令牌（PAT）读取 NewAPI 余额，不创建或刷新网页登录会话。"
         case .subAPI:
             "启用后详情页会出现 \(title) tab，通过登录接口读取 Sub2API 当前用户余额。"
         }
@@ -1428,7 +1490,7 @@ struct SettingsView: View {
     private func balanceUsernameTitle(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "用户名"
+            "账户备注（可选）"
         case .subAPI:
             "登录邮箱"
         }
@@ -1437,7 +1499,7 @@ struct SettingsView: View {
     private func balanceUsernamePlaceholder(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "NewAPI 登录用户名"
+            "可填写用户名便于区分"
         case .subAPI:
             "Sub2API 登录邮箱"
         }
@@ -1446,7 +1508,7 @@ struct SettingsView: View {
     private func balanceUsernameHelp(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "用于调用 NewAPI POST /api/user/login 登录接口。"
+            "仅用于本机区分账号，不参与登录。"
         case .subAPI:
             "用于调用 Sub2API POST /api/v1/auth/login 登录接口。Sub2API 当前接口要求填写邮箱格式。"
         }
@@ -1455,7 +1517,7 @@ struct SettingsView: View {
     private func balanceCredentialTitle(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "密码"
+            "个人访问令牌（PAT）"
         case .subAPI:
             "密码"
         }
@@ -1464,7 +1526,7 @@ struct SettingsView: View {
     private func balanceCredentialPlaceholder(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "NewAPI 登录密码"
+            "NewAPI 个人访问令牌"
         case .subAPI:
             "Sub2API 登录密码"
         }
@@ -1473,7 +1535,7 @@ struct SettingsView: View {
     private func balanceCredentialHelp(source: BalanceMonitorSource) -> String {
         switch source {
         case .newAPI:
-            "用于调用 NewAPI POST /api/user/login。密码只保存到 macOS Keychain。"
+            "用于读取当前用户余额，不调用登录接口。令牌保存在所选的本机凭据存储中。"
         case .subAPI:
             "用于调用 Sub2API POST /api/v1/auth/login。密码只保存到 macOS Keychain。"
         }
@@ -1632,6 +1694,7 @@ struct SettingsView: View {
     }
 
     private func thresholdValidationMessage(for draft: SettingsDraft) -> String? {
+        if draft.pricing.validatedURL == nil { return TokenPricingError.invalidSource.localizedDescription }
         if let message = draft.newAPIThresholds.orderValidationMessage {
             return "NewAPI 默认阈值：\(message)"
         }
@@ -1660,6 +1723,7 @@ struct SettingsView: View {
             return
         }
         let next = draft
+        pricingUpdater.save(next.pricing)
         let current = currentDraft
         let currentRemoteSources = Dictionary(
             current.remoteAccountSources.map { ($0.id, $0) },

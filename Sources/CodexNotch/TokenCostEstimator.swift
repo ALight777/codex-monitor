@@ -31,83 +31,83 @@ struct TokenUsageBreakdown: Equatable, Sendable {
     }
 }
 
+// Keep token components by model and per-request context tier. Cached summaries can
+// then use a new price catalog without scanning the user's rollout files again.
 struct TokenUsageSummary: Equatable, Sendable {
     var breakdown: TokenUsageBreakdown = .zero
-    var estimatedCostUSD: Double = 0
-    var unpricedTokens: Int = 0
-    var unknownModels: [String] = []
-    var hasComponentData: Bool = false
+    var hasComponentData = false
+    private var components: [PriceBucket: TokenUsageBreakdown] = [:]
+    private var missingTokens = 0
+    private var missingModels: Set<String> = []
+
+    private struct PriceBucket: Hashable, Sendable {
+        let model: String
+        let longContext: Bool
+    }
 
     static let zero = TokenUsageSummary()
 
     static func unpriced(totalTokens: Int, model: String? = nil) -> TokenUsageSummary {
-        let tokens = max(0, totalTokens)
-        let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return TokenUsageSummary(
-            breakdown: TokenUsageBreakdown(totalTokens: tokens),
-            estimatedCostUSD: 0,
-            unpricedTokens: tokens,
-            unknownModels: normalizedModel.flatMap { $0.isEmpty ? nil : [$0] } ?? [],
-            hasComponentData: false
-        )
+        var summary = Self.zero
+        summary.addUnpricedTokens(totalTokens, model: model)
+        return summary
     }
 
-    var totalTokens: Int {
-        breakdown.totalTokens
-    }
-
-    var pricedTokens: Int {
-        max(0, totalTokens - unpricedTokens)
-    }
-
+    var totalTokens: Int { breakdown.totalTokens }
+    var estimatedCostUSD: Double { valuation().cost }
+    var unpricedTokens: Int { valuation().unpriced }
+    var unknownModels: [String] { valuation().unknown }
+    var pricedTokens: Int { max(0, totalTokens - unpricedTokens) }
     var costUSD: Double? {
-        guard pricedTokens > 0 else {
-            return nil
-        }
-        return estimatedCostUSD
+        let value = valuation()
+        return totalTokens > value.unpriced ? value.cost : nil
     }
-
-    var isComplete: Bool {
-        totalTokens > 0 && unpricedTokens == 0
-    }
+    var isComplete: Bool { totalTokens > 0 && unpricedTokens == 0 }
 
     mutating func add(_ usage: TokenUsageBreakdown, model: String?) {
         breakdown.add(usage)
         hasComponentData = hasComponentData || usage.hasComponentData
-
-        if let cost = TokenCostCatalog.estimatedCostUSD(for: usage, model: model) {
-            estimatedCostUSD += cost
-        } else {
-            unpricedTokens = Self.saturatingAdd(unpricedTokens, usage.totalTokens)
-            let label = model?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let unknown = (label?.isEmpty == false ? label : nil) ?? "模型未知"
-            if !unknownModels.contains(unknown) {
-                unknownModels.append(unknown)
-                unknownModels.sort()
-            }
-        }
+        let label = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let bucket = PriceBucket(
+            model: label.isEmpty ? "模型未知" : label,
+            longContext: usage.inputTokens > TokenCostCatalog.longContextThreshold
+        )
+        components[bucket, default: .zero].add(usage)
     }
 
     mutating func add(_ other: TokenUsageSummary) {
         breakdown.add(other.breakdown)
-        estimatedCostUSD += other.estimatedCostUSD
-        unpricedTokens = Self.saturatingAdd(unpricedTokens, other.unpricedTokens)
         hasComponentData = hasComponentData || other.hasComponentData
-        unknownModels = Array(Set(unknownModels + other.unknownModels)).sorted()
+        missingTokens = Self.saturatingAdd(missingTokens, other.missingTokens)
+        missingModels.formUnion(other.missingModels)
+        for (bucket, usage) in other.components {
+            components[bucket, default: .zero].add(usage)
+        }
     }
 
     mutating func addUnpricedTokens(_ tokens: Int, model: String? = nil) {
-        guard tokens > 0 else {
-            return
-        }
+        guard tokens > 0 else { return }
         breakdown.totalTokens = Self.saturatingAdd(breakdown.totalTokens, tokens)
-        unpricedTokens = Self.saturatingAdd(unpricedTokens, tokens)
-        let label = model?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let unknown = (label?.isEmpty == false ? label : nil) ?? "明细缺失"
-        if !unknownModels.contains(unknown) {
-            unknownModels.append(unknown)
-            unknownModels.sort()
+        missingTokens = Self.saturatingAdd(missingTokens, tokens)
+        let label = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        missingModels.insert(label.isEmpty ? "明细缺失" : label)
+    }
+
+    private func valuation() -> (cost: Double, unpriced: Int, unknown: [String]) {
+        let catalog = TokenCostCatalog.remoteSnapshot
+        var cost = 0.0
+        var unpriced = missingTokens
+        var unknown = missingModels
+        for (bucket, usage) in components {
+            if usage.hasComponentData,
+               let price = TokenCostCatalog.price(for: bucket.model, remote: catalog) {
+                cost += price.cost(for: usage, longContext: bucket.longContext)
+            } else {
+                unpriced = Self.saturatingAdd(unpriced, usage.totalTokens)
+                unknown.insert(bucket.model)
+            }
         }
+        return (cost, unpriced, unknown.sorted())
     }
 
     private static func saturatingAdd(_ lhs: Int, _ rhs: Int) -> Int {
@@ -116,24 +116,70 @@ struct TokenUsageSummary: Equatable, Sendable {
     }
 }
 
-struct ModelTokenPrice: Equatable, Sendable {
+struct ModelTokenPrice: Codable, Equatable, Sendable {
     let inputPerMillionUSD: Double
     let cachedInputPerMillionUSD: Double
     let outputPerMillionUSD: Double
     let appliesLongContextSurcharge: Bool
+    var longContextInputPerMillionUSD: Double? = nil
+    var longContextCachedInputPerMillionUSD: Double? = nil
+    var longContextOutputPerMillionUSD: Double? = nil
+
+    func cost(for usage: TokenUsageBreakdown, longContext: Bool) -> Double {
+        let usesLong = longContext && appliesLongContextSurcharge
+        let input = usesLong ? (longContextInputPerMillionUSD ?? inputPerMillionUSD * 2) : inputPerMillionUSD
+        let cached = usesLong ? (longContextCachedInputPerMillionUSD ?? cachedInputPerMillionUSD * 2) : cachedInputPerMillionUSD
+        let output = usesLong ? (longContextOutputPerMillionUSD ?? outputPerMillionUSD * 1.5) : outputPerMillionUSD
+        return (Double(usage.uncachedInputTokens) * input
+            + Double(usage.cachedInputTokens) * cached
+            + Double(usage.outputTokens) * output) / 1_000_000
+    }
 }
 
 enum TokenCostCatalog {
-    static let priceVersion = "2026-08-28"
+    static let bundledPriceVersion = "2026-08-28"
+    private static let state = CatalogState()
+    static var priceVersion: String { state.read().version }
+    static var remoteSnapshot: [String: ModelTokenPrice] { state.read().prices }
+
+    static func install(_ prices: [String: ModelTokenPrice], version: String) {
+        state.set(prices, version: version)
+    }
+
+    private final class CatalogState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var prices: [String: ModelTokenPrice] = [:]
+        private var version = "内置 2026-08-28"
+        func read() -> (prices: [String: ModelTokenPrice], version: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            return (prices, version)
+        }
+        func set(_ prices: [String: ModelTokenPrice], version: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.prices = prices
+            self.version = version
+        }
+    }
     static let longContextThreshold = 272_000
     private static let modelAliases = [
         "codex-auto-review": "gpt-5.6-sol"
     ]
 
     static func price(for model: String?) -> ModelTokenPrice? {
+        price(for: model, remote: remoteSnapshot)
+    }
+
+    static func price(for model: String?, remote: [String: ModelTokenPrice]) -> ModelTokenPrice? {
         guard let normalized = normalizedModel(model) else {
             return nil
         }
+
+        if let price = remote[normalized] { return price }
+        // Only strip an actual YYYY-MM-DD suffix; never match a different model family.
+        if normalized.range(of: #"-\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil,
+           let price = remote[String(normalized.dropLast(11))] { return price }
 
         let entries: [(String, ModelTokenPrice)] = [
             ("gpt-5.6-terra", .init(inputPerMillionUSD: 2, cachedInputPerMillionUSD: 0.2, outputPerMillionUSD: 12, appliesLongContextSurcharge: false)),
@@ -161,25 +207,8 @@ enum TokenCostCatalog {
             return nil
         }
 
-        let usesLongContextRates = price.appliesLongContextSurcharge
-            && usage.inputTokens > longContextThreshold
-        let inputMultiplier = usesLongContextRates ? 2.0 : 1.0
-        let outputMultiplier = usesLongContextRates ? 1.5 : 1.0
-        let million = 1_000_000.0
-
-        let uncachedCost = Double(usage.uncachedInputTokens)
-            * price.inputPerMillionUSD
-            * inputMultiplier
-            / million
-        let cachedCost = Double(usage.cachedInputTokens)
-            * price.cachedInputPerMillionUSD
-            * inputMultiplier
-            / million
-        let outputCost = Double(usage.outputTokens)
-            * price.outputPerMillionUSD
-            * outputMultiplier
-            / million
-        return uncachedCost + cachedCost + outputCost
+        guard usage.hasComponentData else { return nil }
+        return price.cost(for: usage, longContext: usage.inputTokens > longContextThreshold)
     }
 
     private static func normalizedModel(_ model: String?) -> String? {

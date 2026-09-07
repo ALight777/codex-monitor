@@ -16,6 +16,7 @@ swiftc \
   -swift-version 6 \
   "${ROOT_DIR}/Sources/CodexNotch/DetailPresentation.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/TokenCostEstimator.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/TokenPricingUpdater.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/Models.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/UsageRefreshState.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/IslandMetrics.swift" \

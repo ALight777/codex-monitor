@@ -14,6 +14,8 @@ struct BalanceAPIConfiguration: Equatable {
     let accountID: String
     let accountLabel: String?
     let thresholds: BalanceThresholdConfiguration
+    let newAPIUsesAccessToken: Bool
+    let newAPIUserID: String
 
     init(
         panelURL: String,
@@ -23,7 +25,9 @@ struct BalanceAPIConfiguration: Equatable {
         allowInsecureTLS: Bool,
         accountID: String = "default",
         accountLabel: String? = nil,
-        thresholds: BalanceThresholdConfiguration = BalanceThresholdConfiguration()
+        thresholds: BalanceThresholdConfiguration = BalanceThresholdConfiguration(),
+        newAPIUsesAccessToken: Bool = false,
+        newAPIUserID: String = ""
     ) {
         self.panelURL = panelURL
         self.username = username
@@ -33,12 +37,15 @@ struct BalanceAPIConfiguration: Equatable {
         self.accountID = accountID
         self.accountLabel = accountLabel
         self.thresholds = thresholds.normalized
+        self.newAPIUsesAccessToken = newAPIUsesAccessToken
+        self.newAPIUserID = newAPIUserID
     }
 }
 
 enum BalanceAPIError: LocalizedError {
     case invalidURL
     case missingKey
+    case newAPITokenRequired
     case missingUsername
     case loginRequiresTwoFactor
     case httpStatus(Int, String? = nil)
@@ -51,6 +58,8 @@ enum BalanceAPIError: LocalizedError {
             "面板地址无效"
         case .missingKey:
             "缺少认证信息"
+        case .newAPITokenRequired:
+            "旧密码接入已暂停，请在设置中改用 NewAPI 个人访问令牌（PAT），避免占用登录会话"
         case .missingUsername:
             "缺少登录用户名"
         case .loginRequiresTwoFactor:
@@ -72,7 +81,7 @@ enum BalanceAPIError: LocalizedError {
     }
 }
 
-final class BalanceAPIClient: NSObject, URLSessionDelegate {
+final class BalanceAPIClient: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
     private let configuration: BalanceAPIConfiguration
     private let requestExecutor: BalanceAPIRequestExecutor
 
@@ -103,13 +112,15 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         baseURL: URL,
         source: BalanceMonitorSource
     ) async throws -> BalanceMonitorSnapshot {
-        let session = makeSession()
+        guard configuration.newAPIUsesAccessToken else { throw BalanceAPIError.newAPITokenRequired }
+        let managementHeaders = try Self.newAPIAccessTokenHeaders(
+            token: configuration.secret, userID: configuration.newAPIUserID
+        )
+        let session = makeSession(usesCookies: false)
         defer {
             session.finishTasksAndInvalidate()
         }
         let quotaDisplay = try await fetchNewAPIQuotaDisplay(baseURL: baseURL, session: session)
-        let userID = try await loginToNewAPI(baseURL: baseURL, session: session)
-        let managementHeaders = Self.newAPIManagementHeaders(userID: userID)
         let selfEndpoint = baseURL
             .appendingPathComponent("api")
             .appendingPathComponent("user")
@@ -194,32 +205,6 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         )
     }
 
-    private func loginToNewAPI(baseURL: URL, session: URLSession) async throws -> String {
-        let username = configuration.username.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !username.isEmpty else {
-            throw BalanceAPIError.missingUsername
-        }
-        guard !configuration.secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw BalanceAPIError.missingKey
-        }
-        let loginEndpoint = baseURL
-            .appendingPathComponent("api")
-            .appendingPathComponent("user")
-            .appendingPathComponent("login")
-        let data = try await requestData(
-            loginEndpoint,
-            method: "POST",
-            body: try Self.newAPILoginBody(for: configuration),
-            headers: [
-                "Accept": "application/json",
-                "Content-Type": "application/json"
-            ],
-            session: session,
-            timeout: configuration.timeout
-        )
-        return try Self.validateNewAPILoginResponse(data)
-    }
-
     private func loginToSubAPI(baseURL: URL, session: URLSession) async throws -> String {
         let username = configuration.username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !username.isEmpty else {
@@ -247,17 +232,27 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
         return try Self.validateSubAPILoginResponse(data)
     }
 
-    private func makeSession() -> URLSession {
+    private func makeSession(usesCookies: Bool = true) -> URLSession {
         let sessionConfig = URLSessionConfiguration.ephemeral
         sessionConfig.timeoutIntervalForRequest = configuration.timeout
         sessionConfig.timeoutIntervalForResource = configuration.timeout
-        sessionConfig.httpCookieAcceptPolicy = .always
-        sessionConfig.httpShouldSetCookies = true
+        sessionConfig.httpCookieAcceptPolicy = usesCookies ? .always : .never
+        sessionConfig.httpShouldSetCookies = usesCookies
+        if !usesCookies { sessionConfig.httpCookieStorage = nil }
         return URLSession(
             configuration: sessionConfig,
-            delegate: configuration.allowInsecureTLS ? self : nil,
+            delegate: self,
             delegateQueue: nil
         )
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 
     private func requestData(
@@ -403,6 +398,22 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate {
 
     static func decodeNewAPIQuotaDisplay(_ data: Data) throws -> NewAPIQuotaDisplay {
         try decodePayload(NewAPIStatusData.self, from: data).quotaDisplay
+    }
+
+    static func newAPIAccessTokenHeaders(token: String, userID: String) throws -> [String: String] {
+        var token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if token.lowercased().hasPrefix("bearer ") { token = String(token.dropFirst(7)) }
+        guard !token.isEmpty else { throw BalanceAPIError.missingKey }
+        guard !token.contains(where: { $0.isWhitespace }), !token.lowercased().hasPrefix("sk-") else {
+            throw BalanceAPIError.unsupportedResponse("请使用个人设置中的访问令牌（PAT），不能使用模型调用 API Key")
+        }
+        let userID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard userID.isEmpty || (Int(userID).map { $0 > 0 } == true) else {
+            throw BalanceAPIError.unsupportedResponse("旧版兼容用户 ID 必须是正整数，可留空")
+        }
+        var headers = bearerHeaders(token: token)
+        if !userID.isEmpty { headers["New-Api-User"] = userID }
+        return headers
     }
 
     static func newAPIManagementHeaders(userID: String) -> [String: String] {

@@ -1208,7 +1208,7 @@ struct DetailPanelView: View {
                 )
             }
 
-            Text("API 等价估算 · 价格更新 \(TokenCostCatalog.priceVersion)")
+            Text("API 等价估算 · \(TokenCostCatalog.priceVersion)")
                 .font(.system(size: 8.2, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.32))
                 .frame(maxWidth: .infinity, alignment: .trailing)

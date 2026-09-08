@@ -68,8 +68,8 @@ enum BalanceAPIError: LocalizedError {
             if let message,
                !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 status == 401 || status == 403
-                    ? "认证信息无效或无权限：\(message.redactedForDisplay)"
-                    : message.redactedForDisplay
+                    ? "认证信息无效或无权限（HTTP \(status)）：\(message.redactedForDisplay)"
+                    : "面板返回 HTTP \(status)：\(message.redactedForDisplay)"
             } else {
                 status == 401 || status == 403 ? "认证信息无效或无权限" : "面板返回 HTTP \(status)"
             }
@@ -272,12 +272,17 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate, URLSessionTaskDelega
         }
 
         let (data, response) = try await requestExecutor(request, session)
-        if let httpResponse = response as? HTTPURLResponse,
-           !(200...299).contains(httpResponse.statusCode) {
-            throw BalanceAPIError.httpStatus(
-                httpResponse.statusCode,
-                Self.httpFailureMessage(statusCode: httpResponse.statusCode, data: data)
-            )
+        if let httpResponse = response as? HTTPURLResponse {
+            let context = "接口：\(method) \(endpoint.path)"
+            if let message = Self.webResponseFailureMessage(response: httpResponse, data: data) {
+                throw BalanceAPIError.unsupportedResponse("\(message)\n\(context)")
+            }
+            if !(200...299).contains(httpResponse.statusCode) {
+                throw BalanceAPIError.httpStatus(
+                    httpResponse.statusCode,
+                    "\(Self.httpFailureMessage(statusCode: httpResponse.statusCode, data: data))\n\(context)"
+                )
+            }
         }
         guard !data.isEmpty else {
             throw BalanceAPIError.emptyResponse
@@ -487,16 +492,57 @@ final class BalanceAPIClient: NSObject, URLSessionDelegate, URLSessionTaskDelega
     }
 
     static func httpFailureMessage(statusCode: Int, data: Data) -> String {
-        let decoder = JSONDecoder()
-        let message = (try? decoder.decode(HTTPErrorEnvelope.self, from: data).message)
-            ?? (try? decoder.decode(SubAPIEnvelope<EmptyPayload>.self, from: data).message)
-            ?? (String(data: data, encoding: .utf8) ?? "")
+        let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let message = (payload?["message"] as? String)
+            ?? ((payload?["error"] as? [String: Any])?["message"] as? String)
+            ?? (payload?["error"] as? String)
+            ?? (payload?["detail"] as? String)
+            ?? (payload?["title"] as? String)
+            ?? (payload == nil ? String(decoding: data.prefix(2_048), as: UTF8.self) : "")
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.contains("LoginRequest.Email"),
            trimmed.contains("email") {
             return "Sub2API 登录邮箱格式不正确"
         }
         return trimmed.isEmpty ? "面板返回 HTTP \(statusCode)" : trimmed
+    }
+
+    // API endpoints can return an HTML block page, including with HTTP 200.
+    // Describe the failure without exposing page source or misdiagnosing a PAT.
+    static func webResponseFailureMessage(response: HTTPURLResponse, data: Data) -> String? {
+        let status = response.statusCode
+        let body = String(decoding: data.prefix(65_536), as: UTF8.self)
+        if status == 451 {
+            let reason = body.contains("不向中国大陆地区提供服务")
+                ? "站点提示：不向中国大陆地区提供服务。"
+                : "站点因地区或法律政策限制了当前请求。"
+            return "站点限制访问（HTTP 451）\n\(reason)请联系站点确认服务范围或官方 API 接入地址。"
+        }
+        if (300...399).contains(status) {
+            return "接口发生重定向（HTTP \(status)）\n请核对面板地址，使用站点确认的 API 接入地址。"
+        }
+        if response.value(forHTTPHeaderField: "cf-mitigated")?.lowercased() == "challenge" {
+            return "站点要求浏览器安全验证（HTTP \(status)）\n请联系站点确认 API 访问方式。余额监测不会自动登录或创建浏览器会话。"
+        }
+        let payload = (try? JSONSerialization.jsonObject(with: Data(data.prefix(65_536)))) as? [String: Any]
+        if let type = payload?["type"] as? String,
+           let url = URL(string: type), url.host == "developers.cloudflare.com",
+           url.path.contains("/error-1010") {
+            return "站点安全规则拒绝访问（HTTP \(status)，Cloudflare 1010）\n站点按客户端特征拦截了请求，请联系站点确认 API 访问方式。"
+        }
+        let isHTML = response.mimeType?.lowercased() == "text/html"
+            || body.range(of: #"(?i)<!doctype\s+html|<html\b|<head\b|<body\b"#, options: .regularExpression) != nil
+        guard isHTML else { return nil }
+        switch status {
+        case 401, 403:
+            return "站点拒绝访问（HTTP \(status)）\n接口返回了网页，无法据此确认令牌是否有效。请联系站点确认访问规则。"
+        case 404:
+            return "接口地址未找到（HTTP 404）\n站点返回了网页，请核对面板地址及 NewAPI 接口兼容性。"
+        case 500...599:
+            return "站点服务暂时不可用（HTTP \(status)）\n接口返回了错误网页，请稍后重试或联系站点。"
+        default:
+            return "接口返回网页，无法读取余额（HTTP \(status)）\n请核对面板地址及站点提供的 API 访问方式。"
+        }
     }
 
     private static func decodePayload<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {

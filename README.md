@@ -106,6 +106,7 @@ NewAPI 和 Sub2API 用于监测普通用户账号余额，而不是管理员侧�
 - 余额低于告警阈值时显示红色告警。
 - 展示账户余额、已用余额、已用 token、请求次数等面板返回的数据。
 - 多币种或不同计价单位会分组汇总，无法安全相加时会显示为多币种摘要。
+- 读取失败时显示 HTTP 状态与失败接口，区分地区访问限制、安全拦截、站点异常和认证失败。点击提示右侧的信息图标可展开、选择和复制完整诊断文字；不会直接展示错误网页源码。
 
 认证方式：
 
@@ -164,8 +165,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.16-arm64.dmg
-dist/codex-monitor-0.1.16-amd64.dmg
+dist/codex-monitor-0.1.17-arm64.dmg
+dist/codex-monitor-0.1.17-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -333,6 +334,7 @@ Supported capabilities:
 - Red alert when the balance falls below the alert threshold.
 - Balance, used amount, used tokens, request count, and other supported panel fields.
 - Multi-currency or mixed-unit summaries are grouped instead of being incorrectly added together.
+- Read failures show the HTTP status and endpoint, with distinct messages for regional restrictions, security blocks, server errors, and rejected credentials. The information button expands the diagnostic text for selection and copying instead of displaying raw error-page HTML.
 
 Authentication:
 
@@ -391,8 +393,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.16-arm64.dmg
-dist/codex-monitor-0.1.16-amd64.dmg
+dist/codex-monitor-0.1.17-arm64.dmg
+dist/codex-monitor-0.1.17-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

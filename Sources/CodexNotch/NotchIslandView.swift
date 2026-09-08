@@ -1187,20 +1187,7 @@ struct DetailPanelView: View {
     }
 
     private func inlineWarningMessage(_ message: String) -> some View {
-        HStack {
-            Text(message)
-                .font(.system(size: 9.6, weight: .semibold))
-                .foregroundStyle(Color(red: 1.0, green: 0.70, blue: 0.38))
-                .lineLimit(2)
-            Spacer()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color(red: 1.0, green: 0.55, blue: 0.25).opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color(red: 1.0, green: 0.55, blue: 0.25).opacity(0.16), lineWidth: 1)
-        )
+        ExpandableWarningMessage(message: message)
     }
 
     private func balanceHeaderStatus(_ snapshot: BalanceMonitorSnapshot) -> String {

@@ -41,6 +41,8 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - Token 数字支持整块悬停和点击：悬停短暂查看、点击固定弹窗，显示未缓存输入、缓存输入和含推理输出的构成。
 - 可选显示 GPT-5.3-Codex-Spark 专属额度窗口。
 
+“实时接口优先”以接口返回的额度为准，任务日志不会因为写入时间较晚而覆盖它。接口读取失败时保留上次成功值并重试；本次运行尚无成功接口结果时才回退本地记录。“仅本地记录”仍只读取本地数据。
+
 本机数据主要来自当前用户目录下的 Codex 数据文件，例如：
 
 - `~/.codex/state_5.sqlite`
@@ -269,6 +271,8 @@ It can show:
 - Hover or click the enlarged token target to inspect uncached input, cached input, and output including reasoning; clicking pins the popover.
 - Today, 7-day, and 30-day token usage totals. Today starts at midnight in the Mac's current time zone, and archived conversations remain part of consumed-token totals.
 - Optional GPT-5.3-Codex-Spark quota windows.
+
+With the live API preferred, quota comes from the API even when a rollout log has a later write timestamp. Failed reads retain the last successful API value while retrying; local records are used until the first successful API read. Local-only mode continues to use local records exclusively.
 
 Local data is read from Codex files under the current user account, including:
 

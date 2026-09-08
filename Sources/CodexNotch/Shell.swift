@@ -25,6 +25,69 @@ enum ShellError: Error, LocalizedError {
 }
 
 enum Shell {
+    /// Keep stdin open until the requested JSON-RPC reply arrives. A fixed sleep
+    /// followed by EOF can shut app-server down while its network read is pending.
+    static func runJSONRPC(
+        _ executable: String, _ arguments: [String], input: String,
+        responseID: Int, timeout: TimeInterval
+    ) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        try? inputPipe.fileHandleForReading.close()
+        try? outputPipe.fileHandleForWriting.close()
+        let completed = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            completed.signal()
+        }
+        defer {
+            try? inputPipe.fileHandleForWriting.close()
+            if process.isRunning {
+                terminateProcessTree(rootPID: process.processIdentifier, signal: SIGTERM)
+            }
+            if completed.wait(timeout: .now() + .milliseconds(200)) == .timedOut {
+                terminateProcessTree(rootPID: process.processIdentifier, signal: SIGKILL)
+                _ = completed.wait(timeout: .now() + .milliseconds(300))
+            }
+            try? outputPipe.fileHandleForReading.close()
+        }
+        try inputPipe.fileHandleForWriting.write(contentsOf: Data(input.utf8))
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        var pending = Data()
+        var bytes = [UInt8](repeating: 0, count: 8_192)
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            var descriptor = pollfd(fd: outputPipe.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&descriptor, 1, Int32(max(1, remaining * 1_000)))
+            if ready < 0, errno == EINTR { continue }
+            guard ready > 0 else { break }
+            let count = Darwin.read(descriptor.fd, &bytes, bytes.count)
+            if count < 0, errno == EINTR { continue }
+            guard count > 0 else { break }
+            pending.append(contentsOf: bytes.prefix(count))
+            // Bound malformed output without retaining initialization/notification lines.
+            guard pending.count <= 1_048_576 else {
+                throw ShellError.decodeFailed("JSON-RPC response exceeds 1 MiB")
+            }
+            while let newline = pending.firstIndex(of: 0x0A) {
+                let line = Data(pending[..<newline])
+                pending.removeSubrange(...newline)
+                if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                   object["id"] as? Int == responseID {
+                    return String(decoding: line, as: UTF8.self)
+                }
+            }
+        }
+        throw ShellError.timedOut(executable, timeout, "")
+    }
+
     static func run(_ executable: String, _ arguments: [String], timeout: TimeInterval? = nil) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)

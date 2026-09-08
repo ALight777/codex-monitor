@@ -723,7 +723,7 @@ struct RateLimitSnapshot: Equatable {
     var resetCredits: RateLimitResetCredits? = nil
     var planType: String? = nil
 
-    static func freshest(
+    static func preferringAppServer(
         appServer: RateLimitSnapshot?,
         localFiles: RateLimitSnapshot
     ) -> RateLimitSnapshot {
@@ -731,9 +731,9 @@ struct RateLimitSnapshot: Equatable {
             return localFiles
         }
 
-        let appServerCapturedAt = appServer.capturedAt ?? .distantPast
-        let localCapturedAt = localFiles.capturedAt ?? .distantPast
-        var result = localCapturedAt > appServerCapturedAt ? localFiles : appServer
+        // Rollout timestamps describe when a log was written, not when its quota
+        // was fetched. Replayed quota values must not replace a live response.
+        var result = appServer
         let sparkCandidates = appServer.sparkWindows + localFiles.sparkWindows
         result.sparkWindows = Dictionary(
             grouping: sparkCandidates,

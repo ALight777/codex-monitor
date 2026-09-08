@@ -2432,7 +2432,7 @@ final class CodexUsageStore: @unchecked Sendable {
     private func loadRateLimits(from paths: [String], source: RateLimitSourcePreference, now: Date) -> RateLimitSnapshot {
         switch source {
         case .appServerFirst:
-            RateLimitSnapshot.freshest(
+            RateLimitSnapshot.preferringAppServer(
                 appServer: loadAppServerRateLimits(now: now),
                 localFiles: loadLatestRateLimits(from: paths)
             )
@@ -2504,7 +2504,7 @@ final class CodexUsageStore: @unchecked Sendable {
             case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerSuccessCacheTTL:
                 return snapshot
             case .failure where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerFailureCacheTTL:
-                return nil
+                return cached.lastSuccessfulSnapshot
             default:
                 break
             }
@@ -2513,14 +2513,17 @@ final class CodexUsageStore: @unchecked Sendable {
         guard let appServerExecutable,
               FileManager.default.fileExists(atPath: appServerExecutable) else {
             cacheAppServerRateLimits(.failure, now: now)
-            return nil
+            return cached?.lastSuccessfulSnapshot
         }
 
-        let output = try? Shell.run("/bin/zsh", ["-lc", appServerRateLimitScript(executable: appServerExecutable)], timeout: 4)
+        let output = try? Shell.runJSONRPC(
+            appServerExecutable, ["app-server", "--stdio"],
+            input: appServerRateLimitInput(), responseID: 2, timeout: 4
+        )
         guard let output,
               let snapshot = parseAppServerRateLimits(output: output, now: now) else {
             cacheAppServerRateLimits(.failure, now: now)
-            return nil
+            return cached?.lastSuccessfulSnapshot
         }
 
         cacheAppServerRateLimits(.success(snapshot), now: now)
@@ -2529,28 +2532,30 @@ final class CodexUsageStore: @unchecked Sendable {
 
     private func cacheAppServerRateLimits(_ state: AppServerRateLimitCache.State, now: Date) {
         cacheLock.lock()
-        appServerRateLimitCache = AppServerRateLimitCache(createdAt: now, state: state)
+        let lastSuccessfulSnapshot: RateLimitSnapshot?
+        switch state {
+        case .success(let snapshot): lastSuccessfulSnapshot = snapshot
+        case .failure: lastSuccessfulSnapshot = appServerRateLimitCache?.lastSuccessfulSnapshot
+        }
+        appServerRateLimitCache = AppServerRateLimitCache(
+            createdAt: now, state: state, lastSuccessfulSnapshot: lastSuccessfulSnapshot
+        )
         cacheLock.unlock()
     }
 
-    private func appServerRateLimitScript(executable: String) -> String {
+    private func appServerRateLimitInput() -> String {
         let initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"codex-notch\",\"version\":\"\(AppInfo.version)\"},\"capabilities\":{\"experimentalApi\":true}}}"
         let initialized = #"{"jsonrpc":"2.0","method":"initialized"}"#
         let readRateLimits = #"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":null}"#
 
-        return """
-        {
-          printf '%s\\n' '\(initialize)' '\(initialized)' '\(readRateLimits)'
-          sleep 2.2
-        } | '\(executable)' app-server --stdio
-        """
+        return [initialize, initialized, readRateLimits, ""].joined(separator: "\n")
     }
 
     func parseAppServerRateLimits(output: String, now: Date) -> RateLimitSnapshot? {
         for line in output.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
-            guard line.contains(#""id":2"#),
-                  let data = line.data(using: .utf8),
+            guard let data = line.data(using: .utf8),
                   let response = try? JSONDecoder().decode(AppServerRateLimitResponse.self, from: data),
+                  response.id == 2,
                   let result = response.result else {
                 continue
             }
@@ -2568,6 +2573,9 @@ final class CodexUsageStore: @unchecked Sendable {
                 ),
                 secondary: rateLimitWindow(snapshot.secondary, fallbackID: "secondary", fallbackLabel: "7d")
             )
+            guard windows.contains(where: { $0.remainingPercent != nil }) else {
+                continue
+            }
             let sparkWindows = (result.rateLimitsByLimitId ?? [:])
                 .filter { key, value in
                     isSparkRateLimit(key) || isSparkRateLimit(value.limitId) || isSparkRateLimit(value.limitName)
@@ -3060,6 +3068,7 @@ private struct RecentSessionCandidate {
 private struct AppServerRateLimitCache {
     let createdAt: Date
     let state: State
+    let lastSuccessfulSnapshot: RateLimitSnapshot?
 
     enum State {
         case success(RateLimitSnapshot)

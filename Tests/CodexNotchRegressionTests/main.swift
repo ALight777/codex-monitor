@@ -622,17 +622,17 @@ let newerLocalRateLimits = RateLimitSnapshot(
     capturedAt: Date(timeIntervalSince1970: 2_030),
     isPrimaryCodexLimit: true
 )
-let freshestLocalRateLimits = RateLimitSnapshot.freshest(
+let preferredAppServerRateLimits = RateLimitSnapshot.preferringAppServer(
     appServer: cachedAppServerRateLimits,
     localFiles: newerLocalRateLimits
 )
 runner.check(
-    freshestLocalRateLimits.secondaryPercent == 87,
-    "a newer local rate-limit event should replace the cached app-server percentage"
+    preferredAppServerRateLimits.secondaryPercent == 97,
+    "a later log write must not replace the authoritative app-server percentage"
 )
 runner.check(
-    freshestLocalRateLimits.resetCredits == cachedAppServerRateLimits.resetCredits,
-    "a newer local rate-limit event should preserve app-server reset-credit details"
+    preferredAppServerRateLimits.resetCredits == cachedAppServerRateLimits.resetCredits,
+    "app-server priority should preserve its reset-credit details"
 )
 let refreshedAppServerRateLimits = RateLimitSnapshot(
     primaryPercent: nil,
@@ -643,7 +643,7 @@ let refreshedAppServerRateLimits = RateLimitSnapshot(
     isPrimaryCodexLimit: true
 )
 runner.check(
-    RateLimitSnapshot.freshest(
+    RateLimitSnapshot.preferringAppServer(
         appServer: refreshedAppServerRateLimits,
         localFiles: newerLocalRateLimits
     ).secondaryPercent == 85,

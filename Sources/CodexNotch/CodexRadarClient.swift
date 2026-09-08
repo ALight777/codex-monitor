@@ -4,6 +4,8 @@ struct CodexRadarClient: Sendable {
     // The website's live software-engineering scores replaced the static current.json feed.
     static let publicURL = URL(string: "https://codexradar.com/api/intelligence-efficiency-metrics")!
     static let authorizedURL = URL(string: "https://codexradar.com/api/v1/current")!
+    static let visualURL = URL(string: "https://codexradar.com/api/visual-spatial-reasoning")!
+    static let newsURL = URL(string: "https://codexradar.com/")!
 
     let publicEndpoint: URL
     let authorizedEndpoint: URL
@@ -32,12 +34,21 @@ struct CodexRadarClient: Sendable {
         return (try await request(url: components.url!, token: nil), .publicMetrics)
     }
 
+    func fetchVisual(forceRefresh: Bool = false) async throws -> Data {
+        let url = forceRefresh ? URL(string: Self.visualURL.absoluteString + "?refresh=1")! : Self.visualURL
+        return try await request(url: url, token: nil)
+    }
+
+    func fetchNews() async throws -> Data {
+        try await request(url: Self.newsURL, token: nil)
+    }
+
     private func request(url: URL, token: String?) async throws -> Data {
         guard Self.isAllowed(url, authorized: token != nil) else {
             throw CodexRadarClientError.disallowedURL
         }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(url.path == "/" ? "text/html" : "application/json", forHTTPHeaderField: "Accept")
         request.setValue("codex-monitor/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         if let token {
@@ -61,9 +72,10 @@ struct CodexRadarClient: Sendable {
     static func isAllowed(_ url: URL, authorized: Bool) -> Bool {
         url.scheme?.lowercased() == "https"
             && url.host?.lowercased() == "codexradar.com"
-            && url.path == (authorized ? "/api/v1/current" : "/api/intelligence-efficiency-metrics")
+            && (authorized ? url.path == "/api/v1/current"
+                : ["/api/intelligence-efficiency-metrics", "/api/visual-spatial-reasoning", "/"].contains(url.path))
             && (url.port == nil || url.port == 443)
-            && (url.query == nil || (!authorized && url.query == "refresh=1"))
+            && (url.query == nil || (!authorized && url.path != "/" && url.query == "refresh=1"))
             && url.user == nil
             && url.password == nil
     }

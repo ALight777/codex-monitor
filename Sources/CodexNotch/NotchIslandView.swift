@@ -802,14 +802,35 @@ struct DetailPanelView: View {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     RadarSummaryCell(
-                        label: radar.dataSource == .publicMetrics ? "评测维度" : "状态",
-                        value: radar.status ?? "--"
+                        label: "评测维度",
+                        value: codexRadarViewModel.selectedDimension.title
                     )
                     RadarSummaryCell(
                         label: "数据时间",
                         value: radar.displayUpdatedAt.map { "\(Formatters.relativeAge($0))前" } ?? "--"
                     )
                     RadarSummaryCell(label: "来源", value: radar.dataSource.label)
+                }
+
+                HStack(spacing: 5) {
+                    ForEach(CodexRadarDimension.allCases, id: \.self) { dimension in
+                        let selected = codexRadarViewModel.selectedDimension == dimension
+                        Button {
+                            codexRadarViewModel.selectDimension(dimension)
+                        } label: {
+                            Text(dimension.shortTitle)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(selected ? Color.white : Color.white.opacity(0.55))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 28)
+                                .background(Color.white.opacity(selected ? 0.12 : 0.035), in: RoundedRectangle(cornerRadius: 7))
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(
+                                    selected ? Color.green.opacity(0.35) : Color.clear, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(dimension.title)
+                        .accessibilityValue(selected ? "已选中" : "未选中")
+                    }
                 }
 
                 if let fetchedAt = radar.fetchedAt {
@@ -819,16 +840,7 @@ struct DetailPanelView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                if let prediction = radar.prediction ?? radar.recommendation {
-                    Text(prediction)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
+                codexRadarNewsContent
 
                 if let message = radar.message {
                     inlineWarningMessage(message)
@@ -848,7 +860,7 @@ struct DetailPanelView: View {
                         spacing: 7
                     ) {
                         ForEach(radar.models) { model in
-                            RadarModelCard(model: model, usesAverages: radar.dataSource == .publicMetrics)
+                            RadarModelCard(model: model, usesAverages: radar.dataSource.usesAverages)
                         }
                     }
                 }
@@ -899,6 +911,47 @@ struct DetailPanelView: View {
 
     private func radarQuotaText(_ value: Double?) -> String {
         value.map { String(format: "$%.2f", $0) } ?? "--"
+    }
+
+    @ViewBuilder
+    private var codexRadarNewsContent: some View {
+        if let item = codexRadarViewModel.news?.items.first {
+            Button {
+                NSWorkspace.shared.open(item.url)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("最新新闻 · CodexRadar")
+                        Spacer()
+                        Text(codexRadarViewModel.newsMessage == nil ? "查看原文 ↗" : "缓存 · 查看原文 ↗")
+                    }
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    Text(item.title)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let summary = item.summary {
+                        Text(summary)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+                .help([item.title, item.summary].compactMap { $0 }.joined(separator: "\n"))
+            }
+            .buttonStyle(.plain)
+        } else {
+            Text(codexRadarViewModel.newsMessage ?? (codexRadarViewModel.isRefreshing ? "正在读取最新新闻" : "暂无最新新闻"))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+        }
     }
 
     private var remoteContent: some View {
@@ -1652,7 +1705,11 @@ private struct RadarModelCard: View {
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))
                 Spacer(minLength: 0)
-                if let passed = model.passed, let tasks = model.tasks {
+                if let sampleLabel = model.sampleLabel {
+                    Text(sampleLabel)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.42))
+                } else if let passed = model.passed, let tasks = model.tasks {
                     Text("\(passed)/\(tasks)")
                         .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.42))

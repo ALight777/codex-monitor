@@ -522,10 +522,10 @@ struct SettingsView: View {
     private var codexRadarSettingsContent: some View {
         Section("CodexRadar") {
             Toggle(isOn: $draft.codexRadarEnabled) {
-                HelpLabel(title: "启用 CodexRadar", help: "在展开页新增 CodexRadar 标签，展示模型评分、额度雷达和状态摘要。")
+                HelpLabel(title: "启用 CodexRadar", help: "在展开页新增 CodexRadar 标签，可切换综合智能、软件工程能力、视觉空间推理，并查看官网最新新闻。")
             }
 
-            Text("每小时及北京时间 08:20、14:20 自动检查；失败后 5 分钟重试。手动刷新成功后间隔 5 分钟，失败可立即重试。没有 Token 时读取官网众测数据。")
+            Text("三个评分维度和最新新闻来自官网公开数据，每小时及北京时间 08:20、14:20 自动检查；失败后 5 分钟重试。手动刷新成功后间隔 5 分钟，失败可立即重试。可选 Token 用于额外读取授权摘要中的额度信息。")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

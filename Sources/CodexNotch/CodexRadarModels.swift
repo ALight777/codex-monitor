@@ -4,12 +4,36 @@ enum CodexRadarDataSource: String, Codable, Equatable, Sendable {
     case authorizedAPI
     case publicSummary
     case publicMetrics
+    case publicVisual
+    case publicComposite
 
     var label: String {
         switch self {
         case .authorizedAPI: "授权 API"
         case .publicSummary: "旧版摘要"
-        case .publicMetrics: "官网众测"
+        case .publicMetrics, .publicVisual, .publicComposite: "官网众测"
+        }
+    }
+
+    var usesAverages: Bool { self == .publicMetrics || self == .publicVisual || self == .publicComposite }
+}
+
+enum CodexRadarDimension: String, CaseIterable, Sendable {
+    case comprehensive, software, visual
+
+    var title: String {
+        switch self {
+        case .comprehensive: "综合智能"
+        case .software: "软件工程能力"
+        case .visual: "视觉空间推理"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .comprehensive: "综合智能"
+        case .software: "软件工程"
+        case .visual: "视觉空间"
         }
     }
 }
@@ -31,6 +55,9 @@ struct CodexRadarModelScore: Identifiable, Equatable, Sendable {
     let tasks: Int?
     let costUSD: Double?
     let wallTime: String?
+    var validTasks: Double? = nil
+    var averageMinutes: Double? = nil
+    var sampleLabel: String? = nil
 }
 
 struct CodexRadarQuotaRow: Identifiable, Equatable, Sendable {
@@ -112,8 +139,8 @@ struct CodexRadarSnapshot: Equatable, Sendable {
         fetchedAt: Date,
         source: CodexRadarDataSource
     ) throws -> CodexRadarSnapshot {
-        if source == .publicMetrics {
-            return try decodeMetrics(data: data, fetchedAt: fetchedAt)
+        if source == .publicMetrics || source == .publicVisual {
+            return try decodeMetrics(data: data, fetchedAt: fetchedAt, source: source)
         }
         let summary = try JSONDecoder().decode(CodexRadarSummaryDTO.self, from: data)
         let modelIQ = summary.modelIQ
@@ -145,22 +172,35 @@ struct CodexRadarSnapshot: Equatable, Sendable {
         )
     }
 
-    private static func decodeMetrics(data: Data, fetchedAt: Date) throws -> CodexRadarSnapshot {
+    private static func decodeMetrics(data: Data, fetchedAt: Date, source: CodexRadarDataSource) throws -> CodexRadarSnapshot {
         let metrics = try JSONDecoder().decode(CodexRadarMetricsDTO.self, from: data)
-        guard [2, 3].contains(metrics.schema), metrics.benchmarkID == "deep-swe",
+        let visual = source == .publicVisual
+        let validBenchmark = visual
+            ? metrics.schema == 1 && metrics.benchmarkID == "pompeii-adjacency"
+            : [2, 3].contains(metrics.schema) && metrics.benchmarkID == "deep-swe"
+        guard validBenchmark,
               let updatedAt = CodexRadarDateParser.parse(metrics.sourceUpdatedAt) else {
             throw CodexRadarClientError.invalidResponse
         }
         var seen = Set<String>()
         let cards = metrics.points.compactMap { point -> CodexRadarModelScore? in
             let id = "\(point.model)|\(point.effort)"
+            let count = visual ? point.validTasks : (metrics.schema == 2 ? point.weightedTotal : point.total)
             guard point.model.hasPrefix("gpt-"), let score = point.iq, score.isFinite,
+                  score >= 0, let count, count.isFinite, count > 0,
+                  let taskCount = Int(exactly: count.rounded()),
                   seen.insert(id).inserted else { return nil }
+            let passed = metrics.schema == 2 ? point.weightedPassed : point.passed
+            let cost = point.averagePriceUSD.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            let minutes = point.averageMinutes.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            let benchmarkCount = point.benchmarkTasks.flatMap { Int(exactly: $0.rounded()) } ?? taskCount
             return CodexRadarModelScore(
                 id: id, label: "\(point.model) \(point.effort)", score: score, status: nil,
-                passed: point.passed, tasks: point.total,
-                costUSD: point.averagePriceUSD,
-                wallTime: point.averageMinutes.map { String(format: "均时 %.1f 分钟", $0) }
+                passed: visual ? nil : passed.flatMap { $0 >= 0 ? Int(exactly: $0.rounded()) : nil }, tasks: taskCount,
+                costUSD: cost,
+                wallTime: minutes.map { String(format: "均时 %.1f 分钟", $0) },
+                validTasks: count, averageMinutes: minutes,
+                sampleLabel: visual ? "覆盖 \(taskCount)/\(max(taskCount, benchmarkCount)) 题" : nil
             )
         }.sorted {
             if $0.score == $1.score { return $0.id < $1.id }
@@ -169,11 +209,49 @@ struct CodexRadarSnapshot: Equatable, Sendable {
         guard !cards.isEmpty else { throw CodexRadarClientError.emptyResponse }
         return CodexRadarSnapshot(
             state: .ready, models: cards, quotaRows: [], monitoredAt: updatedAt,
-            quotaUpdatedAt: nil, fetchedAt: fetchedAt, status: "软件工程",
-            recommendation: "DeepSWE 软件工程能力评分；通过数按有效样本统计，成本与耗时为平均值。",
-            prediction: nil, dataSource: .publicMetrics, attributionText: attribution,
+            quotaUpdatedAt: nil, fetchedAt: fetchedAt, status: visual ? "视觉空间推理" : "软件工程能力",
+            recommendation: nil,
+            prediction: nil, dataSource: source, attributionText: attribution,
             siteURL: siteURL, message: nil
         )
+    }
+
+    static func comprehensive(software: CodexRadarSnapshot, visual: CodexRadarSnapshot) -> CodexRadarSnapshot {
+        var result = CodexRadarSnapshot.loading
+        result.dataSource = .publicComposite
+        result.status = CodexRadarDimension.comprehensive.title
+        guard software.dataSource == .publicMetrics, visual.dataSource == .publicVisual,
+              software.hasData, visual.hasData else {
+            return result.withState(.error, message: "综合智能需要软件工程和视觉空间两个维度的有效数据")
+        }
+        let visualByID = Dictionary(visual.models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        result.models = software.models.compactMap { left in
+            guard let right = visualByID[left.id], let leftIQ = left.score, let rightIQ = right.score,
+                  let leftCount = left.validTasks, let rightCount = right.validTasks,
+                  leftCount > 0, rightCount > 0 else { return nil }
+            let total = leftCount + rightCount
+            func weighted(_ a: Double?, _ b: Double?) -> Double? {
+                guard let a, let b else { return nil }
+                let leftWeight = max(1, leftCount), rightWeight = max(1, rightCount)
+                let value = (a * leftWeight + b * rightWeight) / (leftWeight + rightWeight)
+                return value.isFinite ? value : nil
+            }
+            let minutes = weighted(left.averageMinutes, right.averageMinutes)
+            return CodexRadarModelScore(
+                id: left.id, label: left.label, score: weighted(leftIQ, rightIQ), status: nil,
+                passed: nil, tasks: nil, costUSD: weighted(left.costUSD, right.costUSD),
+                wallTime: minutes.map { String(format: "均时 %.1f 分钟", $0) },
+                validTasks: total, averageMinutes: minutes, sampleLabel: String(format: "有效题量 %.0f", total)
+            )
+        }.sorted {
+            if $0.score == $1.score { return $0.id < $1.id }
+            return ($0.score ?? 0) > ($1.score ?? 0)
+        }
+        result.monitoredAt = [software.monitoredAt, visual.monitoredAt].compactMap { $0 }.min()
+        result.fetchedAt = [software.fetchedAt, visual.fetchedAt].compactMap { $0 }.min()
+        let stale = software.state != .ready || visual.state != .ready
+        if result.models.isEmpty { return result.withState(.error, message: "暂无同时完成两个维度评测的模型档位") }
+        return result.withState(stale ? .stale : .ready, message: stale ? "部分维度未更新，综合智能沿用其最后有效数据" : nil)
     }
 }
 
@@ -256,13 +334,21 @@ private struct CodexRadarMetricsDTO: Decodable {
         let model: String
         let effort: String
         let iq: Double?
-        let passed: Int?
-        let total: Int?
+        let passed: Double?
+        let total: Double?
+        let weightedPassed: Double?
+        let weightedTotal: Double?
+        let validTasks: Double?
+        let benchmarkTasks: Double?
         let averagePriceUSD: Double?
         let averageMinutes: Double?
 
         enum CodingKeys: String, CodingKey {
             case model, effort, iq, passed, total
+            case weightedPassed = "weighted_passed"
+            case weightedTotal = "weighted_total"
+            case validTasks = "valid_tasks"
+            case benchmarkTasks = "benchmark_tasks"
             case averagePriceUSD = "average_price_usd"
             case averageMinutes = "average_minutes"
         }
@@ -272,8 +358,12 @@ private struct CodexRadarMetricsDTO: Decodable {
             model = try container.decode(String.self, forKey: .model)
             effort = try container.decode(String.self, forKey: .effort)
             iq = container.flexibleDouble(.iq)
-            passed = container.flexibleInt(.passed)
-            total = container.flexibleInt(.total)
+            passed = container.flexibleDouble(.passed)
+            total = container.flexibleDouble(.total)
+            weightedPassed = container.flexibleDouble(.weightedPassed)
+            weightedTotal = container.flexibleDouble(.weightedTotal)
+            validTasks = container.flexibleDouble(.validTasks)
+            benchmarkTasks = container.flexibleDouble(.benchmarkTasks)
             averagePriceUSD = container.flexibleDouble(.averagePriceUSD)
             averageMinutes = container.flexibleDouble(.averageMinutes)
         }

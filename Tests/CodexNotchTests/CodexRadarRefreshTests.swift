@@ -106,7 +106,7 @@ private let radarMetrics = Data(#"""
         context.date.addTimeInterval(3600)
         model.refreshIfNeeded()
         try await waitForRefresh(model)
-        #expect(await transport.requests.count == 2)
+        #expect(await transport.softwareRequests.count == 2)
         #expect(model.snapshot.fetchedAt == context.date)
     }
 
@@ -126,14 +126,14 @@ private let radarMetrics = Data(#"""
         #expect(model.nextRefreshAt == context.date.addingTimeInterval(300))
         #expect(try Data(contentsOf: context.directory.appendingPathComponent("current.json")) == radarMetrics)
         model.refreshIfNeeded()
-        #expect(await transport.requests.count == 2)
+        #expect(await transport.softwareRequests.count == 2)
         await transport.setFailure(false)
         model.refreshNow()
         try await waitForRefresh(model)
-        #expect(await transport.requests.count == 3)
+        #expect(await transport.softwareRequests.count == 3)
         #expect(model.snapshot.state == .ready)
         model.refreshNow()
-        #expect(await transport.requests.count == 3)
+        #expect(await transport.softwareRequests.count == 3)
         #expect(model.snapshot.state == .ready)
     }
 
@@ -150,7 +150,7 @@ private let radarMetrics = Data(#"""
         await transport.setFailure(false)
         model.refreshIfNeeded()
         try await waitForRefresh(model)
-        #expect(await transport.requests.count == 3)
+        #expect(await transport.softwareRequests.count == 3)
         #expect(model.snapshot.state == .ready)
     }
 
@@ -173,16 +173,23 @@ private let radarMetrics = Data(#"""
         try radarMetrics.write(to: context.directory.appendingPathComponent("current.json"))
         try JSONSerialization.data(withJSONObject: ["fetchedAt": context.date.addingTimeInterval(-3599).timeIntervalSinceReferenceDate, "source": "publicMetrics"])
             .write(to: context.directory.appendingPathComponent("metadata.json"))
+        let visualDirectory = context.directory.appendingPathComponent("visual")
+        try FileManager.default.createDirectory(at: visualDirectory, withIntermediateDirectories: true)
+        try radarVisualMetrics.write(to: visualDirectory.appendingPathComponent("current.json"))
+        try JSONSerialization.data(withJSONObject: ["fetchedAt": context.date.addingTimeInterval(-3599).timeIntervalSinceReferenceDate, "source": "publicVisual"])
+            .write(to: visualDirectory.appendingPathComponent("metadata.json"))
+        try JSONEncoder().encode(CodexRadarNewsSnapshot(items: [], fetchedAt: context.date.addingTimeInterval(-3599)))
+            .write(to: context.directory.appendingPathComponent("news.json"))
         let transport = RadarTestTransport()
         let model = context.model(transport)
         #expect(!model.isRefreshing)
-        #expect(await transport.requests.isEmpty)
+        #expect(await transport.softwareRequests.isEmpty)
         context.date.addTimeInterval(2)
         for _ in 0..<300 {
             if model.snapshot.fetchedAt == context.date { break }
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(await transport.requests.count == 1)
+        #expect(await transport.softwareRequests.count == 1)
         #expect(model.snapshot.fetchedAt == context.date)
     }
 
@@ -192,7 +199,7 @@ private let radarMetrics = Data(#"""
         let transport = RadarDelayedTransport()
         let model = CodexRadarViewModel(settings: context.settings,
             client: CodexRadarClient { try await transport.send($0) },
-            cacheDirectory: context.directory, now: { context.date })
+            cacheDirectory: context.directory, selectionDefaults: context.defaults, now: { context.date })
         for _ in 0..<100 {
             if await transport.started { break }
             try await Task.sleep(for: .milliseconds(10))
@@ -222,12 +229,13 @@ private let radarMetrics = Data(#"""
 
 private actor RadarTestTransport {
     var requests: [URLRequest] = []
+    var softwareRequests: [URLRequest] { requests.filter { $0.url?.path == CodexRadarClient.publicURL.path } }
     private var shouldFail = false
     func setFailure(_ value: Bool) { shouldFail = value }
     func send(_ request: URLRequest) throws -> (Data, URLResponse) {
         requests.append(request)
         if shouldFail { throw URLError(.notConnectedToInternet) }
-        return (radarMetrics, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        return (radarResponseData(request), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }
 
@@ -235,9 +243,12 @@ private actor RadarDelayedTransport {
     var started = false
     private var continuation: CheckedContinuation<Void, Never>?
     func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        if request.url?.path != CodexRadarClient.publicURL.path {
+            return (radarResponseData(request), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
         started = true
         await withCheckedContinuation { continuation = $0 }
-        return (radarMetrics, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        return (radarResponseData(request), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
     func finish() {
         continuation?.resume()
@@ -256,6 +267,7 @@ private actor RadarDelayedTransport {
         defaults = try #require(UserDefaults(suiteName: suite))
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
         defaults.set(true, forKey: "codexRadarEnabled")
+        defaults.set("software", forKey: "codexRadarDimension")
         settings = CodexNotchSettings(
             defaults: defaults, initialManagementKey: "", initialNewAPIKey: "", initialSubAPIKey: "",
             secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
@@ -265,7 +277,7 @@ private actor RadarDelayedTransport {
 
     func model(_ transport: RadarTestTransport) -> CodexRadarViewModel {
         CodexRadarViewModel(settings: settings, client: CodexRadarClient { try await transport.send($0) },
-                            cacheDirectory: directory, now: { self.date })
+                            cacheDirectory: directory, selectionDefaults: defaults, now: { self.date })
     }
 
     func cleanUp() {
@@ -277,4 +289,18 @@ private actor RadarDelayedTransport {
 private struct RadarLaunchAtLoginManager: LaunchAtLoginManaging {
     var isEnabled = false
     func setEnabled(_ enabled: Bool) throws {}
+}
+
+private let radarVisualMetrics = Data(#"""
+{"schema":1,"benchmark_id":"pompeii-adjacency","source_updated_at":"2026-09-07T13:50:00Z","points":[
+ {"model":"gpt-6-astra","effort":"ultra","iq":140,"passed":12.7,"valid_tasks":20,"benchmark_tasks":86,"average_price_usd":2,"average_minutes":5}
+]}
+"""#.utf8)
+
+private func radarResponseData(_ request: URLRequest) -> Data {
+    switch request.url?.path {
+    case CodexRadarClient.visualURL.path: return radarVisualMetrics
+    case "/": return Data(#"<html data-radar-station="codex"><section class="site-announcement"><strong class="site-announcement-headline">Test news</strong></section></html>"#.utf8)
+    default: return radarMetrics
+    }
 }

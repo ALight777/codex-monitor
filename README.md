@@ -60,7 +60,9 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 ### CodexRadar
 
-可在设置中启用独立的 `Radar` 页。Token 留空时读取官网持续更新的 DeepSWE 软件工程众测评分，展示包括 GPT-6 Astra 在内的全部 Codex 模型档位。通过数按有效样本统计，成本与耗时为平均值；界面标明“评测维度：软件工程”，并分别显示数据时间和最近检查时间。有 API Token 时使用授权摘要接口，可展示该接口提供的套餐额度预测与状态摘要。
+可在设置中启用独立的 `Radar` 页，切换“综合智能、软件工程能力、视觉空间推理”三个评分维度，默认综合智能并记住上次选择。软件工程与视觉空间读取官网公开众测接口，综合智能按官网规则，对同一模型档位按两个维度的有效题量加权。切换直接使用已加载数据。成本与耗时均为平均值，视觉空间显示覆盖题数；数据时间和最近检查时间分别显示。可选 API Token 用于补充授权接口提供的套餐额度预测，不影响三个公开评分维度。
+
+原评分说明位置展示 CodexRadar 官网最新公告新闻，点击可打开来源原文。新闻与评分分别缓存；某个来源失败时保留该来源的最后有效数据并标记，其他来源仍可更新。
 
 每小时及北京时间 08:20、14:20 自动检查；失败时保留最后有效数据，5 分钟后自动重试。手动刷新会请求官网刷新共享缓存，成功后间隔 5 分钟，失败可立即重试。升级后旧 `current.json` 摘要缓存会在首次成功获取众测数据后自动迁移。
 
@@ -287,7 +289,9 @@ Costs are estimated per recorded request using the matching standard API model p
 
 ### CodexRadar
 
-The optional `Radar` tab shows Codex model scores from the website's live DeepSWE community feed, including GPT-6 Astra and all available reasoning tiers. Pass counts represent samples; cost and duration are averages. An optional API token selects the authorized summary endpoint, which can also provide plan-quota estimates and status summaries. Data timestamps are shown separately from the last successful check. Refreshes run hourly and at 08:20 and 14:20 Beijing time; failures keep the last valid data and retry after five minutes. Manual refresh requests the website's shared-cache refresh and has a five-minute cooldown after success; failed requests can be retried immediately. Old `current.json` caches are migrated on the first successful refresh.
+The optional `Radar` tab switches between comprehensive intelligence, software engineering, and visual-spatial reasoning. It defaults to comprehensive intelligence and remembers your selection; switching uses already loaded data. Software and visual scores come from the website's public community feeds. Comprehensive scores combine matching model/effort pairs using the same valid-task weights as the website. Cost and duration are averages, and visual scores show task coverage. Data timestamps are shown separately from the last successful check. An optional API token adds authorized plan-quota estimates while all three score dimensions remain public.
+
+The latest CodexRadar homepage announcement replaces the scoring explanation, with a link to its original source. News and score feeds retain separate caches; a failed source keeps its last valid data with a warning while other sources can update. Refreshes run hourly and at 08:20 and 14:20 Beijing time; failures retry after five minutes. Manual refresh requests the website's shared-cache refresh and has a five-minute cooldown after success; failed requests can be retried immediately. Old `current.json` caches are migrated on the first successful refresh.
 
 The API token uses the app's existing secret-storage mode (macOS Keychain by default) and is not written to UserDefaults or the CodexRadar response cache. Cache files are restricted to the current user. Data comes from [Codex Radar](https://codexradar.com).
 

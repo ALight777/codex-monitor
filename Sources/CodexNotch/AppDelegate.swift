@@ -30,7 +30,11 @@ struct CodexNotchApp {
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         ProcessInfo.processInfo.disableAutomaticTermination("codex监测 runs as a persistent notch overlay")
-        app.run()
+        // NSApplication.delegate is weak; keep the owner of the overlay alive
+        // for the entire event loop, including optimized release builds.
+        withExtendedLifetime(delegate) {
+            app.run()
+        }
     }
 }
 

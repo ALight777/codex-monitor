@@ -78,8 +78,11 @@ func codexRadarScheduleUsesBeijingTime() throws {
 
 @Test
 func codexRadarClientOnlyAllowsDocumentedEndpoints() {
-    #expect(CodexRadarClient.isAllowed(CodexRadarClient.publicURL, authorized: false))
+    #expect(CodexRadarClient.isAllowed(CodexRadarClient.newsURL, authorized: false))
     #expect(CodexRadarClient.isAllowed(CodexRadarClient.authorizedURL, authorized: true))
+    for path in ["/data/radar-bench-binding.json", "/api/radar-bench-score?model=x&effort=low&view=summary", "/data/radar-legacy-software.json", "/data/radar-legacy-visual.json", "/api/intelligence-efficiency-metrics", "/api/visual-spatial-reasoning"] {
+        #expect(!CodexRadarClient.isAllowed(URL(string: "https://codexradar.com" + path)!, authorized: false))
+    }
     #expect(!CodexRadarClient.isAllowed(URL(string: "http://codexradar.com/current.json")!, authorized: false))
     #expect(!CodexRadarClient.isAllowed(URL(string: "https://codexradar.com.evil.test/current.json")!, authorized: false))
     #expect(!CodexRadarClient.isAllowed(URL(string: "https://codexradar.com/api/v1/current")!, authorized: false))

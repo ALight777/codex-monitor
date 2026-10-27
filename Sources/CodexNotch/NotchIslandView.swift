@@ -802,33 +802,28 @@ struct DetailPanelView: View {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     RadarSummaryCell(
-                        label: "评测维度",
-                        value: codexRadarViewModel.selectedDimension.title
+                        label: "评测基准",
+                        value: "降智雷达"
                     )
                     RadarSummaryCell(
-                        label: "数据时间",
+                        label: "官网核验",
                         value: radar.displayUpdatedAt.map { "\(Formatters.relativeAge($0))前" } ?? "--"
                     )
                     RadarSummaryCell(label: "来源", value: radar.dataSource.label)
                 }
 
-                HStack(spacing: 5) {
-                    ForEach(CodexRadarDimension.allCases, id: \.self) { dimension in
-                        let selected = codexRadarViewModel.selectedDimension == dimension
-                        Button {
-                            codexRadarViewModel.selectDimension(dimension)
-                        } label: {
-                            Text(dimension.shortTitle)
+                HStack(spacing: 6) {
+                    ForEach(codexRadarViewModel.availableTasks, id: \.self) { task in
+                        let selected = codexRadarViewModel.selectedTask == task
+                        Button { codexRadarViewModel.selectTask(task) } label: {
+                            Text(task.title)
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(selected ? Color.white : Color.white.opacity(0.55))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 28)
                                 .background(Color.white.opacity(selected ? 0.12 : 0.035), in: RoundedRectangle(cornerRadius: 7))
-                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(
-                                    selected ? Color.green.opacity(0.35) : Color.clear, lineWidth: 1))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(dimension.title)
                         .accessibilityValue(selected ? "已选中" : "未选中")
                     }
                 }
@@ -839,6 +834,12 @@ struct DetailPanelView: View {
                         .foregroundStyle(.white.opacity(0.45))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
+                Text("\(codexRadarViewModel.selectedTask.explanation) \(radar.models.count)档 · 费用为API等价估算；耗时不含排队和评分。各题来自不同轮次。")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 codexRadarNewsContent
 
@@ -921,7 +922,7 @@ struct DetailPanelView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("最新新闻 · CodexRadar")
+                        Text("官网公告 · CodexRadar")
                         Spacer()
                         Text(codexRadarViewModel.newsMessage == nil ? "查看原文 ↗" : "缓存 · 查看原文 ↗")
                     }
@@ -1688,9 +1689,9 @@ private struct RadarModelCard: View {
                 }
             }
             HStack(spacing: 8) {
-                Text(model.score.map { String(format: "%.1f", $0) } ?? "--")
+                Text(model.scoreText ?? model.score.map { String(format: "%.1f", $0) } ?? "--")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(red: 0.61, green: 0.95, blue: 0.68))
+                    .foregroundStyle(model.scoreIsCorrect == false ? Color.orange : Color(red: 0.61, green: 0.95, blue: 0.68))
                 Spacer(minLength: 0)
                 if let sampleLabel = model.sampleLabel {
                     Text(sampleLabel)
@@ -1702,13 +1703,17 @@ private struct RadarModelCard: View {
                     .foregroundStyle(.white.opacity(0.42))
                 }
             }
-            if model.costUSD != nil || model.wallTime != nil {
+            if model.costIsEstimate || model.costUSD != nil || model.wallTime != nil {
                 HStack(spacing: 6) {
-                    if let cost = model.costUSD {
-                        Text("\(usesAverages ? "均费" : "成本") $\(cost, specifier: "%.2f")")
+                    if model.costIsEstimate {
+                        Text(model.costUSD.map { "≈$" + String(format: $0 < 0.01 ? "%.6f" : "%.2f", $0) } ?? "费用 --")
+                    } else if let cost = model.costUSD {
+                        Text("\(usesAverages ? "均费" : "成本")\(model.metricsArePartial ? "*" : "") $\(cost, specifier: "%.2f")")
                     }
                     if let wallTime = model.wallTime {
-                        Text(wallTime)
+                        Text(wallTime + (model.metricsArePartial ? "*" : ""))
+                    } else if model.costIsEstimate {
+                        Text("耗时 --")
                     }
                 }
                 .font(.system(size: 8.2, weight: .semibold, design: .rounded))

@@ -41,7 +41,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - Token 数字支持整块悬停和点击：悬停短暂查看、点击固定弹窗，显示未缓存输入、缓存输入和含推理输出的构成。
 - 可选显示 GPT-5.3-Codex-Spark 专属额度窗口。
 
-“实时接口优先”以接口返回的额度为准，任务日志不会因为写入时间较晚而覆盖它。接口读取失败时保留上次成功值并重试；本次运行尚无成功接口结果时才回退本地记录。“仅本地记录”仍只读取本地数据。
+“实时接口优先”会自动发现新版 Codex / ChatGPT 应用内的 CLI，即使没有对话或日志写入，也按30秒缓存周期主动查询额度（实际触发随刷新频率）。应用升级后重新发现路径。以接口返回的额度为准，任务日志不会因为写入时间较晚而覆盖它。接口读取失败时保留上次成功值并重试；本次运行尚无成功接口结果时才回退本地记录。“仅本地记录”仍只读取本地数据。
 
 本机数据主要来自当前用户目录下的 Codex 数据文件，例如：
 
@@ -60,13 +60,13 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 ### CodexRadar
 
-可在设置中启用独立的 `Radar` 页，切换“综合智能、软件工程能力、视觉空间推理”三个评分维度，默认综合智能并记住上次选择。软件工程与视觉空间读取官网公开众测接口，综合智能按官网规则，对同一模型档位按两个维度的有效题量加权。切换直接使用已加载数据。成本与耗时均为平均值，视觉空间显示覆盖题数；数据时间和最近检查时间分别显示。可选 API Token 用于补充授权接口提供的套餐额度预测，不影响三个公开评分维度。
+可在设置中启用独立的 `Radar` 页。当前与官网「降智雷达」一致：默认显示官网发布的三题等权总分（满分150），可切换庞贝、鹈鹕、糖果分项并记住选择。庞贝和鹈鹕按百分制显示，糖果按对错显示；鹈鹕标注 v2/v3 评分规则。按官网提供的模型和档位展示，不假造尚未支持的组合。
 
-原评分说明位置展示 CodexRadar 官网最新公告新闻，点击可打开来源原文。新闻与评分分别缓存；某个来源失败时保留该来源的最后有效数据并标记，其他来源仍可更新。
+从官网首页和公开三题 JSON 文件读取整轮数据，同时兼容内嵌 JSON 页面。总分直接读取官网公布值，并按官网等权规则核对首页与分项数据；不一致时保留上次有效缓存。显示各题费用与原始模型耗时，总分栏仅在三题度量完整时显示合计。费用是 API 等价估算，不是订阅实际扣款；耗时不含排队与评分，各题来自不同轮次。缺失值显示 `--`，未评分显示“待测”；数据核验时间与本机最近检查时间分开显示。已移除旧三维度及64题雷达Bench入口、请求和选择记录，不以旧分数填充新三题。
 
-每小时及北京时间 08:20、14:20 自动检查；失败时保留最后有效数据，5 分钟后自动重试。手动刷新会请求官网刷新共享缓存，成功后间隔 5 分钟，失败可立即重试。升级后旧 `current.json` 摘要缓存会在首次成功获取众测数据后自动迁移。
+每小时及北京时间 08:20、14:20 自动检查，唤醒后检查是否到期；失败5分钟后重试，保留最近一次有效的三题缓存。手动成功后间隔5分钟，失败可立即重试。官网公告适配当前与旧版公告结构，评分/公告分别解析和缓存；格式改变时明确报错并保留有效缓存。
 
-Token 使用应用现有的密钥保存方式（默认 macOS 钥匙串），不写入 UserDefaults 或 CodexRadar 响应缓存。缓存文件仅当前用户可读写。数据来自 [Codex 雷达](https://codexradar.com)。
+可选 API Token 只用于补充授权接口的套餐额度预测，公开首页请求不发送 Token。Token 使用应用现有的密钥保存方式（默认 macOS 钥匙串），不写入 UserDefaults 或响应缓存。缓存文件仅当前用户可读写。数据来自 [Codex 雷达](https://codexradar.com)。
 
 ### 远程账号监测
 
@@ -165,8 +165,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.17-arm64.dmg
-dist/codex-monitor-0.1.17-amd64.dmg
+dist/codex-monitor-0.1.18-arm64.dmg
+dist/codex-monitor-0.1.18-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -290,11 +290,13 @@ Costs are estimated per recorded request using the matching standard API model p
 
 ### CodexRadar
 
-The optional `Radar` tab switches between comprehensive intelligence, software engineering, and visual-spatial reasoning. It defaults to comprehensive intelligence and remembers your selection; switching uses already loaded data. Software and visual scores come from the website's public community feeds. Comprehensive scores combine matching model/effort pairs using the same valid-task weights as the website. Cost and duration are averages, and visual scores show task coverage. Data timestamps are shown separately from the last successful check. An optional API token adds authorized plan-quota estimates while all three score dimensions remain public.
+The optional `Radar` tab defaults to the site's published equal-weight three-task total out of 150, with separate Pompeii, Pelican, and Candy views and a remembered selection. Pompeii and Pelican use /100 scores; Candy shows correct/incorrect. Pelican cards identify rubric v2/v3; model/effort combinations follow the source.
 
-The latest CodexRadar homepage announcement replaces the scoring explanation, with a link to its original source. News and score feeds retain separate caches; a failed source keeps its last valid data with a warning while other sources can update. Refreshes run hourly and at 08:20 and 14:20 Beijing time; failures retry after five minutes. Manual refresh requests the website's shared-cache refresh and has a five-minute cooldown after success; failed requests can be retried immediately. Old `current.json` caches are migrated on the first successful refresh.
+Anonymous requests read the homepage and its public three-task JSON file, with support for the earlier embedded JSON layout. Published totals are checked against the site's equal-weight rule and never synthesized for a page that does not publish them. Mismatched page/file results preserve the valid cache. Total costs and durations require all three components; otherwise they remain unknown. Costs are API-equivalent estimates, not subscription charges; native model durations exclude queueing and grading. Tasks can come from different rounds. Missing metrics remain unknown and ungraded results are marked pending. The site's verification timestamp stays separate from the local check time. Retired IQ dimensions and the 64-task RadarBench are no longer requested or displayed; their scores cannot fill the new dataset.
 
-The API token uses the app's existing secret-storage mode (macOS Keychain by default) and is not written to UserDefaults or the CodexRadar response cache. Cache files are restricted to the current user. Data comes from [Codex Radar](https://codexradar.com).
+Checks run hourly and at 08:20 and 14:20 Beijing time, with a five-minute failure retry. Failures preserve the last valid three-task cache. Successful manual refreshes have a five-minute cooldown; failed attempts can be retried immediately. Scores and announcements are parsed and cached independently, including current and older announcement markup. Unrecognized formats produce a visible error instead of silently replacing valid data.
+
+An optional API token only enriches quota estimates through the authorized endpoint; it is never sent with public homepage requests. Tokens use the app's configured secret store, not UserDefaults or response caches. Cache files are private to the current user. Data is attributed to [Codex Radar](https://codexradar.com).
 
 ### Remote Account Monitoring
 
@@ -393,8 +395,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.17-arm64.dmg
-dist/codex-monitor-0.1.17-amd64.dmg
+dist/codex-monitor-0.1.18-arm64.dmg
+dist/codex-monitor-0.1.18-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

@@ -21,7 +21,8 @@ let package = Package(
         .testTarget(
             name: "CodexNotchTests",
             dependencies: ["CodexNotch"],
-            path: "Tests/CodexNotchTests"
+            path: "Tests/CodexNotchTests",
+            resources: [.copy("Fixtures")]
         )
     ]
 )

@@ -20,9 +20,21 @@ enum CodexRadarNewsParser {
               html.contains("data-radar-station") || html.contains("site-announcement") else {
             throw CodexRadarClientError.invalidResponse
         }
+        if let section = element(className: "speed-site-announcement", in: html) {
+            guard let heading = firstMatch(#"(?is)<h[1-6]\b[^>]*>(.*?)</h[1-6]\s*>"#, in: section, group: 1),
+                  !plainText(heading).isEmpty else { throw CodexRadarClientError.unsupportedFormat }
+            let summary = firstMatch(#"(?is)<p\b[^>]*>(.*?)</p\s*>"#, in: section, group: 1).map(plainText)
+            let href = firstMatch(#"(?is)<a\b[^>]*\bhref\s*=\s*["']([^"']+)["']"#, in: section, group: 1)
+            return CodexRadarNewsSnapshot(items: [CodexRadarNewsItem(
+                title: plainText(heading), summary: summary,
+                url: href.flatMap { safeURL(decodeEntities($0)) } ?? CodexRadarSnapshot.siteURL
+            )], fetchedAt: fetchedAt)
+        }
         guard let section = element(className: "site-announcement", in: html),
               let heading = element(className: "site-announcement-headline", in: section),
               !plainText(heading).isEmpty else {
+            // Do not overwrite a valid announcement cache when its markup has changed.
+            if html.contains("site-announcement") { throw CodexRadarClientError.unsupportedFormat }
             return CodexRadarNewsSnapshot(items: [], fetchedAt: fetchedAt)
         }
         let lead = element(className: "site-announcement-lead", in: section).map(plainText)

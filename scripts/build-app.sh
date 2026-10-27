@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="codex监测"
 PACKAGE_NAME="codex-monitor"
-APP_VERSION="0.1.17"
+APP_VERSION="0.1.18"
 BUNDLE_ID="com.alight.codexnotch"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
@@ -70,11 +70,15 @@ PLIST
 build_arch() {
   local swift_arch="$1"
   local dmg_arch="$2"
-  local build_dir="$ROOT_DIR/.build/$swift_arch-apple-macosx/release"
+  local build_dir
   local staged_app="$PACKAGE_STAGE_DIR/$dmg_arch/$APP_NAME.app"
   local dmg_path="$DIST_DIR/$PACKAGE_NAME-$APP_VERSION-$dmg_arch.dmg"
 
   swift build -c release --arch "$swift_arch"
+  # SwiftPM's build backend can use .build/out/Products/Release for all arches.
+  # Never package an old binary left in the legacy per-architecture directory.
+  build_dir="$(swift build -c release --arch "$swift_arch" --show-bin-path)"
+  lipo -verify_arch "$swift_arch" "$build_dir/CodexNotch"
   create_app_bundle "$build_dir/CodexNotch" "$staged_app"
 
   rm -rf "$DMG_STAGE_DIR"
@@ -87,9 +91,10 @@ build_arch() {
 build_arch "arm64" "arm64"
 build_arch "x86_64" "amd64"
 
+rm -rf "$APP_DIR"
 case "$(uname -m)" in
-  x86_64) create_app_bundle "$ROOT_DIR/.build/x86_64-apple-macosx/release/CodexNotch" "$APP_DIR" ;;
-  *) create_app_bundle "$ROOT_DIR/.build/arm64-apple-macosx/release/CodexNotch" "$APP_DIR" ;;
+  x86_64) ditto "$PACKAGE_STAGE_DIR/amd64/$APP_NAME.app" "$APP_DIR" ;;
+  *) ditto "$PACKAGE_STAGE_DIR/arm64/$APP_NAME.app" "$APP_DIR" ;;
 esac
 
 rm -rf "$DMG_STAGE_DIR" "$PACKAGE_STAGE_DIR"

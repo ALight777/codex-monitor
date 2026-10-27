@@ -133,8 +133,8 @@ func rateLimitSourceRetainsLastSuccessDuringFailedRefreshAndRetryBackoff() throw
         try (#"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","planType":"pro","primary":{"usedPercent":\#(100 - remaining),"windowDurationMins":10080,"resetsAt":\#(reset)}}}}"# + "\n")
             .write(to: response, atomically: true, encoding: .utf8)
     }
-    func read(at offset: TimeInterval, source: RateLimitSourcePreference = .appServerFirst) throws -> UsageSnapshot {
-        let result = store.loadSnapshot(includePeriodUsage: false, bypassFastCache: true,
+    func read(at offset: TimeInterval, source: RateLimitSourcePreference = .appServerFirst, bypassFastCache: Bool = true) throws -> UsageSnapshot {
+        let result = store.loadSnapshot(includePeriodUsage: false, bypassFastCache: bypassFastCache,
                                         rateLimitSource: source, now: now.addingTimeInterval(offset))
         #expect(result.errorMessage == nil)
         return result
@@ -142,13 +142,35 @@ func rateLimitSourceRetainsLastSuccessDuringFailedRefreshAndRetryBackoff() throw
 
     try writeResponse(remaining: 78, reset: reset)
     #expect(try read(at: 0).secondaryPercent == 78)
-    try "".write(to: response, atomically: true, encoding: .utf8)
-    #expect(try read(at: 31).secondaryPercent == 78)
-    #expect(try read(at: 40).secondaryPercent == 78)
-    #expect(try read(at: 40, source: .localFilesOnly).secondaryPercent == 80)
-    #expect(try String(contentsOf: calls, encoding: .utf8).split(separator: "\n").count == 2)
     try writeResponse(remaining: 77, reset: reset)
-    #expect(try read(at: 77).secondaryPercent == 77)
+    let idle = try read(at: 31, bypassFastCache: false)
+    #expect(!idle.isRunning)
+    #expect(idle.secondaryPercent == 77)
+    try "".write(to: response, atomically: true, encoding: .utf8)
+    #expect(try read(at: 62).secondaryPercent == 77)
+    #expect(try read(at: 70).secondaryPercent == 77)
+    #expect(try read(at: 70, source: .localFilesOnly).secondaryPercent == 80)
+    #expect(try String(contentsOf: calls, encoding: .utf8).split(separator: "\n").count == 3)
+    try writeResponse(remaining: 76, reset: reset)
+    #expect(try read(at: 108).secondaryPercent == 76)
     try writeResponse(remaining: 100, reset: reset + 604_800)
-    #expect(try read(at: 108).secondaryPercent == 100)
+    #expect(try read(at: 139).secondaryPercent == 100)
+}
+
+@Test func rateLimitSourceDiscoversNewAppLayoutAfterUpgradeWithMinimalGUIPath() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("NotchDiscovery-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let resources = root.appendingPathComponent("ChatGPT.app/Contents/Resources")
+    try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+    let legacy = resources.appendingPathComponent("codex")
+    try Data().write(to: legacy)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: legacy.path)
+    #expect(CodexUsageStore.resolveAppServerExecutable(applicationDirectories: [root.path], searchPath: "/usr/bin:/bin") == legacy.path)
+    try FileManager.default.removeItem(at: legacy)
+    let modern = resources.appendingPathComponent("codex-cli/CodexCLI.app/Contents/MacOS/codex")
+    try FileManager.default.createDirectory(at: modern.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data().write(to: modern)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: modern.path)
+    #expect(CodexUsageStore.resolveAppServerExecutable(applicationDirectories: [root.path], searchPath: "/usr/bin:/bin") == modern.path)
+    #expect(CodexUsageStore.resolveAppServerExecutable(applicationDirectories: [], searchPath: modern.deletingLastPathComponent().path) == modern.path)
 }

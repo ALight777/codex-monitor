@@ -65,7 +65,7 @@ final class CodexUsageStore: @unchecked Sendable {
         self.codexDirectory = codexDirectory
         self.ripgrepCandidates = ripgrepCandidates
         self.calendar = calendar
-        self.appServerExecutable = appServerExecutable ?? Self.resolveAppServerExecutable()
+        self.appServerExecutable = appServerExecutable
         self.stateDatabase = Self.latestSQLiteDatabase(
             in: codexDirectory,
             prefix: "state_",
@@ -106,16 +106,22 @@ final class CodexUsageStore: @unchecked Sendable {
         return candidates.max { $0.version < $1.version }?.path ?? fallbackPath
     }
 
-    private static func resolveAppServerExecutable() -> String? {
-        let knownPaths = [
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex"
-        ]
+    static func resolveAppServerExecutable(
+        applicationDirectories: [String] = ["/Applications", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path],
+        searchPath: String = ProcessInfo.processInfo.environment["PATH"] ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+    ) -> String? {
+        let knownPaths = applicationDirectories.flatMap { directory in
+            ["Codex.app", "ChatGPT.app"].flatMap { app in
+                ["codex-cli/CodexCLI.app/Contents/MacOS/codex", "codex"].map {
+                    "\(directory)/\(app)/Contents/Resources/\($0)"
+                }
+            }
+        }
         if let existing = knownPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
             return existing
         }
 
-        let pathEntries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+        let pathEntries = searchPath
             .split(separator: ":")
             .map(String.init)
         for directory in pathEntries {
@@ -308,14 +314,18 @@ final class CodexUsageStore: @unchecked Sendable {
         }
 
         let usage = fallbackUsage ?? .zero
+        // Quota polling must continue even when idle session files are unchanged.
+        let rateLimits = rateLimitSource == .appServerFirst
+            ? RateLimitSnapshot.preferringAppServer(appServer: loadAppServerRateLimits(now: now), localFiles: cache.rateLimits)
+            : cache.rateLimits
         let tasks = buildTasks(from: cache.threads, activeThreadIDs: cache.activeThreadIDs, now: now)
         return UsageSnapshot(
-            primaryPercent: cache.rateLimits.primaryDisplayPercent(now: now),
-            secondaryPercent: cache.rateLimits.secondaryDisplayPercent(now: now),
-            primaryResetsAt: cache.rateLimits.primaryDisplayResetDate(now: now),
-            secondaryResetsAt: cache.rateLimits.secondaryDisplayResetDate(now: now),
-            rateLimitWindows: cache.rateLimits.displayWindows(now: now),
-            resetCredits: cache.rateLimits.resetCredits,
+            primaryPercent: rateLimits.primaryDisplayPercent(now: now),
+            secondaryPercent: rateLimits.secondaryDisplayPercent(now: now),
+            primaryResetsAt: rateLimits.primaryDisplayResetDate(now: now),
+            secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
+            rateLimitWindows: rateLimits.displayWindows(now: now),
+            resetCredits: rateLimits.resetCredits,
             usage24h: usage.day,
             usage7d: usage.week,
             usage30d: usage.month,
@@ -324,7 +334,7 @@ final class CodexUsageStore: @unchecked Sendable {
             usage7dSummary: usage.weekSummary,
             usage30dSummary: usage.monthSummary,
             usageTodaySummary: usage.todaySummary,
-            sparkQuotaWindows: cache.rateLimits.displaySparkWindows(now: now),
+            sparkQuotaWindows: rateLimits.displaySparkWindows(now: now),
             tasks: tasks,
             isRunning: tasks.contains { $0.status == .running },
             lastUpdated: now,
@@ -2510,7 +2520,8 @@ final class CodexUsageStore: @unchecked Sendable {
             }
         }
 
-        guard let appServerExecutable,
+        // Resolve again after upgrades; GUI launches generally have a minimal PATH.
+        guard let appServerExecutable = appServerExecutable ?? Self.resolveAppServerExecutable(),
               FileManager.default.fileExists(atPath: appServerExecutable) else {
             cacheAppServerRateLimits(.failure, now: now)
             return cached?.lastSuccessfulSnapshot

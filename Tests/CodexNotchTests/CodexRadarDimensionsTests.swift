@@ -98,52 +98,39 @@ private let newsHTML = Data(#"""
 }
 
 @MainActor
-@Suite struct CodexRadarDimensionLifecycleTests {
-    @Test func codexRadarSwitchesLocallyAndRestoresSelectionAndAllCaches() async throws {
+@Suite struct CodexRadarNewsLifecycleTests {
+    @Test func codexRadarRestoresThreeTaskAndNewsCaches() async throws {
         let context = try DimensionTestContext()
         defer { context.cleanUp() }
         let model = context.model()
         try await wait(model)
-        #expect(model.selectedDimension == .comprehensive)
-        #expect(model.snapshot.models.first?.score == 112.5)
+        #expect(model.snapshot.dataSource == .publicThreeTask)
+        #expect(model.snapshot.models.first?.score == 100)
         #expect(model.news?.items.first?.title == "新公告 & 🚀")
         let calls = await context.transport.requests.count
-        model.selectDimension(.visual)
-        #expect(model.snapshot.models.first?.score == 150)
-        model.selectDimension(.software)
-        #expect(model.snapshot.models.contains { $0.score == 100 })
-        #expect(await context.transport.requests.count == calls)
         let reloaded = context.model()
-        #expect(reloaded.selectedDimension == .software)
         #expect(!reloaded.isRefreshing)
-        reloaded.selectDimension(.visual)
-        #expect(reloaded.snapshot.models.first?.score == 150)
+        #expect(reloaded.snapshot.models == model.snapshot.models)
         #expect(reloaded.news == model.news)
         #expect(await context.transport.requests.count == calls)
     }
 
-    @Test func codexRadarOneFeedFailureRetainsOnlyItsCacheAndRetries() async throws {
+    @Test func codexRadarNewsFailureKeepsNewsWhileScoresUpdateAndRetries() async throws {
         let context = try DimensionTestContext()
         defer { context.cleanUp() }
         let model = context.model()
         try await wait(model)
         let originalNews = model.news
-        await context.transport.change(score: 140, failVisual: true, failNews: true)
+        await context.transport.change(score: 90, failNews: true)
         context.date.addTimeInterval(301)
         model.refreshNow()
         try await wait(model)
-        #expect(model.snapshot.state == .stale)
-        #expect(model.snapshot.models.first?.score == 142.5)
+        #expect(model.snapshot.state == .ready)
+        #expect(model.snapshot.models.first?.score == 90)
         #expect(model.news == originalNews)
         #expect(model.newsMessage != nil)
         #expect(model.nextRefreshAt == context.date.addingTimeInterval(300))
-        model.selectDimension(.software)
-        #expect(model.snapshot.state == .ready)
-        #expect(model.snapshot.models.first?.score == 140)
-        model.selectDimension(.visual)
-        #expect(model.snapshot.state == .stale)
-        #expect(model.snapshot.models.first?.score == 150)
-        await context.transport.change(score: 140, failVisual: false, failNews: false)
+        await context.transport.change(score: 90, failNews: false)
         context.date.addTimeInterval(300)
         model.refreshIfNeeded()
         try await wait(model)
@@ -159,11 +146,11 @@ private let newsHTML = Data(#"""
         let model = context.model()
         try await wait(model)
         let requests = await context.transport.requests
-        #expect(requests.count == 4)
+        #expect(requests.count == 2)
         let authorized = try #require(requests.first { $0.url?.path == CodexRadarClient.authorizedURL.path })
         #expect(authorized.value(forHTTPHeaderField: "Authorization") == "Bearer test-radar-token")
         #expect(requests.filter { $0.url?.path != authorized.url?.path }.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
-        #expect(model.snapshot.models.first?.score == 112.5)
+        #expect(model.snapshot.models.first?.score == 100)
         #expect(model.snapshot.quotaRows.first?.tier == "Plus")
     }
 
@@ -179,24 +166,20 @@ private let newsHTML = Data(#"""
 private actor DimensionTestTransport {
     var requests: [URLRequest] = []
     private var score = 100.0
-    private var failVisual = false
     private var failNews = false
-    func change(score: Double, failVisual: Bool, failNews: Bool) {
-        self.score = score; self.failVisual = failVisual; self.failNews = failNews
+    func change(score: Double, failNews: Bool) {
+        self.score = score; self.failNews = failNews
     }
     func send(_ request: URLRequest) throws -> (Data, URLResponse) {
         requests.append(request)
         let data: Data
         switch request.url?.path {
-        case CodexRadarClient.visualURL.path:
-            if failVisual { throw URLError(.timedOut) }
-            data = visualData
         case "/":
-            if failNews { throw URLError(.notConnectedToInternet) }
-            data = newsHTML
+            let announcement = failNews ? "<aside class='speed-site-announcement'>changed</aside>" : String(decoding: newsHTML, as: UTF8.self)
+            data = try threeTaskHomepage(score: score, announcement: announcement)
         case CodexRadarClient.authorizedURL.path:
             data = Data(#"{"model_iq":{"quota_radar":{"rows":[{"tier":"Plus","five_h":20}]}}}"#.utf8)
-        default: data = softwareData(score: score)
+        default: throw URLError(.unsupportedURL)
         }
         return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
@@ -213,6 +196,8 @@ private actor DimensionTestTransport {
         defaults = try #require(UserDefaults(suiteName: suite))
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
         defaults.set(true, forKey: "codexRadarEnabled")
+        defaults.set(true, forKey: "codexRadarBenchMigrationV1")
+        defaults.set("comprehensive", forKey: "codexRadarDimension")
         settings = CodexNotchSettings(defaults: defaults, initialManagementKey: "", initialNewAPIKey: "", initialSubAPIKey: "",
             secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore()),
             launchAtLoginManager: DimensionLaunchManager(), loadSecretsSynchronously: true)

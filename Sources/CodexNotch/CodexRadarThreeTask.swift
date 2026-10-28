@@ -1,22 +1,37 @@
 import Foundation
 
 enum CodexRadarTask: String, CaseIterable, Sendable {
-    case total, pompeii, pelican, candy
+    case total, combined, pompeii, pelican, candy
 
     static let components: [Self] = [.pompeii, .pelican, .candy]
 
     var title: String {
         switch self {
         case .total: "总分"
+        case .combined: "秦始皇"
         case .pompeii: "庞贝"
         case .pelican: "鹈鹕"
         case .candy: "糖果"
         }
     }
 
-    var explanation: String {
+    func explanation(for source: CodexRadarDataSource) -> String {
+        if source == .publicFourTask {
+            switch self {
+            case .total: return "官网总分 /150：秦始皇60、庞贝45、鹈鹕22.5、糖果22.5；费用和耗时为四题合计。"
+            case .combined: return "秦始皇 /100；采用完成度门槛后的最终分，按60分计入总分。"
+            case .pompeii: return "庞贝 /100，按45分计入总分。"
+            case .pelican: return "鹈鹕 /100，按22.5分计入总分；独立v1 / 可见证据v2。"
+            case .candy: return "糖果按对错展示，答对计22.5分，答错计0分。"
+            }
+        }
+        return legacyExplanation
+    }
+
+    private var legacyExplanation: String {
         switch self {
         case .total: "官网总分 /150，三题等权各50分；费用和耗时为三题合计。"
+        case .combined: "秦始皇 /100。"
         case .pompeii: "庞贝分项 /100。"
         case .pelican: "鹈鹕分项 /100；卡片标注评分规则 v2/v3。"
         case .candy: "糖果题按对错展示。"
@@ -49,7 +64,7 @@ struct CodexRadarThreeTaskPayload: Codable, Sendable {
 
         func result(for task: CodexRadarTask) -> Result? {
             switch task {
-            case .total: nil
+            case .total, .combined: nil
             case .pompeii: pompeii
             case .pelican: pelican
             case .candy: candy
@@ -72,7 +87,7 @@ struct CodexRadarThreeTaskPayload: Codable, Sendable {
 
         func hasGrade(for task: CodexRadarTask) -> Bool {
             switch task {
-            case .total: false
+            case .total, .combined: false
             case .pompeii: score100 != nil
             case .pelican: score != nil
             case .candy: correct != nil
@@ -82,7 +97,7 @@ struct CodexRadarThreeTaskPayload: Codable, Sendable {
         func validate(for task: CodexRadarTask) throws {
             let expectedSelector: String
             switch task {
-            case .total: throw CodexRadarClientError.invalidResponse
+            case .total, .combined: throw CodexRadarClientError.invalidResponse
             case .pompeii: expectedSelector = "pompeii:pompeii-adjacency-rp-040"
             case .pelican: expectedSelector = "visual:pelican-bicycle"
             case .candy: expectedSelector = "local-reasoning:candy-cross-shape"
@@ -214,7 +229,16 @@ struct CodexRadarThreeTaskDocument: Codable, Sendable {
         guard html.contains("三题等权，总分换算为150分"), html.contains("糖果答对计满分、答错计0") else {
             throw CodexRadarClientError.unsupportedFormat
         }
-        let panel = String(html[range])
+        return try validated(payload: payload, totals: publishedTotals(in: String(html[range])))
+    }
+
+    private static func validated(payload: CodexRadarThreeTaskPayload, totals: [Total]) throws -> Self {
+        let document = Self(payload: payload, totals: totals)
+        _ = try document.snapshots(fetchedAt: Date())
+        return document
+    }
+
+    static func publishedTotals(in panel: String) throws -> [Total] {
         let buttons = try NSRegularExpression(pattern: #"(?is)<button\b[^>]*\bdata-cir-setting\s*=\s*["']([^"']+)["'][^>]*>.*?<strong\b[^>]*>([^<]+)</strong>.*?</button\s*>"#)
         let totals = try buttons.matches(in: panel, range: NSRange(panel.startIndex..., in: panel)).map { match -> Total in
             guard let idRange = Range(match.range(at: 1), in: panel), let scoreRange = Range(match.range(at: 2), in: panel) else {
@@ -225,9 +249,7 @@ struct CodexRadarThreeTaskDocument: Codable, Sendable {
             guard score != nil || ["—", "--", "待测"].contains(value) else { throw CodexRadarClientError.invalidResponse }
             return Total(id: panel[idRange].replacingOccurrences(of: ":", with: "|"), score: score)
         }
-        let document = Self(payload: payload, totals: totals)
-        _ = try document.snapshots(fetchedAt: Date())
-        return document
+        return totals
     }
 
     func encode() throws -> Data { try JSONEncoder().encode(self) }

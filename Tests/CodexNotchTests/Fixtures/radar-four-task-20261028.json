@@ -1,0 +1,3294 @@
+{
+  "schema": "codex-four-task-results/1",
+  "protocol": "codex-four-weighted-150-v2",
+  "round_id": "codex-four-weighted-20261027",
+  "source_sha256": "ae386aa985faff580f05130bc6c6fdeb00a572e3fe651d2c4114b1a237097467",
+  "verified_at": "2026-10-27T09:20:47.793802+00:00",
+  "expected": 184,
+  "graded": 184,
+  "configurations": 46,
+  "models": [
+    "gpt-6.1-sol",
+    "gpt-6-astra",
+    "gpt-6.1-terra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna"
+  ],
+  "model_efforts": {
+    "gpt-6.1-sol": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "gpt-6-astra": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "gpt-6.1-terra": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "gpt-6-sol": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "gpt-6-luna": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "gpt-5.6-sol": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "gpt-5.6-terra": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "gpt-5.6-luna": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ]
+  },
+  "model_names": {
+    "gpt-6.1-sol": "GPT-6.1 Sol",
+    "gpt-6-astra": "GPT-6 Astra",
+    "gpt-6.1-terra": "GPT-6.1 Terra",
+    "gpt-6-sol": "GPT-6 Sol",
+    "gpt-6-luna": "GPT-6 Luna",
+    "gpt-5.6-sol": "GPT-5.6 Sol",
+    "gpt-5.6-terra": "GPT-5.6 Terra",
+    "gpt-5.6-luna": "GPT-5.6 Luna"
+  },
+  "efforts": [
+    "ultra",
+    "max",
+    "xhigh",
+    "high",
+    "medium",
+    "low"
+  ],
+  "task_weights": {
+    "combined": 60,
+    "pompeii": 45,
+    "pelican": 22.5,
+    "candy": 22.5
+  },
+  "score_max": 150,
+  "rows": [
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "low",
+      "pompeii": {
+        "execution_id": "9707797e039441da9b559f364765b2b7",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T06:37:13.056858+00:00",
+        "model_completed_at": "2026-10-27T06:44:53.224221+00:00",
+        "model_elapsed_seconds": 460.16737616434693,
+        "cost_usd": 0.229388,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.64,
+        "score100": 64.0
+      },
+      "pelican": {
+        "execution_id": "ac3492288627465e8eca33e970f61aa3",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T06:37:13.544549+00:00",
+        "model_completed_at": "2026-10-27T06:39:29.923941+00:00",
+        "model_elapsed_seconds": 136.37940416112542,
+        "cost_usd": 0.0750836,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 96,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-sol--low.html",
+          "sha256": "f0e0a791084b0f258e7ed45af64bac93d5d88792a0855e16cf331a44e070952c",
+          "bytes": 11989
+        },
+        "raw_score_total": 96,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "acb8b412ba9c4b5583d09149fd7ac6b8",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T06:36:47.817720+00:00",
+        "model_completed_at": "2026-10-27T06:37:44.791379+00:00",
+        "model_elapsed_seconds": 56.97368012368679,
+        "cost_usd": 0.0236856,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "70488b86bb1c45f3a885ee8acf35fbab",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T06:37:13.335832+00:00",
+        "model_completed_at": "2026-10-27T06:40:55.077960+00:00",
+        "model_elapsed_seconds": 221.74214752577245,
+        "cost_usd": 0.0857028,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 66,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-sol--low.svg",
+          "sha256": "c189923230366920e2aa7455f227ea78538abb96719aaefcb0550d7383d503e4",
+          "bytes": 22457
+        },
+        "raw_score_total": 66,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=3，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "pompeii": {
+        "execution_id": "f6b9b7815a5d4494bedbfc13b2edea77",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T06:37:13.275051+00:00",
+        "model_completed_at": "2026-10-27T06:43:05.984095+00:00",
+        "model_elapsed_seconds": 352.7090545594692,
+        "cost_usd": 0.167448,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.9655172413793104,
+        "score100": 96.55172413793103
+      },
+      "pelican": {
+        "execution_id": "cc20fdae736446d3849268979ec1263b",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T06:37:13.182377+00:00",
+        "model_completed_at": "2026-10-27T06:39:46.613076+00:00",
+        "model_elapsed_seconds": 153.4307121168822,
+        "cost_usd": 0.0756112,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 88,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-sol--medium.html",
+          "sha256": "f1909bd2e46d60cd4a378eeafb1b210405327d2ef2a945dffaa727a6e2c520f9",
+          "bytes": 14284
+        },
+        "raw_score_total": 88,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "43c2ca953d4746a0a81ac90bfcc6c565",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T06:37:13.544979+00:00",
+        "model_completed_at": "2026-10-27T06:38:17.716811+00:00",
+        "model_elapsed_seconds": 64.17185344360769,
+        "cost_usd": 0.0199988,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "d0f441d36367449f800638c11b6cffc9",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T06:37:13.281329+00:00",
+        "model_completed_at": "2026-10-27T06:42:42.683647+00:00",
+        "model_elapsed_seconds": 329.4023296646774,
+        "cost_usd": 0.1575424,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-sol--medium.svg",
+          "sha256": "c1cbbe82b80bd523ecde821028b8b2f1d8e4beac97dc49b58c40ea561334e597",
+          "bytes": 27564
+        },
+        "raw_score_total": 70,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=0，n_partial=2；R1与R4部分成立，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "pompeii": {
+        "execution_id": "245e7490205f4acda0a5bc77d7c9689d",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T06:38:18.595136+00:00",
+        "model_completed_at": "2026-10-27T06:49:44.593674+00:00",
+        "model_elapsed_seconds": 685.9985619820654,
+        "cost_usd": 0.340684,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.7857142857142857,
+        "score100": 78.57142857142857
+      },
+      "pelican": {
+        "execution_id": "86bf0a80161f4290b97bed20d34adda3",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T06:37:13.395522+00:00",
+        "model_completed_at": "2026-10-27T06:40:55.135958+00:00",
+        "model_elapsed_seconds": 221.74044856615365,
+        "cost_usd": 0.1181744,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 99,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-sol--high.html",
+          "sha256": "82ca97b7c767e8c9c317c139ae07ed727b6c55be77c1d2bb4b303cf2c14d25bc",
+          "bytes": 19942
+        },
+        "raw_score_total": 99,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "13ee5b30ca7b49d5ab8012f9bd8b63a3",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T06:37:13.545487+00:00",
+        "model_completed_at": "2026-10-27T06:38:30.369541+00:00",
+        "model_elapsed_seconds": 76.82407299615443,
+        "cost_usd": 0.0244316,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "9211394eed364df791f103f5e38aa58d",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T06:37:45.679610+00:00",
+        "model_completed_at": "2026-10-27T06:48:45.569734+00:00",
+        "model_elapsed_seconds": 659.8901401180774,
+        "cost_usd": 0.3158164,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-sol--high.svg",
+          "sha256": "bbd68096c4987e32b62c3938a5be76ea60b4e4415f29faf76eab99c3dc9b56a1",
+          "bytes": 186889
+        },
+        "raw_score_total": 84,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=1；存在一条not_met，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "pompeii": {
+        "execution_id": "6ac592ad1ee846569aa4b300efcdce7d",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T06:40:55.347627+00:00",
+        "model_completed_at": "2026-10-27T06:58:35.286193+00:00",
+        "model_elapsed_seconds": 1059.938585260883,
+        "cost_usd": 0.473148,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.9285714285714286,
+        "score100": 92.85714285714286
+      },
+      "pelican": {
+        "execution_id": "1f2c8c3d2eb149ab9dd720f9ac6389f6",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T06:39:30.877635+00:00",
+        "model_completed_at": "2026-10-27T06:54:43.402250+00:00",
+        "model_elapsed_seconds": 912.5246301144361,
+        "cost_usd": 0.4746596,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 99,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-sol--xhigh.html",
+          "sha256": "18050250fc094c9748af0e00caea47d168497cd1aa7f30e01ccdb2ddca82446c",
+          "bytes": 33950
+        },
+        "raw_score_total": 99,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "ea3b8084ba96488590e287f1a2cba23a",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T06:38:31.210180+00:00",
+        "model_completed_at": "2026-10-27T06:40:11.586076+00:00",
+        "model_elapsed_seconds": 100.37591676041484,
+        "cost_usd": 0.0412036,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "8c2f5e70282449e0933abcae2cf75a20",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T06:40:11.686467+00:00",
+        "model_completed_at": "2026-10-27T06:54:31.998439+00:00",
+        "model_elapsed_seconds": 860.3119934555143,
+        "cost_usd": 0.425954,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 79,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-sol--xhigh.svg",
+          "sha256": "c1790b290173fc50dba870e5aca134d47d1297a3686432a23690e0b147f844d0",
+          "bytes": 754525
+        },
+        "raw_score_total": 90,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 79,
+            "reason": "n_not=0，n_partial=1；R7喊话尾端归属部分成立，适用79分上限。"
+          }
+        ],
+        "completion_cap": 79
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "max",
+      "pompeii": {
+        "execution_id": "89378977fc374db68056bd5aac3590a6",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T06:48:40.429567+00:00",
+        "model_completed_at": "2026-10-27T07:13:17.283732+00:00",
+        "model_elapsed_seconds": 1476.8541812710464,
+        "cost_usd": 0.6197936,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.8888888888888888,
+        "score100": 88.88888888888889
+      },
+      "pelican": {
+        "execution_id": "9370dceb86ba481fb783bb322ff2ac06",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T06:42:42.763809+00:00",
+        "model_completed_at": "2026-10-27T06:54:43.710738+00:00",
+        "model_elapsed_seconds": 720.9469425901771,
+        "cost_usd": 0.4976988,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 100,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-sol--max.html",
+          "sha256": "458708b9e5a574bae03d3527676c781e20632154a8b90eb37c126d7acc85a0a4",
+          "bytes": 38972
+        },
+        "raw_score_total": 100,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "ce19dd5134c04b4ba4237ffcae6e497e",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T06:43:06.069693+00:00",
+        "model_completed_at": "2026-10-27T06:44:41.046234+00:00",
+        "model_elapsed_seconds": 94.97656156681478,
+        "cost_usd": 0.0372656,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "b333b4c491fa4b5aafeccca074ca575d",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T06:47:09.277389+00:00",
+        "model_completed_at": "2026-10-27T07:02:16.896519+00:00",
+        "model_elapsed_seconds": 907.619142010808,
+        "cost_usd": 0.42383,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 91,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-sol--max.svg",
+          "sha256": "980adc3d4c1d9f09445a1508391613255cf6fd7a1213f47a5670a4e88469b97c",
+          "bytes": 281638
+        },
+        "raw_score_total": 91,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 100,
+            "reason": "n_not=0，n_partial=0；七条核心关系均为confirmed。"
+          }
+        ],
+        "completion_cap": 100
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "ultra",
+      "pompeii": {
+        "execution_id": "bea18524518e4d209d5b23e499c6f2fd",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T06:54:32.102925+00:00",
+        "model_completed_at": "2026-10-27T07:05:26.295121+00:00",
+        "model_elapsed_seconds": 654.1922168266028,
+        "cost_usd": 1.026958,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.7142857142857143,
+        "score100": 71.42857142857143
+      },
+      "pelican": {
+        "execution_id": "be9af6a940a44a73b52fd8815832eb5c",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T06:49:44.692013+00:00",
+        "model_completed_at": "2026-10-27T07:06:26.334215+00:00",
+        "model_elapsed_seconds": 1001.6422206554562,
+        "cost_usd": 0.6385308,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 93.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-sol--ultra.html",
+          "sha256": "7997263563cc52163b852c49ed05b0f314650db5df979d5f03076a1f876afc6e",
+          "bytes": 90666
+        },
+        "raw_score_total": 93.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "98bb22a78db44757810b157f66b792f6",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T06:48:45.672373+00:00",
+        "model_completed_at": "2026-10-27T06:50:28.247740+00:00",
+        "model_elapsed_seconds": 102.57537572458386,
+        "cost_usd": 0.0722776,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "c6ed38197d124ccd8492df162d80f015",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T06:51:10.728190+00:00",
+        "model_completed_at": "2026-10-27T07:05:22.584266+00:00",
+        "model_elapsed_seconds": 851.8561028260738,
+        "cost_usd": 0.6177092,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 85.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-sol--ultra.svg",
+          "sha256": "da9af62d07b09ef347c46912d7e753565ca72bf11a3f39beb9f66b07f2274923",
+          "bytes": 182335
+        },
+        "raw_score_total": 85.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 100,
+            "reason": "n_not=0，n_partial=0；七条核心关系均为confirmed。"
+          }
+        ],
+        "completion_cap": 100
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "pompeii": {
+        "execution_id": "25c17e52fa184b2e8c45ab93cad553a9",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T06:58:08.503409+00:00",
+        "model_completed_at": "2026-10-27T07:10:13.805174+00:00",
+        "model_elapsed_seconds": 725.3017800617963,
+        "cost_usd": 2.196884,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.4,
+        "score100": 40.0
+      },
+      "pelican": {
+        "execution_id": "fea900fa17dc4eb0b2c93ae7640f6191",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T06:54:43.808780+00:00",
+        "model_completed_at": "2026-10-27T06:57:48.846162+00:00",
+        "model_elapsed_seconds": 185.0373953524977,
+        "cost_usd": 0.424372,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 98,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-astra--low.html",
+          "sha256": "563d0f81d77383f67ddf2e4d7065a1e63bb801ee76f8acb55c4df4403d539c3e",
+          "bytes": 12130
+        },
+        "raw_score_total": 98,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "33aea802dc4d4440b065a7e4fe4bffa0",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T06:54:43.502232+00:00",
+        "model_completed_at": "2026-10-27T06:55:46.373993+00:00",
+        "model_elapsed_seconds": 62.87177152372897,
+        "cost_usd": 0.07841,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "f3e091c639094a74bfbeae1adaa0e941",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T06:57:48.937618+00:00",
+        "model_completed_at": "2026-10-27T07:02:52.939091+00:00",
+        "model_elapsed_seconds": 304.0014943368733,
+        "cost_usd": 0.493154,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 64,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-astra--low.svg",
+          "sha256": "99bc7cd0ef5f34ec0a7e2b534ee148a047927da7aa4cb9c3e314721fd2152d95",
+          "bytes": 22226
+        },
+        "raw_score_total": 64,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=3，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "pompeii": {
+        "execution_id": "f07b12a828294133a9efc784537e7ba5",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:04:40.569201+00:00",
+        "model_completed_at": "2026-10-27T07:16:19.916966+00:00",
+        "model_elapsed_seconds": 699.3477771226317,
+        "cost_usd": 1.388276,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.6666666666666666,
+        "score100": 66.66666666666666
+      },
+      "pelican": {
+        "execution_id": "28de0b8b13414ef19fc381d383de27d1",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:01:14.679006+00:00",
+        "model_completed_at": "2026-10-27T07:04:40.467332+00:00",
+        "model_elapsed_seconds": 205.78833936154842,
+        "cost_usd": 0.38027,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 98,
+        "rubric": "pelican-animation-standalone-v2-visible-evidence-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-astra--medium.html",
+          "sha256": "51f59ffc265dd2e5aac03be9bf3c93956038ebb689ed93ce6d582b21558e6852",
+          "bytes": 13418
+        },
+        "raw_score_total": 98,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "bd390c64e61a4edba2fce21972ec62be",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T06:59:56.043713+00:00",
+        "model_completed_at": "2026-10-27T07:01:14.569644+00:00",
+        "model_elapsed_seconds": 78.52594222687185,
+        "cost_usd": 0.08971,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "a5af78bfd70441e4afc1b02d0155476a",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:02:53.032052+00:00",
+        "model_completed_at": "2026-10-27T07:08:28.035137+00:00",
+        "model_elapsed_seconds": 335.0030994620174,
+        "cost_usd": 0.469196,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-astra--medium.svg",
+          "sha256": "7deeaa89cd1e0114d6344a230be5c94bcf55eee6641c5845e9cd5e945d19a563",
+          "bytes": 25692
+        },
+        "raw_score_total": 70.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=0，n_partial=3；部分成立的核心关系不少于2条，上限为69。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "pompeii": {
+        "execution_id": "539fb6bbcb2346ed862f7ecabe42c575",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:06:26.468304+00:00",
+        "model_completed_at": "2026-10-27T07:15:31.767292+00:00",
+        "model_elapsed_seconds": 545.2990027740598,
+        "cost_usd": 1.052198,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.9285714285714286,
+        "score100": 92.85714285714286
+      },
+      "pelican": {
+        "execution_id": "8736ac35b6c249db9e1687f25e776265",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:05:22.685604+00:00",
+        "model_completed_at": "2026-10-27T07:09:28.879754+00:00",
+        "model_elapsed_seconds": 246.19417162425816,
+        "cost_usd": 0.598192,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 99,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-astra--high.html",
+          "sha256": "c20417798bedb0907e3b8544e47816fc1bd31f309009699e2b7fe981c75ae673",
+          "bytes": 16335
+        },
+        "raw_score_total": 99,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "0a4199ac324d4df8ab9d4881c04c34fa",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:04:50.140491+00:00",
+        "model_completed_at": "2026-10-27T07:06:10.563850+00:00",
+        "model_elapsed_seconds": 80.42337387613952,
+        "cost_usd": 0.14202,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "997993b2a08a435a94ee08e85494929d",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:05:31.849916+00:00",
+        "model_completed_at": "2026-10-27T07:16:27.139108+00:00",
+        "model_elapsed_seconds": 655.2892102785408,
+        "cost_usd": 1.18904,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-astra--high.svg",
+          "sha256": "a0f4216a233c7b377ddf49c27abd97a1294caa6af2dc27e5f5e53c9cfa2722ff",
+          "bytes": 479728
+        },
+        "raw_score_total": 73.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=0，n_partial=2；熊的翼面承托与喊话尾端归属为partial，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "pompeii": {
+        "execution_id": "9f57c91d32614525b1d57caba8ba2659",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:11:28.748036+00:00",
+        "model_completed_at": "2026-10-27T07:27:19.901991+00:00",
+        "model_elapsed_seconds": 951.1539704054594,
+        "cost_usd": 2.082958,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.8888888888888888,
+        "score100": 88.88888888888889
+      },
+      "pelican": {
+        "execution_id": "a2056035e5ba421ab5ec132b2a2e4860",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:10:13.902120+00:00",
+        "model_completed_at": "2026-10-27T07:21:54.489323+00:00",
+        "model_elapsed_seconds": 700.5872119404376,
+        "cost_usd": 1.727196,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 97,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-astra--xhigh.html",
+          "sha256": "41199139e932242f2835fe7dd2d91b48e733376feff1d8bcee69c54f96623de0",
+          "bytes": 29197
+        },
+        "raw_score_total": 97,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "b96faf49b837441b915b3fb916d421f1",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:08:28.130927+00:00",
+        "model_completed_at": "2026-10-27T07:10:25.008787+00:00",
+        "model_elapsed_seconds": 116.87786963023245,
+        "cost_usd": 0.171834,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "6090f610a67d4f448d12f93d5550df54",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:10:25.106899+00:00",
+        "model_completed_at": "2026-10-27T07:30:07.407027+00:00",
+        "model_elapsed_seconds": 1182.3001487087458,
+        "cost_usd": 1.902342,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 94,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-astra--xhigh.svg",
+          "sha256": "a6a7e326e813c62a6826dd4e321b32f315e7528d1b56c12990026ffc984a7366",
+          "bytes": 125736
+        },
+        "raw_score_total": 94,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 100,
+            "reason": "n_not=0，n_partial=0；七项核心关系均为confirmed。"
+          }
+        ],
+        "completion_cap": 100
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "max",
+      "pompeii": {
+        "execution_id": "e1c349d4098049be8d736d4462403d6e",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:15:32.886386+00:00",
+        "model_completed_at": "2026-10-27T07:35:40.294564+00:00",
+        "model_elapsed_seconds": 1207.408194852993,
+        "cost_usd": 1.962938,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.8888888888888888,
+        "score100": 88.88888888888889
+      },
+      "pelican": {
+        "execution_id": "ad498b9f41234842aab3396976847e22",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:13:17.378077+00:00",
+        "model_completed_at": "2026-10-27T07:42:18.536886+00:00",
+        "model_elapsed_seconds": 1741.1588237322867,
+        "cost_usd": 4.043952,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 99,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-astra--max.html",
+          "sha256": "a99a0d68826557ae726d5f8662a0bfbb21e09ae2836f491087192c148697813b",
+          "bytes": 38408
+        },
+        "raw_score_total": 99,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "76d5a34637114c5e87fbac0f220214fb",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:13:16.367498+00:00",
+        "model_completed_at": "2026-10-27T07:15:32.746733+00:00",
+        "model_elapsed_seconds": 136.3792474810034,
+        "cost_usd": 0.220288,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "75807d225608444797f44dd5e41ea4cb",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:15:23.563261+00:00",
+        "model_completed_at": "2026-10-27T07:32:58.491128+00:00",
+        "model_elapsed_seconds": 1054.927889276296,
+        "cost_usd": 1.834766,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-astra--max.svg",
+          "sha256": "0c788c68b99b6029f87565f287fd6f884c8d0ba693507adc98ad8df3d3450e17",
+          "bytes": 169402
+        },
+        "raw_score_total": 84,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=1，适用存在至少一条not_met的69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "effort": "ultra",
+      "pompeii": {
+        "execution_id": "a98ddf66e70e4350ac37a4086827f2b5",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:21:54.604228+00:00",
+        "model_completed_at": "2026-10-27T07:35:09.106492+00:00",
+        "model_elapsed_seconds": 794.5022798758,
+        "cost_usd": 4.740124,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.9655172413793104,
+        "score100": 96.55172413793103
+      },
+      "pelican": {
+        "execution_id": "ee2354b194cc4468a9e47d2f9cd4070d",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:19:14.086696+00:00",
+        "model_completed_at": "2026-10-27T07:35:46.616210+00:00",
+        "model_elapsed_seconds": 992.5295257624239,
+        "cost_usd": 3.255738,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 100,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-astra--ultra.html",
+          "sha256": "02d8fa65fbcac685149c66422c2b83a520978190022a8e1bb31d286fd854c06c",
+          "bytes": 29175
+        },
+        "raw_score_total": 100,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "23546092eb0042fda7e08c4b66e1cf56",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:17:15.866269+00:00",
+        "model_completed_at": "2026-10-27T07:19:13.994276+00:00",
+        "model_elapsed_seconds": 118.1280202139169,
+        "cost_usd": 0.4134,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "503daf80e7dd4fcb9fef1542a163973e",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:21:53.814809+00:00",
+        "model_completed_at": "2026-10-27T07:35:26.219732+00:00",
+        "model_elapsed_seconds": 812.4049464091659,
+        "cost_usd": 3.017002,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 79,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-astra--ultra.svg",
+          "sha256": "087a40873473c1cd66c8acc8ae79e7d40b0c5a4dab57cea85b6ae4a3a30603af",
+          "bytes": 151230
+        },
+        "raw_score_total": 94,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 79,
+            "reason": "n_not=0，n_partial=1；R4的前爪承托接触处被遮挡，适用79分上限。"
+          }
+        ],
+        "completion_cap": 79
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "effort": "low",
+      "pompeii": {
+        "execution_id": "6c466c8827834e2ca86703e96de93cbc",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:21:24.535630+00:00",
+        "model_completed_at": "2026-10-27T07:23:56.716795+00:00",
+        "model_elapsed_seconds": 152.18118050135672,
+        "cost_usd": 0.0659844,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.21052631578947367,
+        "score100": 21.052631578947366
+      },
+      "pelican": {
+        "execution_id": "d0441b7b886a41f1a3e65fe9ea15d73a",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:18:59.370078+00:00",
+        "model_completed_at": "2026-10-27T07:20:09.441659+00:00",
+        "model_elapsed_seconds": 70.07158994302154,
+        "cost_usd": 0.02416,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 74.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-terra--low.html",
+          "sha256": "e05d1f2cc8e8ce2a48a346a74a1d93fbfcc3b8b3c5822ff5b380c4ee61fb96b1",
+          "bytes": 6225
+        },
+        "raw_score_total": 74.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "7d1d0d2d4da243da8797a935d1fc9bf0",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:20:02.113073+00:00",
+        "model_completed_at": "2026-10-27T07:21:23.037946+00:00",
+        "model_elapsed_seconds": 80.9248847682029,
+        "cost_usd": 0.010212,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "3808148928994602b399229cb9306eef",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:18:59.724458+00:00",
+        "model_completed_at": "2026-10-27T07:20:37.249644+00:00",
+        "model_elapsed_seconds": 97.52519573643804,
+        "cost_usd": 0.0283632,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 59,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-terra--low.svg",
+          "sha256": "fbe2fe1f52c61cb5a85629124ef9c88fd15e4b54da4f48d7d149bb111056c8dd",
+          "bytes": 8445
+        },
+        "raw_score_total": 59.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=3；两条核心关系未满足，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "effort": "medium",
+      "pompeii": {
+        "execution_id": "3167a055394e4ecc92a2056d1c30bcb0",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:27:04.136842+00:00",
+        "model_completed_at": "2026-10-27T08:31:11.980188+00:00",
+        "model_elapsed_seconds": 247.84336263872683,
+        "cost_usd": 0.1072042,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.3157894736842105,
+        "score100": 31.57894736842105
+      },
+      "pelican": {
+        "execution_id": "c2a15d31706c4871a3355a453ff10a8d",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:18:59.510435+00:00",
+        "model_completed_at": "2026-10-27T07:20:24.734538+00:00",
+        "model_elapsed_seconds": 85.22412694618106,
+        "cost_usd": 0.0235976,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-terra--medium.html",
+          "sha256": "1c531da87672cda9e61d12898b39ac4daf05c8b24b192770e240c408a65e5d0c",
+          "bytes": 7275
+        },
+        "raw_score_total": 69,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "8889058ee1df466a9b3ee92f0c1910d3",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:18:59.147311+00:00",
+        "model_completed_at": "2026-10-27T07:20:02.020008+00:00",
+        "model_elapsed_seconds": 62.87271009199321,
+        "cost_usd": 0.010939,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "67e7822206bd47a78485682a7aa7c74a",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:18:59.151571+00:00",
+        "model_completed_at": "2026-10-27T07:21:02.530626+00:00",
+        "model_elapsed_seconds": 123.37907265126705,
+        "cost_usd": 0.0418938,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 58.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-terra--medium.svg",
+          "sha256": "f27d5534b351c58ca48385dc102112cfb7ca61ba5af676405c72f9febf522e98",
+          "bytes": 12198
+        },
+        "raw_score_total": 58.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=3；满足n_not≥2，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "effort": "high",
+      "pompeii": {
+        "execution_id": "ecec46f5535d459f8e55c30681999c44",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:20:37.334830+00:00",
+        "model_completed_at": "2026-10-27T07:26:12.443571+00:00",
+        "model_elapsed_seconds": 335.10875766165555,
+        "cost_usd": 0.1089796,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.3333333333333333,
+        "score100": 33.33333333333333
+      },
+      "pelican": {
+        "execution_id": "e599fb68f85f4ac2a7ff9fb3f1b3a9e8",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:18:59.598965+00:00",
+        "model_completed_at": "2026-10-27T07:20:40.175070+00:00",
+        "model_elapsed_seconds": 100.576121263206,
+        "cost_usd": 0.042236,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 72,
+        "rubric": "pelican-animation-standalone-v2-visible-evidence-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-terra--high.html",
+          "sha256": "dffb9cde55094192e96f6908bba43856496afc8615b5a4c8ea7dbb82195f5532",
+          "bytes": 9225
+        },
+        "raw_score_total": 72,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "3afa4fbd3ce449dba374f30a15192a79",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:18:59.370093+00:00",
+        "model_completed_at": "2026-10-27T07:20:09.442125+00:00",
+        "model_elapsed_seconds": 70.07204477488995,
+        "cost_usd": 0.024393,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "e8747a7e004d44e4b0391c6c3886cd30",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:18:59.264238+00:00",
+        "model_completed_at": "2026-10-27T07:20:54.192298+00:00",
+        "model_elapsed_seconds": 114.92808106355369,
+        "cost_usd": 0.0409832,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 64.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-terra--high.svg",
+          "sha256": "8d993aef457c47192cb707d5315c163fc7b338c0c1d0318d44f07bc6a55115e1",
+          "bytes": 13627
+        },
+        "raw_score_total": 64.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=2，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "effort": "xhigh",
+      "pompeii": {
+        "execution_id": "0aa96f4140724e2c8592fc5bfd4fd7cd",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:21:02.611834+00:00",
+        "model_completed_at": "2026-10-27T07:31:39.897480+00:00",
+        "model_elapsed_seconds": 637.2856674585491,
+        "cost_usd": 0.2481354,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.5925925925925926,
+        "score100": 59.25925925925925
+      },
+      "pelican": {
+        "execution_id": "7665e7a760144887a9cd1d93dcb83fec",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:20:24.829409+00:00",
+        "model_completed_at": "2026-10-27T07:21:46.354729+00:00",
+        "model_elapsed_seconds": 81.52533996105194,
+        "cost_usd": 0.0254676,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 81.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-terra--xhigh.html",
+          "sha256": "98e3dd11736229579fe0640b1e5b7009454ca5bd687b7de0588030714bd4b466",
+          "bytes": 7630
+        },
+        "raw_score_total": 81.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "806dffc2ce784559a2fcc547a8a94891",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:20:09.532752+00:00",
+        "model_completed_at": "2026-10-27T07:21:24.456629+00:00",
+        "model_elapsed_seconds": 74.92388645000756,
+        "cost_usd": 0.0195004,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "2b8f9aa04e6c400ca447b3d4e49f9af9",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:20:09.525991+00:00",
+        "model_completed_at": "2026-10-27T07:22:43.543068+00:00",
+        "model_elapsed_seconds": 154.01709551922977,
+        "cost_usd": 0.0538072,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 59,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-terra--xhigh.svg",
+          "sha256": "3a7c0aca4ec12a0a978d0b44ca739e633927c7baa2c5bf7b657ec79528b28be8",
+          "bytes": 16298
+        },
+        "raw_score_total": 63,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=2；因n_not≥2，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "effort": "max",
+      "pompeii": {
+        "execution_id": "2a6e2a79e50e47c588a666a9ded60e3b",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:20:54.278076+00:00",
+        "model_completed_at": "2026-10-27T07:27:56.094912+00:00",
+        "model_elapsed_seconds": 421.8168616909534,
+        "cost_usd": 0.198935,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 1.0,
+        "score100": 100.0
+      },
+      "pelican": {
+        "execution_id": "42050eff70504697bffc91c7ff84eda7",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:18:59.516766+00:00",
+        "model_completed_at": "2026-10-27T07:29:06.747240+00:00",
+        "model_elapsed_seconds": 607.2304794769734,
+        "cost_usd": 0.3277892,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 98.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-terra--max.html",
+          "sha256": "b9c890022e899f24a563f9ae52a6e9fd091a5bcfbec932e1e1d6bd064df8ff16",
+          "bytes": 22508
+        },
+        "raw_score_total": 98.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "d71a5bc1714e4dcaa8c58ba2a7bd4758",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:21:23.123445+00:00",
+        "model_completed_at": "2026-10-27T07:22:34.047919+00:00",
+        "model_elapsed_seconds": 70.92449048906565,
+        "cost_usd": 0.015389,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "9b5d70bdabef4c6b966ec52b098e60b6",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:18:59.424532+00:00",
+        "model_completed_at": "2026-10-27T07:27:46.401766+00:00",
+        "model_elapsed_seconds": 526.9772428181022,
+        "cost_usd": 0.2616356,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-terra--max.svg",
+          "sha256": "8a35419e83aca7f72a39f7a00e70df61f28c900a3f1bb630c6a25d0e624d7dd2",
+          "bytes": 29486
+        },
+        "raw_score_total": 92.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=1；R7未达标，R6部分成立，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "effort": "ultra",
+      "pompeii": {
+        "execution_id": "df17d42353974033b9cc476f86a8a4bc",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:23:56.801420+00:00",
+        "model_completed_at": "2026-10-27T07:37:45.714281+00:00",
+        "model_elapsed_seconds": 828.9128818400204,
+        "cost_usd": 1.017282,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.75,
+        "score100": 75.0
+      },
+      "pelican": {
+        "execution_id": "74ab969ec2a44b54ba2266bc498e35d3",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:22:34.141634+00:00",
+        "model_completed_at": "2026-10-27T07:24:36.023600+00:00",
+        "model_elapsed_seconds": 121.88198793306947,
+        "cost_usd": 0.0542842,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 75,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6.1-terra--ultra.html",
+          "sha256": "df1475283b34d2881d4bba96f010f9cd8ec715f8f974e4529478bcad2eb7b165",
+          "bytes": 9371
+        },
+        "raw_score_total": 75,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "705eb5af52334cec8ce037210fc80c9d",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:21:46.450760+00:00",
+        "model_completed_at": "2026-10-27T07:22:58.575197+00:00",
+        "model_elapsed_seconds": 72.12445716746151,
+        "cost_usd": 0.033083,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "41b7cf0af7a34f359e0de9a66758ed05",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:22:43.627695+00:00",
+        "model_completed_at": "2026-10-27T07:26:00.064151+00:00",
+        "model_elapsed_seconds": 196.43646826781332,
+        "cost_usd": 0.1910224,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 59,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6.1-terra--ultra.svg",
+          "sha256": "8932bbeacb704e9e69806378bff2d59d3028846a16a10525a3ee7a3e87c22240",
+          "bytes": 19003
+        },
+        "raw_score_total": 89,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=1；R6、R7未满足，R1部分成立，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6-sol",
+      "effort": "low",
+      "pompeii": {
+        "execution_id": "94c6b50ea922487a8351abb8e4194255",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:27:56.188363+00:00",
+        "model_completed_at": "2026-10-27T07:30:58.026568+00:00",
+        "model_elapsed_seconds": 181.83821867220104,
+        "cost_usd": 0.182336,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.4,
+        "score100": 40.0
+      },
+      "pelican": {
+        "execution_id": "8aaa1a4a495f4773be995fb340175596",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:25:33.862202+00:00",
+        "model_completed_at": "2026-10-27T07:26:56.586376+00:00",
+        "model_elapsed_seconds": 82.724185353145,
+        "cost_usd": 0.0551448,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 58.5,
+        "rubric": "pelican-animation-standalone-v2-visible-evidence-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-sol--low.html",
+          "sha256": "3212c0dbd0d31ddad7013fca58f3ae7da43eacedef22cace68aef8e7e728e0b0",
+          "bytes": 6591
+        },
+        "raw_score_total": 58.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "2173853ec9b64673b99a027758336628",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:24:45.555449+00:00",
+        "model_completed_at": "2026-10-27T07:25:33.775693+00:00",
+        "model_elapsed_seconds": 48.22026490792632,
+        "cost_usd": 0.0171052,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "471d08221f6a49ba9d01dcbdcb3e78b0",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:26:56.694838+00:00",
+        "model_completed_at": "2026-10-27T07:29:22.926114+00:00",
+        "model_elapsed_seconds": 146.2312789130956,
+        "cost_usd": 0.1138148,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 54,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-sol--low.svg",
+          "sha256": "70cf5138070848f767ec6ca02afb38be2b22485bab66518efd671750f0e9f82b",
+          "bytes": 16420
+        },
+        "raw_score_total": 54,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=3，n_partial=3；满足n_not≥2，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "pompeii": {
+        "execution_id": "4896c52f2ab04b2a8e903046f0fa8cb5",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:30:58.114443+00:00",
+        "model_completed_at": "2026-10-27T07:41:44.450329+00:00",
+        "model_elapsed_seconds": 646.3359089419246,
+        "cost_usd": 0.7539704,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.36363636363636365,
+        "score100": 36.36363636363637
+      },
+      "pelican": {
+        "execution_id": "95d84eb14f7d4c438966a10d447866c0",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:30:11.276550+00:00",
+        "model_completed_at": "2026-10-27T07:32:27.292763+00:00",
+        "model_elapsed_seconds": 136.0162252318114,
+        "cost_usd": 0.1067304,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 91.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-sol--medium.html",
+          "sha256": "7877c5127ec25a37cd4db84b5d91b07f4fe8ffeaea65bd311d5aa7bb061b54a5",
+          "bytes": 14276
+        },
+        "raw_score_total": 91.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "3d57b32cb21b40928f8527106732be16",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:29:23.020768+00:00",
+        "model_completed_at": "2026-10-27T07:30:18.091071+00:00",
+        "model_elapsed_seconds": 55.07031664811075,
+        "cost_usd": 0.0302864,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "838af066779c455392345c9feac6311a",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:30:18.197378+00:00",
+        "model_completed_at": "2026-10-27T07:33:32.885368+00:00",
+        "model_elapsed_seconds": 194.68800812214613,
+        "cost_usd": 0.1525132,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 59,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-sol--medium.svg",
+          "sha256": "1c0b8dc82d20a0000551ec201008bf41432fe836253f1711d3feb353cb687fd7",
+          "bytes": 19094
+        },
+        "raw_score_total": 60,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=3；优先适用n_not≥2的59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6-sol",
+      "effort": "high",
+      "pompeii": {
+        "execution_id": "ffe359d9db9545b0a280ba8ae76e7843",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:32:51.092733+00:00",
+        "model_completed_at": "2026-10-27T07:45:14.540616+00:00",
+        "model_elapsed_seconds": 743.4479061681777,
+        "cost_usd": 1.0932584,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.72,
+        "score100": 72.0
+      },
+      "pelican": {
+        "execution_id": "40022bd7f6144cf2a66c01d0d73ab0c9",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:32:27.389538+00:00",
+        "model_completed_at": "2026-10-27T07:36:25.933367+00:00",
+        "model_elapsed_seconds": 238.54384882934391,
+        "cost_usd": 0.1839228,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 94.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-sol--high.html",
+          "sha256": "339ef6e2a47b064bf0e0ca56dc913a2300ac57b66e27cab34015be12c0c0b085",
+          "bytes": 16346
+        },
+        "raw_score_total": 94.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "e3750b69fee744b69709bd125534ed2c",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:31:39.995911+00:00",
+        "model_completed_at": "2026-10-27T07:32:51.004008+00:00",
+        "model_elapsed_seconds": 71.00810760445893,
+        "cost_usd": 0.0347204,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "fb70b2cf349a468ca478c534c9702dee",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:32:49.724609+00:00",
+        "model_completed_at": "2026-10-27T07:37:38.571972+00:00",
+        "model_elapsed_seconds": 288.8473841138184,
+        "cost_usd": 0.22963,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 68.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-sol--high.svg",
+          "sha256": "4cc55cc8d7994937565101d54da899cb8c912ac2a537aecb0359e0850e468cc2",
+          "bytes": 24791
+        },
+        "raw_score_total": 68.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=2，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6-sol",
+      "effort": "xhigh",
+      "pompeii": {
+        "execution_id": "fbd4bf82e3404eaca66b8a187b3cc5a3",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:37:45.802222+00:00",
+        "model_completed_at": "2026-10-27T07:51:54.074360+00:00",
+        "model_elapsed_seconds": 848.2721518315375,
+        "cost_usd": 1.3601392,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.8461538461538461,
+        "score100": 84.61538461538461
+      },
+      "pelican": {
+        "execution_id": "46a478ee34624fc1812fa26eece3c29e",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:36:50.072376+00:00",
+        "model_completed_at": "2026-10-27T07:40:33.311692+00:00",
+        "model_elapsed_seconds": 223.23932781256735,
+        "cost_usd": 0.2022292,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 94.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-sol--xhigh.html",
+          "sha256": "7ac9b60c7bebcbd426fb8f1e331c13bb25d4b49c6ebb42d43a1383cdab71988d",
+          "bytes": 18772
+        },
+        "raw_score_total": 94.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "e9687d194dd84955a026556a5fdabb71",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:36:26.098863+00:00",
+        "model_completed_at": "2026-10-27T07:37:49.372174+00:00",
+        "model_elapsed_seconds": 83.27332020737231,
+        "cost_usd": 0.0468284,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "9d58259087074317b6cba529499cae00",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:37:27.544433+00:00",
+        "model_completed_at": "2026-10-27T07:41:52.739790+00:00",
+        "model_elapsed_seconds": 265.19537083618343,
+        "cost_usd": 0.2255672,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 66.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-sol--xhigh.svg",
+          "sha256": "1a72fdb9ea260fc2443662811266ff618491ac3b51c3d344d9fbd51e0d5bfc0a",
+          "bytes": 22120
+        },
+        "raw_score_total": 66.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=2；R7未成立，R1和R6部分成立，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6-sol",
+      "effort": "max",
+      "pompeii": {
+        "execution_id": "0bf5d59d7f544a94935d98ddf1c3b12d",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:40:33.399222+00:00",
+        "model_completed_at": "2026-10-27T07:54:00.905882+00:00",
+        "model_elapsed_seconds": 807.5066865626723,
+        "cost_usd": 0.836024,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.56,
+        "score100": 56.00000000000001
+      },
+      "pelican": {
+        "execution_id": "c2db1ff7e3784b4cbf779a6b3b8506dc",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:39:18.485625+00:00",
+        "model_completed_at": "2026-10-27T07:45:11.139916+00:00",
+        "model_elapsed_seconds": 352.65430171228945,
+        "cost_usd": 0.3420012,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 97,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-sol--max.html",
+          "sha256": "06351d0a1383117a472fd31ded326d83719e7c71b9527e06dcb5faf68b1cf138",
+          "bytes": 18133
+        },
+        "raw_score_total": 97,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "b8d2e7c408374e67bd3956bd19b51fef",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:37:49.465813+00:00",
+        "model_completed_at": "2026-10-27T07:39:18.391588+00:00",
+        "model_elapsed_seconds": 88.92578701116145,
+        "cost_usd": 0.0747088,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "0f3509750af446e9b7db06462401faa8",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:40:26.230160+00:00",
+        "model_completed_at": "2026-10-27T07:48:55.702744+00:00",
+        "model_elapsed_seconds": 509.4725943338126,
+        "cost_usd": 0.4778384,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-sol--max.svg",
+          "sha256": "e4ed89abb7b4a1f34422645ba51b9286a4db964cabb2cf11e378f2b17742d606",
+          "bytes": 26767
+        },
+        "raw_score_total": 89,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=3，适用存在至少一条not_met或至少两条partial的69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-6-sol",
+      "effort": "ultra",
+      "pompeii": {
+        "execution_id": "a7152827c3a44cc6b21d9a2b1e0f9925",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:45:11.224628+00:00",
+        "model_completed_at": "2026-10-27T08:00:29.746154+00:00",
+        "model_elapsed_seconds": 918.5215401407331,
+        "cost_usd": 5.78061,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.6923076923076923,
+        "score100": 69.23076923076923
+      },
+      "pelican": {
+        "execution_id": "367e0bfae0bc455f9bd9afa6302988e4",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:43:45.369056+00:00",
+        "model_completed_at": "2026-10-27T07:50:56.081129+00:00",
+        "model_elapsed_seconds": 430.7120943199843,
+        "cost_usd": 0.4227652,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 99,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-sol--ultra.html",
+          "sha256": "38333d917c854542420805ec2c1541a8c437951b83d749a659942418234f4892",
+          "bytes": 16630
+        },
+        "raw_score_total": 99,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "439fe5e2e51c44038e14f6010cec5f57",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:41:52.837993+00:00",
+        "model_completed_at": "2026-10-27T07:43:09.878866+00:00",
+        "model_elapsed_seconds": 77.04089007526636,
+        "cost_usd": 0.1411232,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "9daa61b30f174a2c82ea8e2bbd584439",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:45:10.046846+00:00",
+        "model_completed_at": "2026-10-27T07:55:39.285222+00:00",
+        "model_elapsed_seconds": 629.2383965924382,
+        "cost_usd": 0.6345424,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 79,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-sol--ultra.svg",
+          "sha256": "8d93f7a4f60937876644c8c7812a8992b2bc4935d57f756037f947f3f10a9881",
+          "bytes": 43089
+        },
+        "raw_score_total": 84,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 79,
+            "reason": "n_not=0，n_partial=1；R1因鞍座承托接触不可确认而为partial，适用79分上限。"
+          }
+        ],
+        "completion_cap": 79
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "pompeii": {
+        "execution_id": "3f897cb6db7b4680ab1554a5b56150a0",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:49:40.182045+00:00",
+        "model_completed_at": "2026-10-27T07:50:45.005532+00:00",
+        "model_elapsed_seconds": 64.82350718416274,
+        "cost_usd": 0.00496718,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.32,
+        "score100": 32.0
+      },
+      "pelican": {
+        "execution_id": "d900eab42c9146e6be0633fb9c9795c6",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:48:51.471014+00:00",
+        "model_completed_at": "2026-10-27T07:49:40.091116+00:00",
+        "model_elapsed_seconds": 48.620113933458924,
+        "cost_usd": 0.00279912,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 47,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-luna--low.html",
+          "sha256": "1a3610df741ad088b031bacb701567693b754cf19b36a5041204d94ab54e7463",
+          "bytes": 7393
+        },
+        "raw_score_total": 47,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "32d4192bf5fe444b9907952d7203053d",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:45:14.644407+00:00",
+        "model_completed_at": "2026-10-27T07:45:32.811112+00:00",
+        "model_elapsed_seconds": 18.166725365445018,
+        "cost_usd": 0.0005249,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": false,
+        "answer": 20
+      },
+      "combined": {
+        "execution_id": "d87a1b7c35594e37998108652f87f239",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:48:51.485349+00:00",
+        "model_completed_at": "2026-10-27T07:49:59.508724+00:00",
+        "model_elapsed_seconds": 68.02338640578091,
+        "cost_usd": 0.00363146,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 38.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-luna--low.svg",
+          "sha256": "71b5bf0dedf678e0fef7bb98a13c77fbcacf6cca2914416c6035f8e9aff63412",
+          "bytes": 10063
+        },
+        "raw_score_total": 38.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=4，n_partial=1，适用n_not≥2的59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "medium",
+      "pompeii": {
+        "execution_id": "c40969dde53b4cb89f5cf25ff7b908df",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:51:11.642315+00:00",
+        "model_completed_at": "2026-10-27T07:52:18.065029+00:00",
+        "model_elapsed_seconds": 66.42273948341608,
+        "cost_usd": 0.00407008,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.19047619047619047,
+        "score100": 19.047619047619047
+      },
+      "pelican": {
+        "execution_id": "0c7829b663904d39966ddf6ae5310055",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:50:45.107262+00:00",
+        "model_completed_at": "2026-10-27T07:51:34.113042+00:00",
+        "model_elapsed_seconds": 49.00579258054495,
+        "cost_usd": 0.00275352,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 52,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-luna--medium.html",
+          "sha256": "70516d114605c73e00b4433ac7f406240a5ec2533707be6a1622406a0fd26886",
+          "bytes": 7864
+        },
+        "raw_score_total": 52,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "45248246ee724fcf8a44ef26097354a8",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:49:59.595493+00:00",
+        "model_completed_at": "2026-10-27T07:50:30.364495+00:00",
+        "model_elapsed_seconds": 30.769013341516256,
+        "cost_usd": 0.0010589,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "caa3660471394862914a6e15cc5c8004",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:50:56.209049+00:00",
+        "model_completed_at": "2026-10-27T07:52:01.131932+00:00",
+        "model_elapsed_seconds": 64.92289225757122,
+        "cost_usd": 0.00397318,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 47.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-luna--medium.svg",
+          "sha256": "7d28cfb6f1bf544007916f7e2a32494a76d4ffd23352a47a365b6c53bcc27a43",
+          "bytes": 11187
+        },
+        "raw_score_total": 47.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=4，n_partial=2，按优先级适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "pompeii": {
+        "execution_id": "549484a2177f4f11b6371bbeee4f100c",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:51:11.647680+00:00",
+        "model_completed_at": "2026-10-27T07:54:04.931428+00:00",
+        "model_elapsed_seconds": 173.2837633099407,
+        "cost_usd": 0.01322316,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.4166666666666667,
+        "score100": 41.66666666666667
+      },
+      "pelican": {
+        "execution_id": "05ef9f00c66f405bad210910106f66d0",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:51:11.652585+00:00",
+        "model_completed_at": "2026-10-27T07:52:16.474819+00:00",
+        "model_elapsed_seconds": 64.8222449105233,
+        "cost_usd": 0.0028232,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 52.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-luna--high.html",
+          "sha256": "1f07ee1c7f50edd5dc73db205ca98267d38f4c68c5d4f657f9f5b6e32a3ecb86",
+          "bytes": 6970
+        },
+        "raw_score_total": 52.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "d1c3dfb89e5847cbabd45c9a80ad34d8",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:51:11.641754+00:00",
+        "model_completed_at": "2026-10-27T07:52:02.513186+00:00",
+        "model_elapsed_seconds": 50.871456732973456,
+        "cost_usd": 0.0012319,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "d5e33bf8a4cd4d9fab60ff385b91d3c4",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:51:11.654229+00:00",
+        "model_completed_at": "2026-10-27T07:52:45.828530+00:00",
+        "model_elapsed_seconds": 94.17431552894413,
+        "cost_usd": 0.00516972,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 59,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-luna--high.svg",
+          "sha256": "8bbced3d81d57f221b621961b8f8a3370ab8528b83ebdbb352e5d42f0eb9eaea",
+          "bytes": 11606
+        },
+        "raw_score_total": 59.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=2；两条核心关系未满足，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "xhigh",
+      "pompeii": {
+        "execution_id": "c891223bde294210aa104194db35c42a",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:51:54.178712+00:00",
+        "model_completed_at": "2026-10-27T08:05:52.285411+00:00",
+        "model_elapsed_seconds": 838.1067256908864,
+        "cost_usd": 0.04306274,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.5217391304347826,
+        "score100": 52.17391304347826
+      },
+      "pelican": {
+        "execution_id": "4c5d99b8ed694e3587c27ec68ff54478",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:51:11.653728+00:00",
+        "model_completed_at": "2026-10-27T07:52:33.628813+00:00",
+        "model_elapsed_seconds": 81.97510173916817,
+        "cost_usd": 0.0040472,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 57.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-luna--xhigh.html",
+          "sha256": "39008ee047411690be79dd92c5ef96cfa6f2a09296fa98ceeb02c0ecff8e25eb",
+          "bytes": 9664
+        },
+        "raw_score_total": 57.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "48bb502f20c0457993da86bfbe45121c",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:51:11.649987+00:00",
+        "model_completed_at": "2026-10-27T07:52:18.472490+00:00",
+        "model_elapsed_seconds": 66.822510862723,
+        "cost_usd": 0.0017959,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "24343e4af8664ce48ebdaafe96a2d9e9",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:51:34.209308+00:00",
+        "model_completed_at": "2026-10-27T07:54:32.845288+00:00",
+        "model_elapsed_seconds": 178.6360001731664,
+        "cost_usd": 0.01140034,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 55,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-luna--xhigh.svg",
+          "sha256": "f93c9f115f19c39ed675a19756738c3652fbeb1455d4d72725f1ccf4da8c3642",
+          "bytes": 18650
+        },
+        "raw_score_total": 55,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=3，按优先级适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "max",
+      "pompeii": {
+        "execution_id": "6145a20bc0084ba6b2a758d7334f8449",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:52:33.883578+00:00",
+        "model_completed_at": "2026-10-27T08:07:24.751142+00:00",
+        "model_elapsed_seconds": 890.8675849325955,
+        "cost_usd": 0.0578623,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.45454545454545453,
+        "score100": 45.45454545454545
+      },
+      "pelican": {
+        "execution_id": "7020e3d50b00454e9fc10025d9fc1b5d",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:52:18.173911+00:00",
+        "model_completed_at": "2026-10-27T07:53:46.799659+00:00",
+        "model_elapsed_seconds": 88.62575880251825,
+        "cost_usd": 0.00469348,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 54.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-6-luna--max.html",
+          "sha256": "b371b195bdd09853000c30f8d102af7a24cd170a905ccc104a3f64b589d7407a",
+          "bytes": 11508
+        },
+        "raw_score_total": 54.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "b72779c07e1b48fdbede7ee87b68a838",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:52:02.621409+00:00",
+        "model_completed_at": "2026-10-27T07:54:06.300896+00:00",
+        "model_elapsed_seconds": 123.67949886806309,
+        "cost_usd": 0.0044109,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "eeca6e22d2b747e7834dc5b307c76c47",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:52:33.737499+00:00",
+        "model_completed_at": "2026-10-27T07:56:43.080369+00:00",
+        "model_elapsed_seconds": 249.34288416430354,
+        "cost_usd": 0.01727464,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 54.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-6-luna--max.svg",
+          "sha256": "a3a7fda152428dfe42bffde1c1427da014f85e85c352757677a57c3f8ffd9cca",
+          "bytes": 21116
+        },
+        "raw_score_total": 54.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=3；按优先级适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "effort": "low",
+      "pompeii": {
+        "execution_id": "b87c970e45be42cb971d3629e53d2b18",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:54:06.388987+00:00",
+        "model_completed_at": "2026-10-27T07:59:45.691205+00:00",
+        "model_elapsed_seconds": 339.30224203132093,
+        "cost_usd": 0.5036088,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.3333333333333333,
+        "score100": 33.33333333333333
+      },
+      "pelican": {
+        "execution_id": "739c546ca1d24aeda31c7922b94acd7e",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:53:53.623481+00:00",
+        "model_completed_at": "2026-10-27T07:55:34.299969+00:00",
+        "model_elapsed_seconds": 100.67650008201599,
+        "cost_usd": 0.2071656,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 67.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-sol--low.html",
+          "sha256": "f39eb2b3542176441cad1d999c9917072e5b29ba32939ac04d78f178dbfa3098",
+          "bytes": 14267
+        },
+        "raw_score_total": 67.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "a7b64cee07984a13bb8e95326c09c7af",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:52:45.932125+00:00",
+        "model_completed_at": "2026-10-27T07:53:53.507422+00:00",
+        "model_elapsed_seconds": 67.57531716488302,
+        "cost_usd": 0.0829384,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "87434a01994049dcb377a73c25b6141c",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:54:05.037082+00:00",
+        "model_completed_at": "2026-10-27T07:55:36.965396+00:00",
+        "model_elapsed_seconds": 91.92833223193884,
+        "cost_usd": 0.1997944,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 50.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-sol--low.svg",
+          "sha256": "366f022d8604c64c9d11dc6721f72afd47d15c09053e615376d5786e315365e2",
+          "bytes": 11119
+        },
+        "raw_score_total": 50.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=4，n_partial=1；满足n_not≥2，完成度上限为59。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "pompeii": {
+        "execution_id": "ff20d4b8fbc24fbc9aa6890d67ab409e",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:55:37.072205+00:00",
+        "model_completed_at": "2026-10-27T08:10:55.943209+00:00",
+        "model_elapsed_seconds": 918.8710188120604,
+        "cost_usd": 2.24696,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.6923076923076923,
+        "score100": 69.23076923076923
+      },
+      "pelican": {
+        "execution_id": "6a5bab6f245447d4bd49db1ec8b723ed",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:55:33.939221+00:00",
+        "model_completed_at": "2026-10-27T07:56:42.612216+00:00",
+        "model_elapsed_seconds": 68.67301361449063,
+        "cost_usd": 0.1430512,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 56,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-sol--medium.html",
+          "sha256": "ee5d6ec6608a6690cb87899210978b122d3b20f678443035086851d89bc5f152",
+          "bytes": 10114
+        },
+        "raw_score_total": 56,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "930b833f967e40c1a2a7cdcc72731ee7",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:54:32.957970+00:00",
+        "model_completed_at": "2026-10-27T07:55:33.830393+00:00",
+        "model_elapsed_seconds": 60.87244106084108,
+        "cost_usd": 0.070852,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "1e62640de0da4c0e8d64fa983585de0a",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:55:34.407068+00:00",
+        "model_completed_at": "2026-10-27T07:57:34.086118+00:00",
+        "model_elapsed_seconds": 119.67906220443547,
+        "cost_usd": 0.2402616,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 58,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-sol--medium.svg",
+          "sha256": "2859c506608d67ada76c0abbd29ee771b57a44d849f303cc19270b3450f1915d",
+          "bytes": 15763
+        },
+        "raw_score_total": 58,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=3，n_partial=3；按优先级适用n_not≥2的59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "pompeii": {
+        "execution_id": "b562618eb85f4f479bda89d629ef067b",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:58:26.655566+00:00",
+        "model_completed_at": "2026-10-27T08:15:23.284587+00:00",
+        "model_elapsed_seconds": 1016.6290382351726,
+        "cost_usd": 3.0088264,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.2,
+        "score100": 20.0
+      },
+      "pelican": {
+        "execution_id": "bc194f31101f44fa814b27cbfc826d58",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:57:11.340753+00:00",
+        "model_completed_at": "2026-10-27T07:59:01.167806+00:00",
+        "model_elapsed_seconds": 109.82707395032048,
+        "cost_usd": 0.2218408,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 59,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-sol--high.html",
+          "sha256": "ce143c7f1727ff5f4867849c964f8fcd0f4a75f417e6d57ff95e9b6d27d9dcfe",
+          "bytes": 14983
+        },
+        "raw_score_total": 59,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "dd86e1e799fa48f78b1fe89c5f3ad214",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:56:42.726371+00:00",
+        "model_completed_at": "2026-10-27T07:57:35.796372+00:00",
+        "model_elapsed_seconds": 53.07001295685768,
+        "cost_usd": 0.070052,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "5890885e0a16408189618f214dcd984d",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:57:35.938335+00:00",
+        "model_completed_at": "2026-10-27T08:01:36.729153+00:00",
+        "model_elapsed_seconds": 240.79083928093314,
+        "cost_usd": 0.4791624,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 59,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-sol--high.svg",
+          "sha256": "49c228181858cc8cfacc2f23eb8b88460df52f7dee7d262bd20feda3f344f3dc",
+          "bytes": 24626
+        },
+        "raw_score_total": 81,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=2；R2、R7未成立，满足n_not≥2，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "pompeii": {
+        "execution_id": "0e82767a72be41a095f3a2a59183cf85",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T07:59:45.797789+00:00",
+        "model_completed_at": "2026-10-27T08:09:50.982677+00:00",
+        "model_elapsed_seconds": 605.1849026996642,
+        "cost_usd": 1.2626504,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.45454545454545453,
+        "score100": 45.45454545454545
+      },
+      "pelican": {
+        "execution_id": "9de0433f69ac49f3b38b943ce0741fe9",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T07:59:11.786906+00:00",
+        "model_completed_at": "2026-10-27T08:02:00.571561+00:00",
+        "model_elapsed_seconds": 168.78466521948576,
+        "cost_usd": 0.3354272,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 73.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-sol--xhigh.html",
+          "sha256": "5be658d132edb771bc3964171f146802688cb1c3a46868ab4b39880b8de1f723",
+          "bytes": 18176
+        },
+        "raw_score_total": 73.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "6db5bcd1efd0442c8f9e7eda9427686e",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T07:59:01.287675+00:00",
+        "model_completed_at": "2026-10-27T08:00:30.413621+00:00",
+        "model_elapsed_seconds": 89.12596480920911,
+        "cost_usd": 0.100972,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "2045cb66a5714800bf15493ca40877ac",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T07:59:43.983463+00:00",
+        "model_completed_at": "2026-10-27T08:03:55.225364+00:00",
+        "model_elapsed_seconds": 251.24191528744996,
+        "cost_usd": 0.42572,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 59,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-sol--xhigh.svg",
+          "sha256": "587b4252a6bd094d78af9c094f5439f5b72e55b46ff109c750ad846b29177faa",
+          "bytes": 23117
+        },
+        "raw_score_total": 77.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=2；满足n_not≥2，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "effort": "max",
+      "pompeii": {
+        "execution_id": "8bbfc381f45f4b90b492d05b027c8c2e",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:01:19.657756+00:00",
+        "model_completed_at": "2026-10-27T08:35:14.786647+00:00",
+        "model_elapsed_seconds": 2035.1289073973894,
+        "cost_usd": 4.0735448,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.6956521739130435,
+        "score100": 69.56521739130434
+      },
+      "pelican": {
+        "execution_id": "862cb3f309f644c2bf4bccc6c01acc14",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:00:31.840038+00:00",
+        "model_completed_at": "2026-10-27T08:04:40.687324+00:00",
+        "model_elapsed_seconds": 248.84730356372893,
+        "cost_usd": 0.486312,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 71,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-sol--max.html",
+          "sha256": "e9d9c1650d27bc5db25e034e0833bb814abb31e5e050979cc9e48f6362b3c548",
+          "bytes": 24438
+        },
+        "raw_score_total": 71,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "80932a3f0d454edb9dd2c140a7c62703",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:00:30.528607+00:00",
+        "model_completed_at": "2026-10-27T08:02:09.953958+00:00",
+        "model_elapsed_seconds": 99.42536097951233,
+        "cost_usd": 0.117312,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "08795b8eb6ab452dbc279fe61d40f5b3",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:01:05.158756+00:00",
+        "model_completed_at": "2026-10-27T08:10:51.144014+00:00",
+        "model_elapsed_seconds": 585.9852799307555,
+        "cost_usd": 1.4564544,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-sol--max.svg",
+          "sha256": "20638f8a91b04efc0fd03b82f3bbe269d0a97e94ef6fad39b962cf9afc150159",
+          "bytes": 48068
+        },
+        "raw_score_total": 80.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=3，适用存在未成立关系或至少两条部分成立关系的69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "effort": "ultra",
+      "pompeii": {
+        "execution_id": "d9e061bc7dd0483cb274f0f9a24d3105",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:04:21.302083+00:00",
+        "model_completed_at": "2026-10-27T08:20:08.343130+00:00",
+        "model_elapsed_seconds": 947.0410689413548,
+        "cost_usd": 10.1564248,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.967741935483871,
+        "score100": 96.7741935483871
+      },
+      "pelican": {
+        "execution_id": "9b3ba7492cbc4af285009346170765e6",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:02:46.847549+00:00",
+        "model_completed_at": "2026-10-27T08:18:08.414552+00:00",
+        "model_elapsed_seconds": 921.5670146066695,
+        "cost_usd": 1.4083752,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 71,
+        "rubric": "pelican-animation-standalone-v2-visible-evidence-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-sol--ultra.html",
+          "sha256": "25182e92731f1ca4fcf9f10daf5c67ec686fbf24b22a9f538210e569422e327c",
+          "bytes": 22203
+        },
+        "raw_score_total": 71,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "ee10215aea06412baa9bd35aa7dc7367",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:02:10.061056+00:00",
+        "model_completed_at": "2026-10-27T08:04:01.337679+00:00",
+        "model_elapsed_seconds": 111.27663615904748,
+        "cost_usd": 0.567228,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "b1b2c900ce01421696647f4d1152c4ca",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:04:07.031619+00:00",
+        "model_completed_at": "2026-10-27T08:14:31.915452+00:00",
+        "model_elapsed_seconds": 624.8838570639491,
+        "cost_usd": 1.0817192,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 69,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-sol--ultra.svg",
+          "sha256": "b54990036deb60bd72d1bc7376328a05b3224c1c14044866f632431d38c4ddde",
+          "bytes": 34491
+        },
+        "raw_score_total": 83.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=0，n_partial=2；R1骑行和R4翼面承托仅部分成立，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "low",
+      "pompeii": {
+        "execution_id": "f8ace053c0064310b5bb671e26f3d861",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:06:36.684634+00:00",
+        "model_completed_at": "2026-10-27T08:14:12.401908+00:00",
+        "model_elapsed_seconds": 455.7172966133803,
+        "cost_usd": 0.2070236,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.1,
+        "score100": 10.0
+      },
+      "pelican": {
+        "execution_id": "8c8c996e9c8b4d009e0123857521573a",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:05:52.388769+00:00",
+        "model_completed_at": "2026-10-27T08:06:36.559146+00:00",
+        "model_elapsed_seconds": 44.17039757966995,
+        "cost_usd": 0.0596652,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 53.5,
+        "rubric": "pelican-animation-standalone-v2-visible-evidence-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-terra--low.html",
+          "sha256": "0c8e5364bf3224db0655528b75f0a2adb2d661bac33aa4bfc538295c70089db9",
+          "bytes": 7202
+        },
+        "raw_score_total": 53.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "ef70785535f84507b45204c2305b1c6b",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:05:03.670217+00:00",
+        "model_completed_at": "2026-10-27T08:06:48.895947+00:00",
+        "model_elapsed_seconds": 105.22574406675994,
+        "cost_usd": 0.0317156,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "ee14e8a99fcf491f945f3b1327de5239",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:06:09.901578+00:00",
+        "model_completed_at": "2026-10-27T08:08:42.382495+00:00",
+        "model_elapsed_seconds": 152.4809309821576,
+        "cost_usd": 0.0745424,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 50,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-terra--low.svg",
+          "sha256": "69e4c6443c8c17d6f5b58644d8a73207e274a80150f6acf8614172fb5eb4ff33",
+          "bytes": 7271
+        },
+        "raw_score_total": 50,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=3，n_partial=2；满足n_not≥2，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "pompeii": {
+        "execution_id": "914c6c71e9ad4c16a0f8a404b71a3bfa",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:09:42.658182+00:00",
+        "model_completed_at": "2026-10-27T08:19:32.728611+00:00",
+        "model_elapsed_seconds": 590.0704568587244,
+        "cost_usd": 0.3674312,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.11764705882352941,
+        "score100": 11.76470588235294
+      },
+      "pelican": {
+        "execution_id": "07a3a58b3b7f473c96f67bb7e48d0d0d",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:08:27.821296+00:00",
+        "model_completed_at": "2026-10-27T08:10:17.598591+00:00",
+        "model_elapsed_seconds": 109.77731637656689,
+        "cost_usd": 0.0689228,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 41,
+        "rubric": "pelican-animation-standalone-v2-visible-evidence-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-terra--medium.html",
+          "sha256": "d3b2189aadc17a2e947ebd4195c8d925b15740314e1ff512b4d03a99f51c8a29",
+          "bytes": 7679
+        },
+        "raw_score_total": 41,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "5de34b82b61e4af1951cd00d0aba011d",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:06:49.014749+00:00",
+        "model_completed_at": "2026-10-27T08:08:27.691164+00:00",
+        "model_elapsed_seconds": 98.67643668875098,
+        "cost_usd": 0.0305276,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "2f8b403457a14a3bb6981ee418a41ab3",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:09:06.760852+00:00",
+        "model_completed_at": "2026-10-27T08:10:30.736317+00:00",
+        "model_elapsed_seconds": 83.97547753155231,
+        "cost_usd": 0.1113784,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 49,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-terra--medium.svg",
+          "sha256": "3afd6e6523faaeeba1c065fd089e43c331d2b84df8ef3eb60cd39b3ecca2d40e",
+          "bytes": 11263
+        },
+        "raw_score_total": 49,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=3，n_partial=2；至少两条核心关系为not_met，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "pompeii": {
+        "execution_id": "f72cd2073b0f49a388b95138acce3ea2",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:10:33.467461+00:00",
+        "model_completed_at": "2026-10-27T08:39:30.220803+00:00",
+        "model_elapsed_seconds": 1736.7533577624708,
+        "cost_usd": 1.425538,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.2727272727272727,
+        "score100": 27.27272727272727
+      },
+      "pelican": {
+        "execution_id": "97239c58cc7448b1a3052912da887aef",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:10:08.781198+00:00",
+        "model_completed_at": "2026-10-27T08:11:12.253139+00:00",
+        "model_elapsed_seconds": 63.47195389121771,
+        "cost_usd": 0.069206,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 52.5,
+        "rubric": "pelican-animation-standalone-v2-visible-evidence-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-terra--high.html",
+          "sha256": "9c7b3af2859a9ee2408edf5a0692f988063fd39c931b58f1d715a97fc805ffad",
+          "bytes": 7558
+        },
+        "raw_score_total": 52.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "2a58a4912f0a4be88b1db3567445659f",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:09:51.090195+00:00",
+        "model_completed_at": "2026-10-27T08:11:10.313177+00:00",
+        "model_elapsed_seconds": 79.22299317456782,
+        "cost_usd": 0.0750048,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "bbc8254c825745adaf36067f57a5bc50",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:10:30.840352+00:00",
+        "model_completed_at": "2026-10-27T08:14:38.281399+00:00",
+        "model_elapsed_seconds": 247.44106022641063,
+        "cost_usd": 0.1314748,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 48.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-terra--high.svg",
+          "sha256": "8f04dd6a082acc9dc7337dcc94f3d17d525d549e31c39fe53296164406c949c1",
+          "bytes": 13752
+        },
+        "raw_score_total": 48.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=4，n_partial=3；满足n_not≥2，上限为59。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "xhigh",
+      "pompeii": {
+        "execution_id": "9e073a29a5834c67b5eea62560d707ce",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:12:33.756832+00:00",
+        "model_completed_at": "2026-10-27T08:27:04.026720+00:00",
+        "model_elapsed_seconds": 870.2699048947543,
+        "cost_usd": 1.909422,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.9333333333333333,
+        "score100": 93.33333333333333
+      },
+      "pelican": {
+        "execution_id": "4f1932042b694522a77f2ba9527eeb30",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:11:10.453402+00:00",
+        "model_completed_at": "2026-10-27T08:13:50.736095+00:00",
+        "model_elapsed_seconds": 160.28271736763418,
+        "cost_usd": 0.0782816,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 49.5,
+        "rubric": "pelican-animation-standalone-v2-visible-evidence-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-terra--xhigh.html",
+          "sha256": "f52683b4129d4e5093b213ffd2fde4179597123769be413b54e45acbf882a4ae",
+          "bytes": 8820
+        },
+        "raw_score_total": 49.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "6cdd80ad59e142189d62d89f431c914a",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:10:56.050254+00:00",
+        "model_completed_at": "2026-10-27T08:12:33.631386+00:00",
+        "model_elapsed_seconds": 97.5811568107456,
+        "cost_usd": 0.0820068,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "779852a3add243898ffe3d2a6bae5d7b",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:11:12.387364+00:00",
+        "model_completed_at": "2026-10-27T08:15:59.684157+00:00",
+        "model_elapsed_seconds": 287.2967939116061,
+        "cost_usd": 0.1394256,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 41.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-terra--xhigh.svg",
+          "sha256": "8baf717225426050a191aa5db084f7c98de7e0a8d2f25394330fe822113e7056",
+          "bytes": 15191
+        },
+        "raw_score_total": 41.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=3，n_partial=4；至少两条核心关系为not_met，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "max",
+      "pompeii": {
+        "execution_id": "b4278e0f8b7d43a39ce735b2aef354f9",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:14:48.204844+00:00",
+        "model_completed_at": "2026-10-27T08:43:36.433525+00:00",
+        "model_elapsed_seconds": 1728.228700004518,
+        "cost_usd": 4.8665036,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.5217391304347826,
+        "score100": 52.17391304347826
+      },
+      "pelican": {
+        "execution_id": "39a84e4f338343e3840a1fc557faa3d1",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:14:03.912006+00:00",
+        "model_completed_at": "2026-10-27T08:19:01.310766+00:00",
+        "model_elapsed_seconds": 297.39877296052873,
+        "cost_usd": 0.1808636,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 57,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-terra--max.html",
+          "sha256": "8cb2f5797e6afcdacb6a2d1bff3e4774aa350e350eb35054781147f696a8494b",
+          "bytes": 17314
+        },
+        "raw_score_total": 57,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "536bf69a79e042c3810e5b68c5d3f8f7",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:13:50.873703+00:00",
+        "model_completed_at": "2026-10-27T08:21:45.894771+00:00",
+        "model_elapsed_seconds": 475.02108771540225,
+        "cost_usd": 0.178188,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "41246866ef304126beaf92e1c7d8ed68",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:14:32.058482+00:00",
+        "model_completed_at": "2026-10-27T08:21:11.216423+00:00",
+        "model_elapsed_seconds": 399.15795579366386,
+        "cost_usd": 0.2474992,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 50.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-terra--max.svg",
+          "sha256": "630b8b4d96ba79415092870eaca84afdcf227fb0e33d5e68ad70418c6d5a9081",
+          "bytes": 25115
+        },
+        "raw_score_total": 50.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=3，n_partial=2；n_not≥2，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "ultra",
+      "pompeii": {
+        "execution_id": "8a007e04d7e24bd2a7a9675e32e9e66d",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:18:08.019340+00:00",
+        "model_completed_at": "2026-10-27T09:02:22.581658+00:00",
+        "model_elapsed_seconds": 2654.5623315479606,
+        "cost_usd": 10.8389644,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.967741935483871,
+        "score100": 96.7741935483871
+      },
+      "pelican": {
+        "execution_id": "ae73ec493a4b4d6b9bfe0ffec8433821",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:16:43.298077+00:00",
+        "model_completed_at": "2026-10-27T08:24:52.565860+00:00",
+        "model_elapsed_seconds": 489.2678179740906,
+        "cost_usd": 0.34472,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 72.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-terra--ultra.html",
+          "sha256": "bf208659c99942d8fa12b0ee6261543bc952787b691cc101c96695f22c23ec95",
+          "bytes": 14766
+        },
+        "raw_score_total": 72.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "4452acbfe57e405da024ab3f9e73bc64",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:15:23.401622+00:00",
+        "model_completed_at": "2026-10-27T08:21:14.007194+00:00",
+        "model_elapsed_seconds": 350.6055930722505,
+        "cost_usd": 0.4540824,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "eb787ee76d494291b3d93ac2ed8a6dbd",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:17:06.450408+00:00",
+        "model_completed_at": "2026-10-27T08:31:16.806136+00:00",
+        "model_elapsed_seconds": 850.3557413071394,
+        "cost_usd": 0.6252184,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 57.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-terra--ultra.svg",
+          "sha256": "eab00c6fd95cb8eee92351c6abf501f0733d42f0ee76218435f0db22e60e00f4",
+          "bytes": 24939
+        },
+        "raw_score_total": 57.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 69,
+            "reason": "n_not=1，n_partial=4，适用69分上限。"
+          }
+        ],
+        "completion_cap": 69
+      }
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "effort": "low",
+      "pompeii": {
+        "execution_id": "ad225d195b7445bcb266a27ad981aee9",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:19:23.782391+00:00",
+        "model_completed_at": "2026-10-27T08:20:20.795014+00:00",
+        "model_elapsed_seconds": 57.01263923570514,
+        "cost_usd": 0.011243,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.36363636363636365,
+        "score100": 36.36363636363637
+      },
+      "pelican": {
+        "execution_id": "678add61bccf4d619255e3fb8bd72a89",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:18:41.981076+00:00",
+        "model_completed_at": "2026-10-27T08:19:23.650923+00:00",
+        "model_elapsed_seconds": 41.66986119188368,
+        "cost_usd": 0.00497532,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 48,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-luna--low.html",
+          "sha256": "725c270c334b4192fa38efc82242f678e7ce0e743e4cf4d76b5d18f872f36705",
+          "bytes": 5512
+        },
+        "raw_score_total": 48,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "e62323858a814a38b85cf62628c4eb3e",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:18:08.541998+00:00",
+        "model_completed_at": "2026-10-27T08:18:41.460630+00:00",
+        "model_elapsed_seconds": 32.918641651049256,
+        "cost_usd": 0.002396,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "885cd6c0567743ffab46a9cb1968037b",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:19:01.435809+00:00",
+        "model_completed_at": "2026-10-27T08:19:49.955793+00:00",
+        "model_elapsed_seconds": 48.51999540440738,
+        "cost_usd": 0.00695632,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 46.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-luna--low.svg",
+          "sha256": "876e8938b8e98cdfdd1cad792cc9d4255c770e04e4acc07f3705f01e2b2788ee",
+          "bytes": 8494
+        },
+        "raw_score_total": 46.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=3，n_partial=2；至少两条核心关系未完成，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "pompeii": {
+        "execution_id": "70b8272dd8e04cd2a74830dd1d08eff4",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:21:14.140157+00:00",
+        "model_completed_at": "2026-10-27T08:23:43.188834+00:00",
+        "model_elapsed_seconds": 149.0486908443272,
+        "cost_usd": 0.03242216,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.43478260869565216,
+        "score100": 43.47826086956522
+      },
+      "pelican": {
+        "execution_id": "6789805f3e5f442c8d442e9520e171bf",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:20:20.919202+00:00",
+        "model_completed_at": "2026-10-27T08:20:57.638465+00:00",
+        "model_elapsed_seconds": 36.71927686408162,
+        "cost_usd": 0.00704296,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 57,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-luna--medium.html",
+          "sha256": "cff796e35214f832bc15c1e75a92d77412e9636e4439ca23dd012cc74b6b49c9",
+          "bytes": 7792
+        },
+        "raw_score_total": 57,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "2fe6a876a93c4d3aa31d780dc8c95d18",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:20:08.455741+00:00",
+        "model_completed_at": "2026-10-27T08:20:34.074907+00:00",
+        "model_elapsed_seconds": 25.619187835603952,
+        "cost_usd": 0.0022736,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "4c6ae5efe99f47148dd84fe7bbe4b240",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:20:57.753270+00:00",
+        "model_completed_at": "2026-10-27T08:21:52.675628+00:00",
+        "model_elapsed_seconds": 54.92236995883286,
+        "cost_usd": 0.00969404,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 38,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-luna--medium.svg",
+          "sha256": "fe5ac3d1ff2ab4fdf6ee1a3ca5d0ec1501b02364e592c9c8b598ab6b54ef61d9",
+          "bytes": 11135
+        },
+        "raw_score_total": 38,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=4，n_partial=2；满足n_not≥2，总分上限为59。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "pompeii": {
+        "execution_id": "04e87a39fc6044e7abc65f6d324d2ac7",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:23:02.313614+00:00",
+        "model_completed_at": "2026-10-27T08:35:45.778284+00:00",
+        "model_elapsed_seconds": 763.4646841716021,
+        "cost_usd": 0.156787,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.34782608695652173,
+        "score100": 34.78260869565217
+      },
+      "pelican": {
+        "execution_id": "8cab02554a814fb6a1fa3e9289d60558",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:21:52.821382+00:00",
+        "model_completed_at": "2026-10-27T08:22:56.343867+00:00",
+        "model_elapsed_seconds": 63.52250289916992,
+        "cost_usd": 0.01003444,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 32.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-luna--high.html",
+          "sha256": "540e3f79184002de9fbc12d67b1e4cd747efb3216d87666629bc883714152ae8",
+          "bytes": 11137
+        },
+        "raw_score_total": 32.5,
+        "applied_caps": [
+          {
+            "id": "cap_no_riding_pose",
+            "limit": 40,
+            "reason": "f0–f7：躯体与车辆始终有明显空隙，触及车架的腿也未连接身体，没有形成身体经相连腿接触车辆的骑乘关系。"
+          }
+        ]
+      },
+      "candy": {
+        "execution_id": "4213e2b17afc41dabf27e7995c42c180",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:21:38.812637+00:00",
+        "model_completed_at": "2026-10-27T08:22:15.031695+00:00",
+        "model_elapsed_seconds": 36.21907792799175,
+        "cost_usd": 0.0040472,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "51aedee1d29b4c53a68d013655800155",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:22:56.469024+00:00",
+        "model_completed_at": "2026-10-27T08:24:16.505560+00:00",
+        "model_elapsed_seconds": 80.03655773028731,
+        "cost_usd": 0.01963072,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 46,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-luna--high.svg",
+          "sha256": "b3aad28664d4a25defc29fa099bf859dc3facd7233a94df7a6ab0aa013aac16b",
+          "bytes": 17361
+        },
+        "raw_score_total": 46,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=3，n_partial=4，满足n_not≥2，上限为59。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "effort": "xhigh",
+      "pompeii": {
+        "execution_id": "92cc1584b9204261b8974bf088847bae",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:24:30.735897+00:00",
+        "model_completed_at": "2026-10-27T08:43:53.242732+00:00",
+        "model_elapsed_seconds": 1162.506849348545,
+        "cost_usd": 0.3024328,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.4,
+        "score100": 40.0
+      },
+      "pelican": {
+        "execution_id": "3a5145a342004628b4420a8c9a444f2c",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:23:59.021454+00:00",
+        "model_completed_at": "2026-10-27T08:25:09.345023+00:00",
+        "model_elapsed_seconds": 70.32358968444169,
+        "cost_usd": 0.012814,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 45.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-luna--xhigh.html",
+          "sha256": "d56dac958362e3fd1d1ae06bdbe7df02d8cd6e1d554a6b19460cf832238cf3ca",
+          "bytes": 14255
+        },
+        "raw_score_total": 45.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "d7fbae8981314948ac425d8284f934be",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:23:47.354304+00:00",
+        "model_completed_at": "2026-10-27T08:24:30.623351+00:00",
+        "model_elapsed_seconds": 43.26906097494066,
+        "cost_usd": 0.0053756,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "8e818a65d68c4a77af519336b8d7ba85",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:24:16.641204+00:00",
+        "model_completed_at": "2026-10-27T08:26:34.870722+00:00",
+        "model_elapsed_seconds": 138.22952886857092,
+        "cost_usd": 0.02758768,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 47.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-luna--xhigh.svg",
+          "sha256": "82ce86c335425bc42b9465941a5558cdd214bbd16df0c596e1efe8ca6bdeddc8",
+          "bytes": 24145
+        },
+        "raw_score_total": 47.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=4；按优先级适用n_not≥2的59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "effort": "max",
+      "pompeii": {
+        "execution_id": "673451b1d8244d8886d57252771a008f",
+        "selector": "pompeii:pompeii-adjacency-rp-040",
+        "model_started_at": "2026-10-27T08:26:39.547390+00:00",
+        "model_completed_at": "2026-10-27T09:09:42.511199+00:00",
+        "model_elapsed_seconds": 2582.9638266786933,
+        "cost_usd": 0.84617924,
+        "cost_kind": "api_equivalent_estimate",
+        "reward": 0.2608695652173913,
+        "score100": 26.08695652173913
+      },
+      "pelican": {
+        "execution_id": "c2125ba65ec34ac6928926f8c9ffd1f6",
+        "selector": "visual:pelican-bicycle",
+        "model_started_at": "2026-10-27T08:25:19.098422+00:00",
+        "model_completed_at": "2026-10-27T08:26:39.422079+00:00",
+        "model_elapsed_seconds": 80.32366745918989,
+        "cost_usd": 0.01729504,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 66.5,
+        "rubric": "pelican-animation-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--pelican--gpt-5.6-luna--max.html",
+          "sha256": "1878e95c068fa561601801fddff1269682dd3e3f9a90c37e2af421870dbcb428",
+          "bytes": 17909
+        },
+        "raw_score_total": 66.5,
+        "applied_caps": []
+      },
+      "candy": {
+        "execution_id": "4f28291dc0ae4896b28f1943c0425deb",
+        "selector": "local-reasoning:candy-cross-shape",
+        "model_started_at": "2026-10-27T08:25:09.470148+00:00",
+        "model_completed_at": "2026-10-27T08:26:08.191353+00:00",
+        "model_elapsed_seconds": 58.72121687978506,
+        "cost_usd": 0.0064916,
+        "cost_kind": "api_equivalent_estimate",
+        "correct": true,
+        "answer": 15
+      },
+      "combined": {
+        "execution_id": "cb3d148e36f040ca9aacf06338bd627e",
+        "selector": "visual-reasoning:pelican-candy-svg-20261027",
+        "model_started_at": "2026-10-27T08:26:34.986861+00:00",
+        "model_completed_at": "2026-10-27T08:29:57.075323+00:00",
+        "model_elapsed_seconds": 202.08847497962415,
+        "cost_usd": 0.04046544,
+        "cost_kind": "api_equivalent_estimate",
+        "score": 49.5,
+        "rubric": "pelican-candy-static-standalone-v1-20261027",
+        "asset": {
+          "url": "/assets/codex-four-task-20261027--combined--gpt-5.6-luna--max.svg",
+          "sha256": "a28e95a9b3f723aeaf2e7b424e7a3807b8097e0176c868ac449fb32183c9c0a4",
+          "bytes": 26037
+        },
+        "raw_score_total": 49.5,
+        "applied_caps": [
+          {
+            "id": "CORE_COMPLETENESS",
+            "limit": 59,
+            "reason": "n_not=2，n_partial=4；两条核心关系为not_met，适用59分上限。"
+          }
+        ],
+        "completion_cap": 59
+      }
+    }
+  ],
+  "review_sha256": "535cfcadfb51feb32cba0b99d1f4d2ad42b9e1892c91f78da5c7e6f51ba050bb",
+  "score_snapshot_at": "2026-10-27T15:16:50.228620+00:00",
+  "pricing_projection_sha256": "3aed06828f63300314308327aff60de288db429fd95b8865183fd14fcf9e5658"
+}

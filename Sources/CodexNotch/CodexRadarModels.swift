@@ -7,12 +7,13 @@ enum CodexRadarDataSource: String, Codable, Equatable, Sendable {
     case publicVisual
     case publicComposite
     case publicThreeTask
+    case publicFourTask
 
     var label: String {
         switch self {
         case .authorizedAPI: "授权 API"
         case .publicSummary: "旧版摘要"
-        case .publicMetrics, .publicVisual, .publicComposite, .publicThreeTask: "官网众测"
+        case .publicMetrics, .publicVisual, .publicComposite, .publicThreeTask, .publicFourTask: "官网众测"
         }
     }
 
@@ -124,8 +125,8 @@ struct CodexRadarSnapshot: Equatable, Sendable {
         fetchedAt: Date,
         source: CodexRadarDataSource
     ) throws -> CodexRadarSnapshot {
-        if source == .publicThreeTask {
-            return try CodexRadarThreeTaskDocument.decode(data).snapshots(fetchedAt: fetchedAt)[.pompeii]!
+        if source == .publicThreeTask || source == .publicFourTask {
+            return try CodexRadarPublicDocument.snapshots(data: data, fetchedAt: fetchedAt)[.pompeii]!
         }
         if source == .publicMetrics || source == .publicVisual {
             return try decodeMetrics(data: data, fetchedAt: fetchedAt, source: source)

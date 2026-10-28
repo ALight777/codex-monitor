@@ -3,6 +3,7 @@ import Foundation
 struct CodexRadarClient: Sendable {
     static let authorizedURL = URL(string: "https://codexradar.com/api/v1/current")!
     static let threeTaskURL = URL(string: "https://codexradar.com/data/codex-three-task-results.json")!
+    static let fourTaskURL = URL(string: "https://codexradar.com/data/codex-four-task-results.json")!
     static let newsURL = URL(string: "https://codexradar.com/")!
 
     let authorizedEndpoint: URL
@@ -31,17 +32,33 @@ struct CodexRadarClient: Sendable {
         do {
             let html = try await fetchHomepage()
             do {
+                if Self.links(to: Self.fourTaskURL, in: html) {
+                    let source = try await request(url: Self.fourTaskURL, token: nil)
+                    let document = try CodexRadarFourTaskDocument.assemble(homepage: html, source: source)
+                    return (.success(html), .success(try document.encode()))
+                }
                 let source: Data
                 if let embedded = try? CodexRadarThreeTaskPayload.extract(from: html) {
                     source = embedded
-                } else {
-                    // The newer homepage links a public JSON file instead of embedding scores.
+                } else if Self.links(to: Self.threeTaskURL, in: html) {
                     source = try await request(url: Self.threeTaskURL, token: nil)
+                } else {
+                    throw CodexRadarClientError.unsupportedFormat
                 }
                 let document = try CodexRadarThreeTaskDocument.assemble(homepage: html, source: source)
                 return (.success(html), .success(try document.encode()))
             } catch { return (.success(html), .failure(error)) }
         } catch { return (.failure(error), .failure(error)) }
+    }
+
+    private static func links(to endpoint: URL, in data: Data) -> Bool {
+        guard data.count <= 8_000_000, let html = String(data: data, encoding: .utf8) else { return false }
+        let pattern = #"(?is)<a\b[^>]*\bhref\s*=\s*["']([^"']+)["']"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        return regex.matches(in: html, range: NSRange(html.startIndex..., in: html)).contains { match in
+            guard let range = Range(match.range(at: 1), in: html) else { return false }
+            return URL(string: String(html[range]), relativeTo: Self.newsURL)?.absoluteURL == endpoint
+        }
     }
 
     private func request(url: URL, token: String?) async throws -> Data {
@@ -74,7 +91,7 @@ struct CodexRadarClient: Sendable {
         return url.scheme?.lowercased() == "https"
             && url.host?.lowercased() == "codexradar.com"
             && (authorized ? url.path == "/api/v1/current"
-                : ["/", threeTaskURL.path].contains(url.path))
+                : ["/", threeTaskURL.path, fourTaskURL.path].contains(url.path))
             && (url.port == nil || url.port == 443)
             && url.query == nil
             && url.user == nil

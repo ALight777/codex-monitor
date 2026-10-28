@@ -806,7 +806,7 @@ struct DetailPanelView: View {
                         value: "降智雷达"
                     )
                     RadarSummaryCell(
-                        label: "官网核验",
+                        label: "官网数据",
                         value: radar.displayUpdatedAt.map { "\(Formatters.relativeAge($0))前" } ?? "--"
                     )
                     RadarSummaryCell(label: "来源", value: radar.dataSource.label)
@@ -835,7 +835,7 @@ struct DetailPanelView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Text("\(codexRadarViewModel.selectedTask.explanation) \(radar.models.count)档 · 费用为API等价估算；耗时不含排队和评分。各题来自不同轮次。")
+                Text("\(codexRadarViewModel.selectedTask.explanation(for: radar.dataSource)) \(radar.models.count)档 · 费用为API等价估算；耗时不含排队和评分。")
                     .font(.system(size: 9))
                     .foregroundStyle(.white.opacity(0.45))
                     .fixedSize(horizontal: false, vertical: true)

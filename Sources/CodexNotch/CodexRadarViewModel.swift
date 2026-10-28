@@ -114,9 +114,8 @@ final class CodexRadarViewModel: ObservableObject {
             selectedTask = taskSnapshots[.total] != nil ? .total : .pompeii
         }
         snapshot = taskSnapshots[selectedTask] ?? .loading
-        snapshot.dataSource = .publicThreeTask
         if isRefreshing && snapshot.models.isEmpty {
-            snapshot = snapshot.withState(.loading, message: "正在读取官网三题评分")
+            snapshot = snapshot.withState(.loading, message: "正在读取官网当前评分")
         }
         if let authorizedSnapshot {
             snapshot.quotaRows = authorizedSnapshot.quotaRows
@@ -151,10 +150,10 @@ final class CodexRadarViewModel: ObservableObject {
             var failed = false
             do {
                 let data = try results.0.scores.get()
-                self.taskSnapshots = try CodexRadarThreeTaskDocument.decode(data).snapshots(fetchedAt: fetchedAt)
+                self.taskSnapshots = try CodexRadarPublicDocument.snapshots(data: data, fetchedAt: fetchedAt)
                 failed = self.taskSnapshots.values.contains { $0.state != .ready }
                 do {
-                    try CodexRadarCache.save(data: data, fetchedAt: fetchedAt, source: .publicThreeTask,
+                    try CodexRadarCache.save(data: data, fetchedAt: fetchedAt, source: self.taskSnapshots[.pompeii]!.dataSource,
                                              to: self.cacheDirectory.appendingPathComponent("three-task"))
                 } catch {
                     self.taskSnapshots = self.taskSnapshots.mapValues { value in
@@ -280,8 +279,8 @@ private enum CodexRadarCache {
         guard let data = try? Data(contentsOf: directory.appendingPathComponent("current.json")),
               let metadataData = try? Data(contentsOf: directory.appendingPathComponent("metadata.json")),
               let metadata = try? JSONDecoder().decode(Metadata.self, from: metadataData),
-              metadata.source == .publicThreeTask else { return nil }
-        return try? CodexRadarThreeTaskDocument.decode(data).snapshots(fetchedAt: metadata.fetchedAt)
+              metadata.source == .publicThreeTask || metadata.source == .publicFourTask else { return nil }
+        return try? CodexRadarPublicDocument.snapshots(data: data, fetchedAt: metadata.fetchedAt)
     }
 
     static func loadNews(from directory: URL) -> CodexRadarNewsSnapshot? {

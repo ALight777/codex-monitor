@@ -7,3 +7,6 @@ Generated with Zstandard 1.5.7 (`zstd -qc --check`); tests use only the bundled 
 - `compressed-block-boundary.zst`: one frame decoding to exactly 131072 ASCII `x` bytes, the decoder output block size.
 
 Truncation and checksum corruption are applied to temporary copies during tests.
+
+- `quota-history.jsonl.zst`: two checksum-protected frames with 72% then 61% remaining, separated by a 2.4 MB UTF-8 message. Used for quota fallback, line boundaries, migration, and corrupt/truncated-stream rejection.
+- `quota-updated.jsonl.zst`: a replacement quota record with 55% remaining for cache invalidation. Both quota fixtures use a future reset in 2100; all data is synthetic.

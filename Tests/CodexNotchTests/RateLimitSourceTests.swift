@@ -18,6 +18,47 @@ private func weeklyQuota(_ remaining: Int, at: TimeInterval, reset: Int = 10_000
     )
 }
 
+@Test(arguments: [0, 1, 98, 99, 100])
+func rateLimitDisplayPreservesReportedPercent(remaining: Int) {
+    let now = Date(timeIntervalSince1970: 2_000)
+    for reset in [nil, 10_000] as [Int?] {
+        var quota = RateLimitSnapshot(
+            primaryPercent: remaining,
+            secondaryPercent: remaining,
+            primaryResetsAt: reset,
+            secondaryResetsAt: reset,
+            capturedAt: now,
+            isPrimaryCodexLimit: true,
+            planType: "plus"
+        )
+        #expect(quota.primaryDisplayPercent(now: now) == remaining)
+        #expect(quota.secondaryDisplayPercent(now: now) == remaining)
+        #expect(quota.displayWindows(now: now).map(\.remainingPercent) == [remaining, remaining])
+
+        quota.windows = [UsageQuotaWindow(
+            id: "primary-7d", shortLabel: "7d", remainingPercent: remaining,
+            resetsAt: reset.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        )]
+        quota.planType = "pro"
+        #expect(quota.displayWindows(now: now).first?.remainingPercent == remaining)
+    }
+}
+
+@Test
+func rateLimitSourceDisplaysOnePercentUsedAsNinetyNineRemaining() throws {
+    let now = Date(timeIntervalSince1970: 2_000)
+    let store = CodexUsageStore(appServerExecutable: "/missing/codex")
+    let quota = try #require(store.parseAppServerRateLimits(
+        output: #"{"id":2,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":1,"windowDurationMins":10080,"resetsAt":10000},"planType":"pro"}}}"#,
+        now: now
+    ))
+    #expect(quota.secondaryPercent == 99)
+    #expect(quota.secondaryDisplayPercent(now: now) == 99)
+    let window = try #require(quota.displayWindows(now: now).first)
+    #expect(window.shortLabel == "7d")
+    #expect(Formatters.percent(window.remainingPercent) == "99%")
+}
+
 @Test
 func rateLimitSourceKeepsLiveQuotaAcrossLaterLogWrites() {
     let live = weeklyQuota(78, at: 2_000)

@@ -149,8 +149,8 @@ runner.check(
     "expanded detail frame height should equal detail height"
 )
 
-runner.check(AppInfo.version == "0.1.21", "app info should expose version 0.1.21")
-runner.check(AppInfo.displayVersion == "0.1.21", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.1.22", "app info should expose version 0.1.22")
+runner.check(AppInfo.displayVersion == "0.1.22", "app info should fall back to source version when bundle version is unavailable")
 
 let resetCreditsNow = Date(timeIntervalSince1970: 1_784_500_000)
 let appServerResetCreditsJSON = Data(#"""
@@ -594,7 +594,7 @@ let expiredRateLimitSnapshot = RateLimitSnapshot(
     capturedAt: rateLimitNow,
     isPrimaryCodexLimit: true
 )
-runner.check(expiredRateLimitSnapshot.primaryDisplayPercent(now: rateLimitNow) == 100, "expired 5h quota should display as restored")
+runner.check(expiredRateLimitSnapshot.primaryDisplayPercent(now: rateLimitNow) == nil, "expired 5h quota must wait for a confirmed reset")
 runner.check(expiredRateLimitSnapshot.primaryDisplayResetDate(now: rateLimitNow) == nil, "expired 5h reset time should be hidden")
 runner.check(expiredRateLimitSnapshot.secondaryDisplayResetDate(now: rateLimitNow) == Date(timeIntervalSince1970: 2_500), "future 7d reset time should be preserved")
 let cachedAppServerRateLimits = RateLimitSnapshot(

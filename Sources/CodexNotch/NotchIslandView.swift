@@ -181,6 +181,7 @@ struct NotchIslandView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 4)
+        .help(effectiveDisplaySource == .codex ? snapshot.rateLimitStatus.detail : "")
     }
 
     private var narrowRateLimitBlock: some View {
@@ -201,9 +202,11 @@ struct NotchIslandView: View {
     }
 
     private var narrowRateLimitAccessibilityLabel: String {
-        collapsedMetrics.prefix(2)
+        let values = collapsedMetrics.prefix(2)
             .map { "\($0.label) 剩余 \($0.value)" }
             .joined(separator: "，")
+        return effectiveDisplaySource == .codex
+            ? values + "，" + snapshot.rateLimitStatus.detail : values
     }
 
     private var effectiveDisplaySource: NotchDisplaySource {
@@ -285,8 +288,9 @@ struct NotchIslandView: View {
                 CollapsedMetric(
                     id: window.id,
                     label: window.shortLabel,
-                    value: Formatters.percent(window.remainingPercent),
-                    color: quotaColor(for: window.shortLabel)
+                    value: Formatters.percent(window.remainingPercent)
+                        + (snapshot.rateLimitStatus.needsAttention && window.remainingPercent != nil ? "*" : ""),
+                    color: snapshot.rateLimitStatus.needsAttention ? .orange : quotaColor(for: window.shortLabel)
                 )
             }
         case .remoteCodex:
@@ -685,6 +689,7 @@ struct DetailPanelView: View {
             )
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity, alignment: .center)
+            .help(snapshot.rateLimitStatus.detail)
         }
     }
 
@@ -734,6 +739,21 @@ struct DetailPanelView: View {
 
     private var localContent: some View {
         VStack(spacing: 10) {
+            if let summary = snapshot.rateLimitStatus.summary {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(summary, systemImage: snapshot.rateLimitStatus.needsAttention ? "exclamationmark.circle" : "clock")
+                        .font(.system(size: 10, weight: .semibold))
+                    if let date = snapshot.rateLimitStatus.lastSuccessfulAt {
+                        Text("\(snapshot.rateLimitStatus.source == .local ? "记录时间" : "上次成功读取")：\(date.formatted(date: .numeric, time: .standard))")
+                            .font(.system(size: 9))
+                    }
+                }
+                .foregroundStyle(snapshot.rateLimitStatus.needsAttention ? Color.orange : Color.white.opacity(0.6))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(snapshot.rateLimitStatus.detail)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(snapshot.rateLimitStatus.detail)
+            }
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 7) {

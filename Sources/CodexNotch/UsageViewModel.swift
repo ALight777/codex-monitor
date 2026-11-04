@@ -28,6 +28,7 @@ final class UsageViewModel: ObservableObject {
     private var isRefreshingWatchPaths = false
     private var pendingSnapshotRefresh = false
     private var pendingSnapshotBypassFastCache = false
+    private var pendingSnapshotForceRateLimitRefresh = false
     private var pendingWatchPathsRefresh = false
     private var fileChangeBurstStartedAt: Date?
     private var fileChangeNeedsWatchPathRefresh = false
@@ -62,13 +63,14 @@ final class UsageViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    func refresh(bypassFastCache: Bool = false) {
+    func refresh(bypassFastCache: Bool = false, forceRateLimitRefresh: Bool = false) {
         guard !isPreviewMode else {
             return
         }
         guard !isRefreshingSnapshot else {
             pendingSnapshotRefresh = true
             pendingSnapshotBypassFastCache = pendingSnapshotBypassFastCache || bypassFastCache
+            pendingSnapshotForceRateLimitRefresh = pendingSnapshotForceRateLimitRefresh || forceRateLimitRefresh
             return
         }
         fastTimer?.invalidate()
@@ -81,11 +83,12 @@ final class UsageViewModel: ObservableObject {
         let rateLimitSource = settings.rateLimitSource
         let taskHistoryRange = settings.taskHistoryRange
 
-        Task.detached(priority: .utility) { [store, fallbackUsage, bypassFastCache, rateLimitSource, taskHistoryRange] in
+        Task.detached(priority: .utility) { [store, fallbackUsage, bypassFastCache, forceRateLimitRefresh, rateLimitSource, taskHistoryRange] in
             let nextSnapshot = store.loadSnapshot(
                 includePeriodUsage: false,
                 fallbackUsage: fallbackUsage,
                 bypassFastCache: bypassFastCache,
+                forceRateLimitRefresh: forceRateLimitRefresh,
                 rateLimitSource: rateLimitSource,
                 taskHistoryRange: taskHistoryRange
             )
@@ -107,8 +110,10 @@ final class UsageViewModel: ObservableObject {
                 self.updateRefreshingState()
                 let shouldRefreshAgain = self.pendingSnapshotRefresh
                 let shouldBypassFastCache = self.pendingSnapshotBypassFastCache
+                let shouldForceRateLimitRefresh = self.pendingSnapshotForceRateLimitRefresh
                 self.pendingSnapshotRefresh = false
                 self.pendingSnapshotBypassFastCache = false
+                self.pendingSnapshotForceRateLimitRefresh = false
                 if snapshotLoadSucceeded,
                    !TaskCompletionDetector.completedRunningTaskIDs(
                     previous: previousTasks,
@@ -118,7 +123,7 @@ final class UsageViewModel: ObservableObject {
                     self.scheduleCompletionUsageRefresh()
                 }
                 if shouldRefreshAgain {
-                    self.schedulePendingSnapshotRefresh(bypassFastCache: shouldBypassFastCache)
+                    self.schedulePendingSnapshotRefresh(bypassFastCache: shouldBypassFastCache, forceRateLimitRefresh: shouldForceRateLimitRefresh)
                 } else {
                     self.scheduleFastRefresh()
                 }
@@ -130,7 +135,7 @@ final class UsageViewModel: ObservableObject {
         guard !isPreviewMode else {
             return
         }
-        refresh(bypassFastCache: true)
+        refresh(bypassFastCache: true, forceRateLimitRefresh: true)
         refreshUsageTotals(scheduleNext: periodUsageRefreshEnabled)
     }
 
@@ -140,7 +145,7 @@ final class UsageViewModel: ObservableObject {
         fastTimer = nil
         pendingSnapshotTimer?.invalidate()
         pendingSnapshotTimer = nil
-        refresh(bypassFastCache: true)
+        refresh(bypassFastCache: true, forceRateLimitRefresh: true)
         refreshWatchPaths()
         if periodUsageRefreshEnabled {
             refreshUsageTotals(scheduleNext: true)
@@ -288,7 +293,7 @@ final class UsageViewModel: ObservableObject {
         fastTimer = timer
     }
 
-    private func schedulePendingSnapshotRefresh(bypassFastCache: Bool) {
+    private func schedulePendingSnapshotRefresh(bypassFastCache: Bool, forceRateLimitRefresh: Bool) {
         fastTimer?.invalidate()
         fastTimer = nil
         pendingSnapshotTimer?.invalidate()
@@ -298,7 +303,7 @@ final class UsageViewModel: ObservableObject {
         let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.pendingSnapshotTimer = nil
-                self?.refresh(bypassFastCache: bypassFastCache)
+                self?.refresh(bypassFastCache: bypassFastCache, forceRateLimitRefresh: forceRateLimitRefresh)
             }
         }
         timer.tolerance = min(1, delay * 0.35)
@@ -554,7 +559,7 @@ final class UsageViewModel: ObservableObject {
         watcherRefreshTimer?.invalidate()
         watcherRefreshTimer = nil
 
-        refresh(bypassFastCache: true)
+        refresh(bypassFastCache: true, forceRateLimitRefresh: true)
         if !settings.showPeriodUsage {
             disableUsageTotals()
         } else if periodUsageRefreshEnabled {

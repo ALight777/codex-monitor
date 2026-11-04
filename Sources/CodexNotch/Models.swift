@@ -45,6 +45,7 @@ struct UsageSnapshot: Equatable {
     var secondaryResetsAt: Date? = nil
     var rateLimitWindows: [UsageQuotaWindow] = []
     var resetCredits: RateLimitResetCredits? = nil
+    var rateLimitStatus: RateLimitStatus = .init()
     var usage24h: Int
     var usage7d: Int
     var usage30d: Int
@@ -83,6 +84,12 @@ struct UsageSnapshot: Equatable {
             return copy
         }
 
+        // A completed quota read (including unavailable/expired data) is authoritative.
+        // Never resurrect an old window after its source has explicitly gone away.
+        if copy.rateLimitStatus.lastAttemptAt != nil {
+            return copy
+        }
+
         if previous.rateLimitWindows.isEmpty {
             if copy.primaryPercent == nil {
                 copy.primaryPercent = previous.primaryPercent
@@ -101,6 +108,8 @@ struct UsageSnapshot: Equatable {
             copy.primaryResetsAt = previous.primaryResetsAt
             copy.secondaryPercent = previous.secondaryPercent
             copy.secondaryResetsAt = previous.secondaryResetsAt
+            copy.rateLimitStatus = previous.rateLimitStatus
+            copy.rateLimitStatus.refreshFailed = true
         }
         return copy
     }
@@ -142,6 +151,37 @@ struct UsageSnapshot: Equatable {
             )
         }
         return windows
+    }
+}
+
+struct RateLimitStatus: Equatable {
+    enum Source: String { case live, local, unavailable }
+    var source: Source = .unavailable
+    var lastSuccessfulAt: Date? = nil
+    var lastAttemptAt: Date? = nil
+    var refreshFailed = false
+    var awaitingReset = false
+
+    var needsAttention: Bool { refreshFailed || awaitingReset || source == .unavailable }
+
+    var summary: String? {
+        if awaitingReset { return "额度已到重置时间，等待确认" }
+        if refreshFailed {
+            return source == .unavailable ? "额度读取失败" : "额度更新失败，当前为旧值"
+        }
+        if source == .local { return "额度来自本地记录" }
+        if source == .unavailable { return "暂无额度数据" }
+        return nil
+    }
+
+    var detail: String {
+        var parts = [summary ?? "实时额度"]
+        if let lastSuccessfulAt {
+            let label = source == .local ? "记录时间" : "上次成功读取"
+            parts.append("\(label)：\(lastSuccessfulAt.formatted(date: .numeric, time: .standard))")
+        }
+        if needsAttention { parts.append("可点击刷新重新查询") }
+        return parts.joined(separator: "；")
     }
 }
 
@@ -742,6 +782,31 @@ struct RateLimitSnapshot: Equatable {
     var windows: [UsageQuotaWindow] = []
     var resetCredits: RateLimitResetCredits? = nil
     var planType: String? = nil
+    var source: RateLimitStatus.Source = .local
+    var refreshFailed = false
+    var lastAttemptAt: Date? = nil
+
+    var hasQuotaValues: Bool {
+        primaryPercent != nil || secondaryPercent != nil || windows.contains { $0.remainingPercent != nil }
+    }
+
+    func status(now: Date) -> RateLimitStatus {
+        RateLimitStatus(
+            source: hasQuotaValues ? source : .unavailable,
+            lastSuccessfulAt: capturedAt,
+            lastAttemptAt: lastAttemptAt ?? now,
+            refreshFailed: refreshFailed,
+            awaitingReset: visibleWindows.contains {
+                $0.resetsAt.map { now >= $0 } ?? false
+            }
+        )
+    }
+
+    func crossesReset(since date: Date, now: Date) -> Bool {
+        visibleWindows.contains {
+            $0.resetsAt.map { date < $0 && now >= $0 } ?? false
+        }
+    }
 
     static func preferringAppServer(
         appServer: RateLimitSnapshot?,
@@ -749,6 +814,13 @@ struct RateLimitSnapshot: Equatable {
     ) -> RateLimitSnapshot {
         guard let appServer else {
             return localFiles
+        }
+
+        guard appServer.hasQuotaValues else {
+            var result = localFiles
+            result.refreshFailed = appServer.refreshFailed
+            result.lastAttemptAt = appServer.lastAttemptAt
+            return result
         }
 
         // Rollout timestamps describe when a log was written, not when its quota
@@ -788,11 +860,7 @@ struct RateLimitSnapshot: Equatable {
     }
 
     func displayWindows(now: Date = Date()) -> [UsageQuotaWindow] {
-        let source = windows.isEmpty ? legacyWindows() : windows
-        let visibleSource = CodexPlanKind(planType: planType).showsFiveHourQuota
-            ? source
-            : source.filter { !$0.isFiveHourWindow }
-        return visibleSource.map { window in
+        visibleWindows.map { window in
             UsageQuotaWindow(
                 id: window.id,
                 shortLabel: window.shortLabel,
@@ -802,22 +870,22 @@ struct RateLimitSnapshot: Equatable {
         }
     }
 
+    private var visibleWindows: [UsageQuotaWindow] {
+        let source = windows.isEmpty ? legacyWindows() : windows
+        return CodexPlanKind(planType: planType).showsFiveHourQuota
+            ? source : source.filter { !$0.isFiveHourWindow }
+    }
+
     private func displayPercent(_ percent: Int?, resetsAt: Int?, now: Date) -> Int? {
         if let resetsAt, Int(now.timeIntervalSince1970) >= resetsAt {
-            return 100
-        }
-        if let percent, percent >= 99 {
-            return 100
+            return nil
         }
         return percent
     }
 
     private func displayPercent(_ percent: Int?, resetsAt: Date?, now: Date) -> Int? {
         if let resetsAt, now >= resetsAt {
-            return 100
-        }
-        if let percent, percent >= 99 {
-            return 100
+            return nil
         }
         return percent
     }

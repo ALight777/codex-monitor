@@ -15,6 +15,7 @@ enum SnapshotOutputFormatter {
             "quotas=\(quotaText.isEmpty ? "--" : quotaText) running=\(snapshot.isRunning)",
             "usageToday=\(snapshot.usageToday) usage24h=\(snapshot.usage24h) usage7d=\(snapshot.usage7d) usage30d=\(snapshot.usage30d)"
         ]
+        lines.append("quota_status=\(snapshot.rateLimitStatus.detail)")
 
         for task in snapshot.tasks.prefix(taskLimit) {
             lines.append("task=\(task.status.label) \(task.title) \(task.tokenCount)")
@@ -32,6 +33,7 @@ enum SnapshotOutputFormatter {
             primaryPercent: snapshot.primaryPercent,
             secondaryPercent: snapshot.secondaryPercent,
             quotaWindows: snapshot.displayRateLimitWindows.map(SnapshotQuotaWindowJSON.init(window:)),
+            quotaStatus: SnapshotQuotaStatusJSON(snapshot.rateLimitStatus),
             resetCredits: snapshot.resetCredits.map(SnapshotResetCreditsJSON.init(resetCredits:)),
             running: snapshot.isRunning,
             usageToday: snapshot.usageToday,
@@ -54,6 +56,7 @@ private struct SnapshotJSON: Encodable {
     let primaryPercent: Int?
     let secondaryPercent: Int?
     let quotaWindows: [SnapshotQuotaWindowJSON]
+    let quotaStatus: SnapshotQuotaStatusJSON
     let resetCredits: SnapshotResetCreditsJSON?
     let running: Bool
     let usageToday: Int
@@ -69,6 +72,7 @@ private struct SnapshotJSON: Encodable {
         case primaryPercent = "primary_percent"
         case secondaryPercent = "secondary_percent"
         case quotaWindows = "quota_windows"
+        case quotaStatus = "quota_status"
         case resetCredits = "reset_credits"
         case running
         case usageToday = "usage_today"
@@ -79,6 +83,32 @@ private struct SnapshotJSON: Encodable {
         case lastUpdated = "last_updated"
         case error
         case tasks
+    }
+}
+
+private struct SnapshotQuotaStatusJSON: Encodable {
+    let source: String
+    let lastSuccessfulAt: String?
+    let lastAttemptAt: String?
+    let refreshFailed: Bool
+    let awaitingReset: Bool
+    let message: String
+
+    init(_ status: RateLimitStatus) {
+        source = status.source.rawValue
+        lastSuccessfulAt = status.lastSuccessfulAt.map { ISO8601DateFormatter().string(from: $0) }
+        lastAttemptAt = status.lastAttemptAt.map { ISO8601DateFormatter().string(from: $0) }
+        refreshFailed = status.refreshFailed
+        awaitingReset = status.awaitingReset
+        message = status.detail
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case source, message
+        case lastSuccessfulAt = "last_successful_at"
+        case lastAttemptAt = "last_attempt_at"
+        case refreshFailed = "refresh_failed"
+        case awaitingReset = "awaiting_reset"
     }
 }
 

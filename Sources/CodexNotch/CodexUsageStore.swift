@@ -118,11 +118,12 @@ final class CodexUsageStore: @unchecked Sendable {
         includePeriodUsage: Bool = true,
         fallbackUsage: PeriodUsage? = nil,
         bypassFastCache: Bool = false,
+        forceRateLimitRefresh: Bool = false,
         rateLimitSource: RateLimitSourcePreference = .appServerFirst,
         taskHistoryRange: TaskHistoryRange = .threeDays,
         now: Date = Date()
     ) -> UsageSnapshot {
-        if !bypassFastCache,
+        if !bypassFastCache, !forceRateLimitRefresh,
            !includePeriodUsage,
            let cachedSnapshot = cachedFastSnapshot(
                 now: now,
@@ -133,39 +134,46 @@ final class CodexUsageStore: @unchecked Sendable {
             return cachedSnapshot
         }
 
+        let databaseThreads: [ThreadRecord]
+        var databaseError: String?
         do {
-            let databaseThreads = try loadRecentThreads(range: taskHistoryRange, now: now)
-            let knownTokens = tokenMap(from: databaseThreads)
-            let sessionCandidates = loadRecentSessionCandidates(
-                range: taskHistoryRange,
-                now: now,
-                knownTokens: knownTokens,
-                limit: UsageScanPolicy.fastSessionCandidateLimit
-            )
-            let sessionNames = loadSessionIndexThreadNames()
-            let sessionThreads = loadRecentSessionThreads(
-                candidates: sessionCandidates,
-                names: sessionNames
-            )
-            let activeSubagentParents = loadActiveSubagentParentThreads(
-                candidates: sessionCandidates,
-                names: sessionNames,
-                now: now
-            )
-            let subagentUsage = loadSubagentUsage(candidates: sessionCandidates, now: now)
-            let threads = withSubagentUsage(
-                mergeThreadRecords(databaseThreads + sessionThreads + activeSubagentParents),
-                usage: subagentUsage
-            )
-            let activeThreadIDs = ((try? loadActiveThreadIDs(now: now)) ?? [])
-                .union(activeSessionThreadIDs(from: threads, now: now))
-                .union(activeSubagentParents.map(\.id))
-            let usage = includePeriodUsage
-                ? (loadUsageTotals(now: now, fallbackThreads: threads) ?? fallbackUsage ?? .zero)
-                : (fallbackUsage ?? .zero)
-            let rateLimitPaths = candidateRateLimitPaths(from: threads)
-            let rateLimits = loadRateLimits(from: rateLimitPaths, source: rateLimitSource, now: now)
-            let tasks = buildTasks(from: threads, activeThreadIDs: activeThreadIDs, now: now)
+            databaseThreads = try loadRecentThreads(range: taskHistoryRange, now: now)
+        } catch {
+            databaseThreads = []
+            databaseError = error.localizedDescription
+        }
+        let knownTokens = tokenMap(from: databaseThreads)
+        let sessionCandidates = loadRecentSessionCandidates(
+            range: taskHistoryRange,
+            now: now,
+            knownTokens: knownTokens,
+            limit: UsageScanPolicy.fastSessionCandidateLimit
+        )
+        let sessionNames = loadSessionIndexThreadNames()
+        let sessionThreads = loadRecentSessionThreads(
+            candidates: sessionCandidates,
+            names: sessionNames
+        )
+        let activeSubagentParents = loadActiveSubagentParentThreads(
+            candidates: sessionCandidates,
+            names: sessionNames,
+            now: now
+        )
+        let subagentUsage = loadSubagentUsage(candidates: sessionCandidates, now: now)
+        let threads = withSubagentUsage(
+            mergeThreadRecords(databaseThreads + sessionThreads + activeSubagentParents),
+            usage: subagentUsage
+        )
+        let activeThreadIDs = ((try? loadActiveThreadIDs(now: now)) ?? [])
+            .union(activeSessionThreadIDs(from: threads, now: now))
+            .union(activeSubagentParents.map(\.id))
+        let usage = includePeriodUsage
+            ? (loadUsageTotals(now: now, fallbackThreads: threads) ?? fallbackUsage ?? .zero)
+            : (fallbackUsage ?? .zero)
+        let rateLimitPaths = candidateRateLimitPaths(from: threads)
+        let rateLimits = loadRateLimits(from: rateLimitPaths, source: rateLimitSource, now: now, forceRefresh: forceRateLimitRefresh)
+        let tasks = buildTasks(from: threads, activeThreadIDs: activeThreadIDs, now: now)
+        if databaseError == nil {
             cacheFastSnapshot(
                 threads: threads,
                 activeThreadIDs: activeThreadIDs,
@@ -174,31 +182,34 @@ final class CodexUsageStore: @unchecked Sendable {
                 rateLimitSource: rateLimitSource,
                 taskHistoryRange: taskHistoryRange
             )
-
-            return UsageSnapshot(
-                primaryPercent: rateLimits.primaryDisplayPercent(now: now),
-                secondaryPercent: rateLimits.secondaryDisplayPercent(now: now),
-                primaryResetsAt: rateLimits.primaryDisplayResetDate(now: now),
-                secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
-                rateLimitWindows: rateLimits.displayWindows(now: now),
-                resetCredits: rateLimits.resetCredits,
-                usage24h: usage.day,
-                usage7d: usage.week,
-                usage30d: usage.month,
-                usageToday: usage.today,
-                usage24hSummary: usage.daySummary,
-                usage7dSummary: usage.weekSummary,
-                usage30dSummary: usage.monthSummary,
-                usageTodaySummary: usage.todaySummary,
-                usageCoverage: usage.coverage,
-                tasks: tasks,
-                isRunning: tasks.contains { $0.status == .running },
-                lastUpdated: now,
-                errorMessage: nil
-            )
-        } catch {
-            return errorSnapshot(error, now: now)
+        } else {
+            cacheLock.lock()
+            fastCache = nil
+            cacheLock.unlock()
         }
+
+        return UsageSnapshot(
+            primaryPercent: rateLimits.primaryDisplayPercent(now: now),
+            secondaryPercent: rateLimits.secondaryDisplayPercent(now: now),
+            primaryResetsAt: rateLimits.primaryDisplayResetDate(now: now),
+            secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
+            rateLimitWindows: rateLimits.displayWindows(now: now),
+            resetCredits: rateLimits.resetCredits,
+            rateLimitStatus: rateLimits.status(now: now),
+            usage24h: usage.day,
+            usage7d: usage.week,
+            usage30d: usage.month,
+            usageToday: usage.today,
+            usage24hSummary: usage.daySummary,
+            usage7dSummary: usage.weekSummary,
+            usage30dSummary: usage.monthSummary,
+            usageTodaySummary: usage.todaySummary,
+            usageCoverage: usage.coverage,
+            tasks: tasks,
+            isRunning: tasks.contains { $0.status == .running },
+            lastUpdated: now,
+            errorMessage: databaseError
+        )
     }
 
     func loadUsageTotals(
@@ -222,22 +233,6 @@ final class CodexUsageStore: @unchecked Sendable {
         return uniqueExistingPaths(
             candidateRateLimitPaths(from: threads)
                 + recentSessionActivityWatchPaths()
-        )
-    }
-
-    private func errorSnapshot(_ error: Error, now: Date) -> UsageSnapshot {
-        UsageSnapshot(
-            primaryPercent: nil,
-            secondaryPercent: nil,
-            primaryResetsAt: nil,
-            secondaryResetsAt: nil,
-            usage24h: 0,
-            usage7d: 0,
-            usage30d: 0,
-            tasks: [],
-            isRunning: false,
-            lastUpdated: now,
-            errorMessage: error.localizedDescription
         )
     }
 
@@ -287,6 +282,7 @@ final class CodexUsageStore: @unchecked Sendable {
             secondaryResetsAt: rateLimits.secondaryDisplayResetDate(now: now),
             rateLimitWindows: rateLimits.displayWindows(now: now),
             resetCredits: rateLimits.resetCredits,
+            rateLimitStatus: rateLimits.status(now: now),
             usage24h: usage.day,
             usage7d: usage.week,
             usage30d: usage.month,
@@ -1574,7 +1570,8 @@ final class CodexUsageStore: @unchecked Sendable {
             .prefix(limit)
             .map(\.rolloutPath)
 
-        for path in threadPaths + recentSessionPaths(limit: limit) {
+        for candidate in threadPaths + recentSessionPaths(limit: limit) {
+            let path = resolvedQuotaPath(candidate)
             guard !path.isEmpty, seen.insert(path).inserted else {
                 continue
             }
@@ -1585,6 +1582,12 @@ final class CodexUsageStore: @unchecked Sendable {
         }
 
         return paths
+    }
+
+    private func resolvedQuotaPath(_ path: String) -> String {
+        guard !path.isEmpty, !FileManager.default.fileExists(atPath: path),
+              FileManager.default.fileExists(atPath: path + ".zst") else { return path }
+        return path + ".zst"
     }
 
     private func recentSessionActivityWatchPaths(limit: Int = UsageScanPolicy.activityWatchFileLimit) -> [String] {
@@ -1647,7 +1650,8 @@ final class CodexUsageStore: @unchecked Sendable {
 
         let paths = collectRecentSessionPaths(
             roots: roots,
-            limit: max(limit, UsageScanPolicy.recentRateLimitPathCacheCapacity)
+            limit: max(limit, UsageScanPolicy.recentRateLimitPathCacheCapacity),
+            includeCompressed: true
         )
 
         cacheLock.lock()
@@ -1687,7 +1691,7 @@ final class CodexUsageStore: @unchecked Sendable {
         return paths
     }
 
-    private func collectRecentSessionPaths(roots: [URL], limit: Int) -> [String] {
+    private func collectRecentSessionPaths(roots: [URL], limit: Int, includeCompressed: Bool = false) -> [String] {
         var files: [(path: String, modifiedAt: Date)] = []
         for root in roots {
             guard let enumerator = FileManager.default.enumerator(
@@ -1698,7 +1702,8 @@ final class CodexUsageStore: @unchecked Sendable {
                 continue
             }
 
-            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+            for case let url as URL in enumerator where url.pathExtension == "jsonl"
+                || (includeCompressed && url.lastPathComponent.hasSuffix(".jsonl.zst")) {
                 guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                       values.isRegularFile == true else {
                     continue
@@ -1734,15 +1739,17 @@ final class CodexUsageStore: @unchecked Sendable {
         }
     }
 
-    private func loadRateLimits(from paths: [String], source: RateLimitSourcePreference, now: Date) -> RateLimitSnapshot {
+    private func loadRateLimits(from paths: [String], source: RateLimitSourcePreference, now: Date, forceRefresh: Bool = false) -> RateLimitSnapshot {
         switch source {
         case .appServerFirst:
-            RateLimitSnapshot.preferringAppServer(
-                appServer: loadAppServerRateLimits(now: now),
-                localFiles: loadLatestRateLimits(from: paths)
+            let live = loadAppServerRateLimits(now: now, forceRefresh: forceRefresh)
+            // A usable live value needs no history scan, especially for large archives.
+            if let live, live.hasQuotaValues, live.planType != nil { return live }
+            return RateLimitSnapshot.preferringAppServer(
+                appServer: live, localFiles: loadLatestRateLimits(from: paths)
             )
         case .localFilesOnly:
-            loadLatestRateLimits(from: paths)
+            return loadLatestRateLimits(from: paths)
         }
     }
 
@@ -1778,17 +1785,18 @@ final class CodexUsageStore: @unchecked Sendable {
         )
     }
 
-    private func loadAppServerRateLimits(now: Date) -> RateLimitSnapshot? {
+    private func loadAppServerRateLimits(now: Date, forceRefresh: Bool = false) -> RateLimitSnapshot? {
         cacheLock.lock()
         let cached = appServerRateLimitCache
         cacheLock.unlock()
 
-        if let cached {
+        if let cached, !forceRefresh {
             switch cached.state {
-            case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerSuccessCacheTTL:
+            case .success(let snapshot) where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerSuccessCacheTTL
+                && !snapshot.crossesReset(since: cached.createdAt, now: now):
                 return snapshot
             case .failure where now.timeIntervalSince(cached.createdAt) < UsageScanPolicy.appServerFailureCacheTTL:
-                return cached.lastSuccessfulSnapshot
+                return failedAppServerSnapshot(cached.lastSuccessfulSnapshot, attemptedAt: cached.createdAt)
             default:
                 break
             }
@@ -1798,7 +1806,7 @@ final class CodexUsageStore: @unchecked Sendable {
         guard let appServerExecutable = appServerExecutable ?? Self.resolveAppServerExecutable(),
               FileManager.default.fileExists(atPath: appServerExecutable) else {
             cacheAppServerRateLimits(.failure, now: now)
-            return cached?.lastSuccessfulSnapshot
+            return failedAppServerSnapshot(cached?.lastSuccessfulSnapshot, attemptedAt: now)
         }
 
         let output = try? Shell.runJSONRPC(
@@ -1808,10 +1816,20 @@ final class CodexUsageStore: @unchecked Sendable {
         guard let output,
               let snapshot = parseAppServerRateLimits(output: output, now: now) else {
             cacheAppServerRateLimits(.failure, now: now)
-            return cached?.lastSuccessfulSnapshot
+            return failedAppServerSnapshot(cached?.lastSuccessfulSnapshot, attemptedAt: now)
         }
 
         cacheAppServerRateLimits(.success(snapshot), now: now)
+        return snapshot
+    }
+
+    private func failedAppServerSnapshot(_ previous: RateLimitSnapshot?, attemptedAt: Date) -> RateLimitSnapshot {
+        var snapshot = previous ?? RateLimitSnapshot(
+            primaryPercent: nil, secondaryPercent: nil, primaryResetsAt: nil,
+            secondaryResetsAt: nil, capturedAt: nil, isPrimaryCodexLimit: true
+        )
+        snapshot.refreshFailed = true
+        snapshot.lastAttemptAt = attemptedAt
         return snapshot
     }
 
@@ -1872,7 +1890,9 @@ final class CodexUsageStore: @unchecked Sendable {
                 isPrimaryCodexLimit: true,
                 windows: windows,
                 resetCredits: resetCredits,
-                planType: snapshot.planType
+                planType: snapshot.planType,
+                source: .live,
+                lastAttemptAt: now
             )
         }
 
@@ -1905,11 +1925,15 @@ final class CodexUsageStore: @unchecked Sendable {
         }
         cacheLock.unlock()
 
-        guard let output = tokenCountLines(from: rolloutPath, lineLimit: 600) else {
-            return nil
+        let snapshot: RateLimitSnapshot?
+        if rolloutPath.hasSuffix(".jsonl.zst") {
+            snapshot = try? readCompressedRateLimitSnapshot(from: rolloutPath)
+        } else {
+            snapshot = tokenCountLines(from: rolloutPath, lineLimit: 600)
+                .flatMap { parseRateLimitSnapshot(from: $0) }
         }
-
-        let snapshot = parseRateLimitSnapshot(from: output)
+        // A file replaced during a scan must not publish an inconsistent result.
+        guard signature == fileSignature(rolloutPath) else { return nil }
         cacheLock.lock()
         rateLimitFileCache[rolloutPath] = FileValueCache(signature: signature, value: snapshot)
         if rateLimitFileCache.count > UsageScanPolicy.rateLimitCandidateLimit * 4 {
@@ -1925,6 +1949,42 @@ final class CodexUsageStore: @unchecked Sendable {
         }
         cacheLock.unlock()
         return snapshot
+    }
+
+    private func readCompressedRateLimitSnapshot(from path: String) throws -> RateLimitSnapshot? {
+        var latest: RateLimitSnapshot?
+        var line = Data()
+        var skipping = false
+        func finishLine() {
+            if !skipping, let parsed = parseRateLimitSnapshot(from: String(decoding: line, as: UTF8.self)),
+               latest == nil || (parsed.capturedAt ?? .distantPast) >= (latest?.capturedAt ?? .distantPast) {
+                latest = parsed
+            }
+            line.removeAll(keepingCapacity: true)
+            skipping = false
+        }
+        // Stream and validate every frame. Discard large message bodies; quota events
+        // are small. Never retain the whole decompressed conversation in memory.
+        try CodexZstdReader.read(path: path, isCancelled: { false }) { bytes in
+            guard let base = bytes.baseAddress else { return }
+            var start = 0
+            while start < bytes.count {
+                let newline = memchr(base.advanced(by: start), 0x0A, bytes.count - start)
+                let end = newline.map { base.distance(to: UnsafeRawPointer($0)) } ?? bytes.count
+                if !skipping {
+                    if line.count + end - start <= 1_048_576 {
+                        line.append(base.advanced(by: start).assumingMemoryBound(to: UInt8.self), count: end - start)
+                    } else {
+                        skipping = true
+                        line.removeAll(keepingCapacity: true)
+                    }
+                }
+                if newline != nil { finishLine() }
+                start = newline == nil ? end : end + 1
+            }
+        }
+        if !line.isEmpty { finishLine() }
+        return latest
     }
 
     private func parseRateLimitSnapshot(from output: String) -> RateLimitSnapshot? {

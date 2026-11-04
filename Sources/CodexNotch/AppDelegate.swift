@@ -199,6 +199,12 @@ final class NotchOverlayController {
             secondaryPercent: 64,
             primaryResetsAt: now.addingTimeInterval(2 * 60 * 60),
             secondaryResetsAt: now.addingTimeInterval(3 * 24 * 60 * 60),
+            rateLimitStatus: RateLimitStatus(
+                source: .live,
+                lastSuccessfulAt: now.addingTimeInterval(-3600),
+                lastAttemptAt: now,
+                refreshFailed: CommandLine.arguments.contains("--qa-stale-quota")
+            ),
             usage24h: today.totalTokens,
             usage7d: week.totalTokens,
             usage30d: month.totalTokens,

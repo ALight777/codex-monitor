@@ -42,7 +42,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 同时支持普通 `.jsonl` 和 Codex 自动压缩的 `.jsonl.zst` 历史日志。压缩日志由应用内置解码器流式读取并校验，不依赖 Homebrew，不生成解压副本；未变化的文件直接复用内存索引。
 - Token 数字支持整块悬停和点击：悬停短暂查看、点击固定弹窗，显示未缓存输入、缓存输入和含推理输出的构成。
 
-“实时接口优先”会自动发现新版 Codex / ChatGPT 应用内的 CLI，即使没有对话或日志写入，也按30秒缓存周期主动查询额度（实际触发随刷新频率）。应用升级后重新发现路径。以接口返回的额度为准，任务日志不会因为写入时间较晚而覆盖它。接口读取失败时保留上次成功值并重试；本次运行尚无成功接口结果时才回退本地记录。“仅本地记录”仍只读取本地数据。
+“实时接口优先”会自动发现新版 Codex / ChatGPT 应用内的 CLI，即使没有对话或日志写入，也按30秒缓存周期主动查询额度（实际触发随刷新频率）。应用升级后重新发现路径。以接口返回的额度为准，任务日志不会因为写入时间较晚而覆盖它。接口读取失败时保留上次成功值并重试；本次运行尚无成功接口结果时才回退本地记录。“仅本地记录”仍只读取本地数据。 手动刷新和唤醒会直接重新查询额度；自动刷新保留缓存限流。到达重置时间后显示待确认（`--`），收到新窗口后才恢复数字，不按本机时间推算为 100%。接口失败保留上次成功值，以橙色和 `*` 标明旧值，并在详情中显示上次成功读取时间；本地兜底明确标注记录时间。任务数据库异常不会阻断额度查询，本地额度兜底同时读取普通和压缩日志，损坏压缩文件不会贡献部分结果。
 
 本机数据主要来自当前用户目录下的 Codex 数据文件，例如：
 
@@ -166,8 +166,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.21-arm64.dmg
-dist/codex-monitor-0.1.21-amd64.dmg
+dist/codex-monitor-0.1.22-arm64.dmg
+dist/codex-monitor-0.1.22-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -277,7 +277,7 @@ It can show:
 - Historical totals scan all local session and archive logs, merge multiple rollouts for each conversation, and deduplicate repeated cumulative usage snapshots. An in-memory index reads only appended data after the first scan. Missing or unreadable logs are flagged; lifetime database totals are not assigned to today.
 - Both `.jsonl` and Codex-compressed `.jsonl.zst` logs are supported. A bundled streaming decoder validates compressed files without Homebrew or unpacked copies on disk; unchanged files reuse the in-memory index.
 
-With the live API preferred, quota comes from the API even when a rollout log has a later write timestamp. Failed reads retain the last successful API value while retrying; local records are used until the first successful API read. Local-only mode continues to use local records exclusively.
+With the live API preferred, quota comes from the API even when a rollout log has a later write timestamp. Failed reads retain the last successful API value while retrying; local records are used until the first successful API read. Local-only mode continues to use local records exclusively. Manual refresh and wake bypass the quota cache. Expired windows show `--` until confirmed by the server. Failed reads mark retained values in orange with `*` and show the original successful-read time in details. Quota queries continue if the task database is unavailable; local quota fallback supports validated `.jsonl.zst` logs as well as plain logs.
 
 Local data is read from Codex files under the current user account, including:
 
@@ -397,8 +397,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.21-arm64.dmg
-dist/codex-monitor-0.1.21-amd64.dmg
+dist/codex-monitor-0.1.22-arm64.dmg
+dist/codex-monitor-0.1.22-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

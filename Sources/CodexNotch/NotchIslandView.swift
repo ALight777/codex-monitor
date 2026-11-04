@@ -1219,10 +1219,18 @@ struct DetailPanelView: View {
                 )
             }
 
-            Text("API 等价估算 · \(TokenCostCatalog.priceVersion)")
-                .font(.system(size: 8.2, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.32))
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            HStack(spacing: 5) {
+                if viewModel.hasLoadedUsageTotals, snapshot.usageCoverage.isIncomplete {
+                    Label("本地记录不完整", systemImage: "exclamationmark.circle")
+                        .foregroundStyle(.orange.opacity(0.85))
+                        .help(snapshot.usageCoverage.detail)
+                        .accessibilityLabel(snapshot.usageCoverage.detail)
+                }
+                Spacer(minLength: 0)
+                Text("API 等价估算 · \(TokenCostCatalog.priceVersion)")
+                    .foregroundStyle(.white.opacity(0.32))
+            }
+            .font(.system(size: 8.2, weight: .medium, design: .rounded))
         }
         .padding(.top, 1)
     }

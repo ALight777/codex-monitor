@@ -38,6 +38,7 @@ enum SnapshotOutputFormatter {
             usage24h: snapshot.usage24h,
             usage7d: snapshot.usage7d,
             usage30d: snapshot.usage30d,
+            usageCoverage: snapshot.usageCoverage,
             lastUpdated: ISO8601DateFormatter().string(from: snapshot.lastUpdated),
             error: snapshot.errorMessage,
             tasks: snapshot.tasks.prefix(taskLimit).map(SnapshotTaskJSON.init(task:))
@@ -59,6 +60,7 @@ private struct SnapshotJSON: Encodable {
     let usage24h: Int
     let usage7d: Int
     let usage30d: Int
+    let usageCoverage: UsageCoverage
     let lastUpdated: String
     let error: String?
     let tasks: [SnapshotTaskJSON]
@@ -73,6 +75,7 @@ private struct SnapshotJSON: Encodable {
         case usage24h = "usage_24h"
         case usage7d = "usage_7d"
         case usage30d = "usage_30d"
+        case usageCoverage = "usage_coverage"
         case lastUpdated = "last_updated"
         case error
         case tasks

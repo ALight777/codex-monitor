@@ -149,8 +149,8 @@ runner.check(
     "expanded detail frame height should equal detail height"
 )
 
-runner.check(AppInfo.version == "0.1.19", "app info should expose version 0.1.19")
-runner.check(AppInfo.displayVersion == "0.1.19", "app info should fall back to source version when bundle version is unavailable")
+runner.check(AppInfo.version == "0.1.21", "app info should expose version 0.1.21")
+runner.check(AppInfo.displayVersion == "0.1.21", "app info should fall back to source version when bundle version is unavailable")
 
 let resetCreditsNow = Date(timeIntervalSince1970: 1_784_500_000)
 let appServerResetCreditsJSON = Data(#"""
@@ -670,7 +670,6 @@ runner.check(stabilizedWeeklyOnlySnapshot.primaryPercent == nil, "weekly-only Co
 runner.check(stabilizedWeeklyOnlySnapshot.displayRateLimitWindows.map(\.shortLabel) == ["7d"], "weekly-only Codex quota should only display the weekly window")
 let appServerParserStore = CodexUsageStore(
     codexDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("codex-notch-reset-credit-parser"),
-    ripgrepCandidates: [],
     appServerExecutable: "/missing/codex"
 )
 let appServerParserNow = Date(timeIntervalSince1970: 1_784_500_000)
@@ -3878,7 +3877,7 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     values('\(mixedUsageSessionID)', \(Int(now.timeIntervalSince1970)), 'codex_otel.trace_safe', 'event.kind=response.completed tool_token_count=10000');
     """
 ])
-let mixedUsageStore = CodexUsageStore(codexDirectory: mixedUsageRoot, ripgrepCandidates: [])
+let mixedUsageStore = CodexUsageStore(codexDirectory: mixedUsageRoot)
 runner.check(mixedUsageStore.loadUsageTotals(now: now)?.day == 10000, "local usage totals should merge logs when logs have more complete token counts than rollouts")
 
 let logCacheRoot = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -3936,7 +3935,7 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     values('\(logCacheSessionID)', \(Int(now.timeIntervalSince1970)), 'codex_otel.trace_safe', 'event.kind=response.completed tool_token_count=1000');
     """
 ])
-let logCacheStore = CodexUsageStore(codexDirectory: logCacheRoot, ripgrepCandidates: [])
+let logCacheStore = CodexUsageStore(codexDirectory: logCacheRoot)
 runner.check(logCacheStore.loadUsageTotals(now: now)?.day == 1000, "log fallback usage should be available when rollout usage is empty")
 _ = try Shell.run("/usr/bin/sqlite3", [
     logCacheLogsDatabase,
@@ -4008,7 +4007,7 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     values('\(snapshotLogSessionID)', '日志触发运行状态', 0, 'gpt-5.5', 'high', '\(snapshotLogPath.path)', \(Int(now.timeIntervalSince1970)), 0);
     """
 ])
-let snapshotLogStore = CodexUsageStore(codexDirectory: snapshotLogRoot, ripgrepCandidates: [])
+let snapshotLogStore = CodexUsageStore(codexDirectory: snapshotLogRoot)
 let idleSnapshotBeforeLog = snapshotLogStore.loadSnapshot(
     includePeriodUsage: false,
     bypassFastCache: false,
@@ -4086,12 +4085,6 @@ if let handle = try? FileHandle(forWritingTo: largeUsagePath) {
     try handle.close()
 }
 try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: largeUsagePath.path)
-let fakeRipgrepPath = largeUsageRoot.appendingPathComponent("fake-rg").path
-try """
-#!/bin/sh
-/usr/bin/grep '"token_count"'
-""".write(toFile: fakeRipgrepPath, atomically: true, encoding: .utf8)
-try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeRipgrepPath)
 _ = try Shell.run("/usr/bin/sqlite3", [
     largeUsageStateDatabase,
     """
@@ -4099,10 +4092,8 @@ _ = try Shell.run("/usr/bin/sqlite3", [
     values('\(largeUsageSessionID)', '大文件统计任务', 777777, 'gpt-5.5', 'high', '\(largeUsagePath.path)', \(Int(now.timeIntervalSince1970)), 0);
     """
 ])
-let largeUsageStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [fakeRipgrepPath])
-runner.check(largeUsageStore.loadUsageTotals(now: now)?.day == 1, "large rollout usage totals should use exact token events when fast search is available")
-let largeUsageFallbackStore = CodexUsageStore(codexDirectory: largeUsageRoot, ripgrepCandidates: [])
-runner.check(largeUsageFallbackStore.loadUsageTotals(now: now)?.day == 1, "large rollout usage totals should scan recent token events instead of attributing the whole database total to today when fast search is unavailable")
+let largeUsageStore = CodexUsageStore(codexDirectory: largeUsageRoot)
+runner.check(largeUsageStore.loadUsageTotals(now: now)?.day == 1, "large rollout totals should use token events, never assign a lifetime database total to today")
 
 let tokenCacheRoot = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("CodexNotchTokenCache-\(UUID().uuidString)")

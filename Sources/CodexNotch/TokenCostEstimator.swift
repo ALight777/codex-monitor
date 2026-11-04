@@ -1,6 +1,6 @@
 import Foundation
 
-struct TokenUsageBreakdown: Equatable, Sendable {
+struct TokenUsageBreakdown: Equatable, Hashable, Sendable {
     var inputTokens: Int = 0
     var cachedInputTokens: Int = 0
     var outputTokens: Int = 0

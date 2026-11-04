@@ -38,6 +38,8 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 当前活跃任务的活跃子代理数量。
 - 每个对话的 token 用量和 API 等价花费估算，包含该对话下的子代理用量。
 - 今日、7 天、30 天 token 用量与花费估算；“今日”按电脑当前时区的自然日计算，归档会话仍计入已消耗 token。
+- 历史用量完整读取本机所有会话及归档日志，合并同一对话的多个日志文件，并去除重复累计用量快照；首次建立内存索引，后续只读取新增内容。日志缺失或读取不完整时会显示提示，不将对话生命周期累计用量直接分摊到今日。
+- 同时支持普通 `.jsonl` 和 Codex 自动压缩的 `.jsonl.zst` 历史日志。压缩日志由应用内置解码器流式读取并校验，不依赖 Homebrew，不生成解压副本；未变化的文件直接复用内存索引。
 - Token 数字支持整块悬停和点击：悬停短暂查看、点击固定弹窗，显示未缓存输入、缓存输入和含推理输出的构成。
 
 “实时接口优先”会自动发现新版 Codex / ChatGPT 应用内的 CLI，即使没有对话或日志写入，也按30秒缓存周期主动查询额度（实际触发随刷新频率）。应用升级后重新发现路径。以接口返回的额度为准，任务日志不会因为写入时间较晚而覆盖它。接口读取失败时保留上次成功值并重试；本次运行尚无成功接口结果时才回退本地记录。“仅本地记录”仍只读取本地数据。
@@ -164,8 +166,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.19-arm64.dmg
-dist/codex-monitor-0.1.19-amd64.dmg
+dist/codex-monitor-0.1.21-arm64.dmg
+dist/codex-monitor-0.1.21-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -272,6 +274,8 @@ It can show:
 - Today, 7-day, and 30-day token totals with estimated API-equivalent cost.
 - Hover or click the enlarged token target to inspect uncached input, cached input, and output including reasoning; clicking pins the popover.
 - Today, 7-day, and 30-day token usage totals. Today starts at midnight in the Mac's current time zone, and archived conversations remain part of consumed-token totals.
+- Historical totals scan all local session and archive logs, merge multiple rollouts for each conversation, and deduplicate repeated cumulative usage snapshots. An in-memory index reads only appended data after the first scan. Missing or unreadable logs are flagged; lifetime database totals are not assigned to today.
+- Both `.jsonl` and Codex-compressed `.jsonl.zst` logs are supported. A bundled streaming decoder validates compressed files without Homebrew or unpacked copies on disk; unchanged files reuse the in-memory index.
 
 With the live API preferred, quota comes from the API even when a rollout log has a later write timestamp. Failed reads retain the last successful API value while retrying; local records are used until the first successful API read. Local-only mode continues to use local records exclusively.
 
@@ -393,8 +397,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.19-arm64.dmg
-dist/codex-monitor-0.1.19-amd64.dmg
+dist/codex-monitor-0.1.21-arm64.dmg
+dist/codex-monitor-0.1.21-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

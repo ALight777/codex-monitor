@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="codex监测"
 PACKAGE_NAME="codex-monitor"
-APP_VERSION="0.1.19"
+APP_VERSION="0.1.21"
 BUNDLE_ID="com.alight.codexnotch"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
@@ -30,6 +30,7 @@ create_app_bundle() {
   mkdir -p "$macos_dir" "$resources_dir"
   cp "$binary_path" "$macos_dir/CodexNotch"
   cp "$ROOT_DIR/Resources/AppIcon.icns" "$resources_dir/AppIcon.icns"
+  cp "$ROOT_DIR/Sources/CZstd/LICENSE" "$resources_dir/Zstandard-LICENSE.txt"
 
   cat > "$contents_dir/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

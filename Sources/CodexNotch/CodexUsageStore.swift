@@ -2,22 +2,9 @@ import Foundation
 import Darwin
 
 private enum UsageScanPolicy {
-    static let ripgrepCandidates = [
-        "/Applications/Codex.app/Contents/Resources/rg",
-        "/Applications/ChatGPT.app/Contents/Resources/rg",
-        "/opt/homebrew/bin/rg",
-        "/usr/local/bin/rg",
-        "/usr/bin/rg"
-    ]
     static let runningActivityWindow = 10 * 60
     static let largeSessionTokenScanLimit: UInt64 = 20 * 1024 * 1024
-    static let staleSessionTokenScanLimit: UInt64 = 2 * 1024 * 1024
-    static let recentSessionScanWindow: TimeInterval = 10 * 60
-    static let periodUsageTailLineLimit = 4_000
     static let estimatedTokenLineBytes: UInt64 = 1_300
-    static let periodUsageBucketCount = 32
-    static let periodUsageCacheTTL: TimeInterval = 120
-    static let periodUsageTailCacheCapacity = 512
     static let activeFastCacheTTL: TimeInterval = 12
     static let idleFastCacheTTL: TimeInterval = 60
     static let fastSessionCandidateLimit = 32
@@ -25,7 +12,6 @@ private enum UsageScanPolicy {
     static let activityWatchFileLimit = 16
     static let recentTaskPathCacheCapacity = 360
     static let recentRateLimitPathCacheCapacity = 32
-    static let ripgrepTimeout: DispatchTimeInterval = .seconds(12)
     static let appServerSuccessCacheTTL: TimeInterval = 30
     static let appServerFailureCacheTTL: TimeInterval = 45
 }
@@ -36,19 +22,16 @@ final class CodexUsageStore: @unchecked Sendable {
     private let logsDatabase: String
     private let sessionIndexPath: String
     private let appServerExecutable: String?
-    private let ripgrepCandidates: [String]
     private let calendar: Calendar
     private let sessionDecoder = CodexSessionEventDecoder()
+    private let periodUsageIndex = CodexPeriodUsageIndex()
     private let tokenPattern = /tool_token_count=([0-9]+)/
     private let cacheLock = NSLock()
     private var fastCache: FastSnapshotCache?
     private var recentPathsCache: RecentPathsCache?
     private var recentTaskPathsCache: RecentPathsCache?
     private var appServerRateLimitCache: AppServerRateLimitCache?
-    private var periodUsageCache: PeriodUsageCache?
     private var rateLimitFileCache: [String: FileValueCache<RateLimitSnapshot>] = [:]
-    private var periodUsageBatchCache: [Int: PeriodUsageBatchCache] = [:]
-    private var periodUsageTailCache: [PeriodUsageTailCacheKey: FileValueCache<[PeriodUsageEvent]>] = [:]
     private var sessionTokenTotalCache: [String: SessionTokenTotalCache] = [:]
     private var sessionIndexNamesCache: FileValueCache<[String: String]>?
     private var sessionMetaCache: [String: FileValueCache<SessionMetaInfo>] = [:]
@@ -58,12 +41,10 @@ final class CodexUsageStore: @unchecked Sendable {
 
     init(
         codexDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"),
-        ripgrepCandidates: [String] = UsageScanPolicy.ripgrepCandidates,
         appServerExecutable: String? = nil,
         calendar: Calendar = .autoupdatingCurrent
     ) {
         self.codexDirectory = codexDirectory
-        self.ripgrepCandidates = ripgrepCandidates
         self.calendar = calendar
         self.appServerExecutable = appServerExecutable
         self.stateDatabase = Self.latestSQLiteDatabase(
@@ -209,6 +190,7 @@ final class CodexUsageStore: @unchecked Sendable {
                 usage7dSummary: usage.weekSummary,
                 usage30dSummary: usage.monthSummary,
                 usageTodaySummary: usage.todaySummary,
+                usageCoverage: usage.coverage,
                 tasks: tasks,
                 isRunning: tasks.contains { $0.status == .running },
                 lastUpdated: now,
@@ -226,24 +208,13 @@ final class CodexUsageStore: @unchecked Sendable {
         guard !isCancelled() else {
             return nil
         }
-        let periodThreads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
-        let sessionThreads = loadSessionUsageThreads(
-            range: .month,
+        let periodThreads = try? loadThreadsForPeriodUsage(now: now)
+        return try? loadPeriodUsage(
             now: now,
-            knownTokens: tokenMap(from: periodThreads),
-            knownThreadIDs: knownThreadIDsWithRolloutPaths(from: periodThreads)
+            threads: periodThreads ?? [],
+            databaseAvailable: periodThreads != nil,
+            isCancelled: isCancelled
         )
-        let usageThreads = mergeThreadRecords(periodThreads + sessionThreads)
-        guard !isCancelled(),
-              !usageThreads.isEmpty,
-              let usage = try? loadPeriodUsage(
-                now: now,
-                threads: usageThreads,
-                isCancelled: isCancelled
-              ) else {
-            return nil
-        }
-        return usage
     }
 
     func rateLimitWatchPaths() -> [String] {
@@ -271,21 +242,12 @@ final class CodexUsageStore: @unchecked Sendable {
     }
 
     private func loadUsageTotals(now: Date, fallbackThreads: [ThreadRecord]?) -> PeriodUsage? {
-        let periodThreads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
-        let knownTokens = tokenMap(from: periodThreads + (fallbackThreads ?? []))
-        let sessionThreads = loadSessionUsageThreads(
-            range: .month,
+        let periodThreads = try? loadThreadsForPeriodUsage(now: now)
+        return try? loadPeriodUsage(
             now: now,
-            knownTokens: knownTokens,
-            knownThreadIDs: knownThreadIDsWithRolloutPaths(
-                from: periodThreads + (fallbackThreads ?? [])
-            )
+            threads: mergeThreadRecords((periodThreads ?? []) + (fallbackThreads ?? [])),
+            databaseAvailable: periodThreads != nil
         )
-        let usageThreads = mergeThreadRecords(periodThreads + sessionThreads + (fallbackThreads ?? []))
-        guard !usageThreads.isEmpty else {
-            return nil
-        }
-        return try? loadPeriodUsage(now: now, threads: usageThreads)
     }
 
     private func cachedFastSnapshot(
@@ -333,6 +295,7 @@ final class CodexUsageStore: @unchecked Sendable {
             usage7dSummary: usage.weekSummary,
             usage30dSummary: usage.monthSummary,
             usageTodaySummary: usage.todaySummary,
+            usageCoverage: usage.coverage,
             tasks: tasks,
             isRunning: tasks.contains { $0.status == .running },
             lastUpdated: now,
@@ -458,53 +421,6 @@ final class CodexUsageStore: @unchecked Sendable {
             reasoningEffort: runtime?.reasoningEffort,
             rolloutPath: candidate.path,
             updatedAt: candidate.updatedAt
-        )
-    }
-
-    private func loadSessionUsageThreads(
-        range: TaskHistoryRange,
-        now: Date,
-        knownTokens: [String: Int] = [:],
-        knownThreadIDs: Set<String> = []
-    ) -> [ThreadRecord] {
-        loadRecentSessionCandidates(
-            range: range,
-            now: now,
-            knownTokens: knownTokens
-        ).compactMap { candidate in
-            guard !knownThreadIDs.contains(candidate.sessionID.lowercased()) else {
-                return nil
-            }
-            let tokensUsed = tokenTotalForPeriodUsage(
-                path: candidate.path,
-                databaseTokens: candidate.databaseTokens,
-                modifiedAt: candidate.modifiedAt,
-                now: now
-            )
-            guard tokensUsed > 0 else {
-                return nil
-            }
-
-            return ThreadRecord(
-                id: candidate.sessionID,
-                title: "",
-                tokensUsed: tokensUsed,
-                model: nil,
-                reasoningEffort: nil,
-                rolloutPath: candidate.path,
-                updatedAt: candidate.updatedAt
-            )
-        }
-    }
-
-    private func knownThreadIDsWithRolloutPaths(from threads: [ThreadRecord]) -> Set<String> {
-        Set(
-            threads.lazy
-                .filter {
-                    !$0.rolloutPath.isEmpty
-                        && FileManager.default.fileExists(atPath: $0.rolloutPath)
-                }
-                .map { $0.id.lowercased() }
         )
     }
 
@@ -748,45 +664,6 @@ final class CodexUsageStore: @unchecked Sendable {
         return max(databaseTokens, sessionTokenTotal(from: path) ?? 0)
     }
 
-    private func tokenTotalForPeriodUsage(
-        path: String,
-        databaseTokens: Int,
-        modifiedAt: Date,
-        now: Date
-    ) -> Int {
-        guard !path.isEmpty else {
-            return databaseTokens
-        }
-
-        let signature = fileSignature(path)
-        guard signature.exists else {
-            return databaseTokens
-        }
-
-        if sessionMeta(from: path)?.isSubagent == true {
-            return sessionTokenTotal(from: path) ?? 0
-        }
-
-        if databaseTokens > 0, signature.size > UsageScanPolicy.largeSessionTokenScanLimit {
-            return databaseTokens
-        }
-
-        let changedRecently = now.timeIntervalSince(modifiedAt) < UsageScanPolicy.recentSessionScanWindow
-        if changedRecently {
-            return max(databaseTokens, sessionTokenTotal(from: path) ?? 0)
-        }
-
-        if databaseTokens > 0 {
-            return databaseTokens
-        }
-
-        guard signature.size <= UsageScanPolicy.staleSessionTokenScanLimit else {
-            return 0
-        }
-
-        return sessionTokenTotal(from: path) ?? 0
-    }
-
     private func tokenMap(from threads: [ThreadRecord]) -> [String: Int] {
         Dictionary(
             threads.map { ($0.id.lowercased(), $0.tokensUsed) },
@@ -934,7 +811,7 @@ final class CodexUsageStore: @unchecked Sendable {
         """
         return withSessionIndexNames(
             try Shell.sqliteJSON(database: stateDatabase, query: legacyQuery, as: [ThreadRecord].self)
-        ).filter { !isSubagentThread($0) }
+        )
     }
 
     private func withSessionIndexNames(_ threads: [ThreadRecord]) -> [ThreadRecord] {
@@ -1007,36 +884,22 @@ final class CodexUsageStore: @unchecked Sendable {
     private func loadPeriodUsage(
         now: Date,
         threads: [ThreadRecord],
+        databaseAvailable: Bool,
         isCancelled: @Sendable () -> Bool = { false }
     ) throws -> PeriodUsage {
-        guard !isCancelled() else {
-            throw CancellationError()
-        }
-        let rolloutPaths = Array(Set(threads.map(\.rolloutPath)).filter { !$0.isEmpty }).sorted()
-        let signature = makeUsageSignature(for: rolloutPaths)
-        if let signature,
-           let cached = cachedPeriodUsage(now: now, signature: signature) {
-            return cached
-        }
-
-        guard let rolloutUsage = loadPeriodUsageFromRollouts(
-            now: now,
+        guard let rolloutUsage = periodUsageIndex.load(
+            directory: codexDirectory,
             threads: threads,
+            databaseAvailable: databaseAvailable,
+            calendar: calendar,
+            now: now,
             isCancelled: isCancelled
-        ) else {
-            throw CancellationError()
-        }
-        guard !isCancelled() else {
+        ), !isCancelled() else {
             throw CancellationError()
         }
         let logUsage = (try? loadPeriodUsageFromLogs(now: now)) ?? .zero
-        let usage = maxPeriodUsage(rolloutUsage, logUsage)
-
-        if let signature {
-            cachePeriodUsage(usage, signature: signature, now: now)
-        }
-
-        return usage
+        guard !isCancelled() else { throw CancellationError() }
+        return maxPeriodUsage(rolloutUsage, logUsage)
     }
 
     private func maxPeriodUsage(_ lhs: PeriodUsage, _ rhs: PeriodUsage) -> PeriodUsage {
@@ -1084,28 +947,9 @@ final class CodexUsageStore: @unchecked Sendable {
                 lhsSummary: lhs.todaySummary,
                 rhsTokens: rhs.today,
                 rhsSummary: rhs.todaySummary
-            )
+            ),
+            coverage: lhs.coverage
         )
-    }
-
-    private func cachedPeriodUsage(now: Date, signature: StoreSignature) -> PeriodUsage? {
-        cacheLock.lock()
-        let cache = periodUsageCache
-        cacheLock.unlock()
-
-        guard let cache,
-              cache.signature == signature,
-              calendar.isDate(cache.createdAt, inSameDayAs: now),
-              now.timeIntervalSince(cache.createdAt) < UsageScanPolicy.periodUsageCacheTTL else {
-            return nil
-        }
-        return cache.usage
-    }
-
-    private func cachePeriodUsage(_ usage: PeriodUsage, signature: StoreSignature, now: Date) {
-        cacheLock.lock()
-        periodUsageCache = PeriodUsageCache(createdAt: now, signature: signature, usage: usage)
-        cacheLock.unlock()
     }
 
     private func loadPeriodUsageFromLogs(now: Date) throws -> PeriodUsage {
@@ -1117,12 +961,13 @@ final class CodexUsageStore: @unchecked Sendable {
           and feedback_log_body like '%event.kind=response.completed%'
           and feedback_log_body like '%tool_token_count=%'
           and ts >= \(oldest)
+          and ts <= \(Int(now.timeIntervalSince1970))
         order by ts desc;
         """
 
         let records = try Shell.sqliteJSON(database: logsDatabase, query: query, as: [UsageLogRecord].self)
         let dayStart = Int(now.timeIntervalSince1970) - (24 * 60 * 60)
-        let todayStart = Int(localDayStart(for: now).timeIntervalSince1970)
+        let todayStart = Int(calendar.startOfDay(for: now).timeIntervalSince1970)
         let weekStart = Int(now.timeIntervalSince1970) - (7 * 24 * 60 * 60)
 
         var today = 0
@@ -1156,554 +1001,6 @@ final class CodexUsageStore: @unchecked Sendable {
             monthSummary: .unpriced(totalTokens: month),
             todaySummary: .unpriced(totalTokens: today)
         )
-    }
-
-    private func loadPeriodUsageFromRollouts(
-        now: Date,
-        threads: [ThreadRecord],
-        isCancelled: @Sendable () -> Bool
-    ) -> PeriodUsage? {
-        let dayStart = now.addingTimeInterval(-24 * 60 * 60)
-        let todayStart = localDayStart(for: now)
-        let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
-        let monthStart = now.addingTimeInterval(-30 * 24 * 60 * 60)
-
-        var today = 0
-        var day = 0
-        var week = 0
-        var month = 0
-        var todaySummary = TokenUsageSummary.zero
-        var daySummary = TokenUsageSummary.zero
-        var weekSummary = TokenUsageSummary.zero
-        var monthSummary = TokenUsageSummary.zero
-
-        func add(summary: TokenUsageSummary, date: Date) {
-            guard summary.totalTokens > 0, date >= monthStart else {
-                return
-            }
-
-            month += summary.totalTokens
-            monthSummary.add(summary)
-            if date >= todayStart {
-                today += summary.totalTokens
-                todaySummary.add(summary)
-            }
-            if date >= weekStart {
-                week += summary.totalTokens
-                weekSummary.add(summary)
-            }
-            if date >= dayStart {
-                day += summary.totalTokens
-                daySummary.add(summary)
-            }
-        }
-
-        func add(tokens: Int, model: String?, date: Date) {
-            add(summary: .unpriced(totalTokens: tokens, model: model), date: date)
-        }
-
-        var recordsByPath: [String: ThreadRecord] = [:]
-        for thread in threads where !thread.rolloutPath.isEmpty {
-            if let existing = recordsByPath[thread.rolloutPath] {
-                recordsByPath[thread.rolloutPath] = mergeThreadRecord(existing, with: thread)
-            } else {
-                recordsByPath[thread.rolloutPath] = thread
-            }
-        }
-
-        let mainPaths = recordsByPath.values.compactMap { thread -> String? in
-            guard sessionMeta(from: thread.rolloutPath)?.isSubagent != true else {
-                return nil
-            }
-            return thread.rolloutPath
-        }.sorted()
-
-        if let mainUsage = loadPeriodUsageWithRipgrep(
-            now: now,
-            paths: mainPaths,
-            isCancelled: isCancelled
-        ) {
-            today = mainUsage.today
-            day = mainUsage.day
-            week = mainUsage.week
-            month = mainUsage.month
-            todaySummary = mainUsage.todaySummary
-            daySummary = mainUsage.daySummary
-            weekSummary = mainUsage.weekSummary
-            monthSummary = mainUsage.monthSummary
-
-            for thread in recordsByPath.values where sessionMeta(from: thread.rolloutPath)?.isSubagent == true {
-                guard !isCancelled() else {
-                    return nil
-                }
-                if let scanned = loadPeriodUsageFromRolloutTail(
-                    now: now,
-                    path: thread.rolloutPath,
-                    resetOnWorldState: true,
-                    initialModel: thread.model
-                ) {
-                    today += scanned.today
-                    day += scanned.day
-                    week += scanned.week
-                    month += scanned.month
-                    todaySummary.add(scanned.todaySummary)
-                    daySummary.add(scanned.daySummary)
-                    weekSummary.add(scanned.weekSummary)
-                    monthSummary.add(scanned.monthSummary)
-                } else {
-                    add(
-                        tokens: thread.tokensUsed,
-                        model: thread.model,
-                        date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
-                    )
-                }
-            }
-            return PeriodUsage(
-                day: day,
-                week: week,
-                month: month,
-                today: today,
-                daySummary: daySummary,
-                weekSummary: weekSummary,
-                monthSummary: monthSummary,
-                todaySummary: todaySummary
-            )
-        }
-
-        guard !isCancelled() else {
-            return nil
-        }
-
-        for thread in recordsByPath.values {
-            guard !isCancelled() else {
-                return nil
-            }
-            let signature = fileSignature(thread.rolloutPath)
-            if signature.exists {
-                if let scanned = loadPeriodUsageFromRolloutTail(
-                    now: now,
-                    path: thread.rolloutPath,
-                    resetOnWorldState: sessionMeta(from: thread.rolloutPath)?.isSubagent == true,
-                    initialModel: thread.model
-                ) {
-                    today += scanned.today
-                    day += scanned.day
-                    week += scanned.week
-                    month += scanned.month
-                    todaySummary.add(scanned.todaySummary)
-                    daySummary.add(scanned.daySummary)
-                    weekSummary.add(scanned.weekSummary)
-                    monthSummary.add(scanned.monthSummary)
-                }
-                continue
-            }
-
-            if thread.tokensUsed > 0 {
-                add(
-                    tokens: thread.tokensUsed,
-                    model: thread.model,
-                    date: Date(timeIntervalSince1970: TimeInterval(thread.updatedAt))
-                )
-            }
-        }
-
-        return PeriodUsage(
-            day: day,
-            week: week,
-            month: month,
-            today: today,
-            daySummary: daySummary,
-            weekSummary: weekSummary,
-            monthSummary: monthSummary,
-            todaySummary: todaySummary
-        )
-    }
-
-    private func loadPeriodUsageFromRolloutTail(
-        now: Date,
-        path: String,
-        resetOnWorldState: Bool = false,
-        initialModel: String? = nil
-    ) -> PeriodUsage? {
-        let signature = fileSignature(path)
-        guard signature.exists else {
-            return nil
-        }
-        let cacheKey = PeriodUsageTailCacheKey(
-            path: path,
-            resetOnWorldState: resetOnWorldState,
-            initialModel: initialModel
-        )
-
-        cacheLock.lock()
-        let cached = periodUsageTailCache[cacheKey]
-        cacheLock.unlock()
-        if let cached, cached.signature == signature {
-            return cached.value.map { periodUsage(from: $0, now: now) }
-        }
-
-        guard let tailEvents = usageEvents(
-            from: path,
-            lineLimit: UsageScanPolicy.periodUsageTailLineLimit,
-            resetOnWorldState: resetOnWorldState
-        ) else {
-            return nil
-        }
-
-        var events: [PeriodUsageEvent] = []
-        var currentModel = initialModel ?? sessionRuntimeInfo(from: path)?.model
-
-        for tailEvent in tailEvents {
-            switch tailEvent {
-            case .worldState:
-                if resetOnWorldState {
-                    events.removeAll(keepingCapacity: true)
-                    currentModel = nil
-                }
-            case .turnContext(let model):
-                if let model {
-                    currentModel = model
-                }
-            case .tokenCount(let timestampPrefix, let tokenUsage):
-                var summary = TokenUsageSummary.zero
-                summary.add(tokenUsage, model: currentModel)
-                events.append(
-                    PeriodUsageEvent(
-                        timestampPrefix: timestampPrefix,
-                        summary: summary
-                    )
-                )
-            }
-        }
-
-        cacheLock.lock()
-        periodUsageTailCache[cacheKey] = FileValueCache(signature: signature, value: events)
-        if periodUsageTailCache.count > UsageScanPolicy.periodUsageTailCacheCapacity {
-            let retainedKeys = Set(
-                periodUsageTailCache.keys
-                    .sorted { lhs, rhs in
-                        (periodUsageTailCache[lhs]?.signature.modifiedAt ?? 0)
-                            > (periodUsageTailCache[rhs]?.signature.modifiedAt ?? 0)
-                    }
-                    .prefix(UsageScanPolicy.periodUsageTailCacheCapacity)
-            )
-            periodUsageTailCache = periodUsageTailCache.filter { retainedKeys.contains($0.key) }
-        }
-        cacheLock.unlock()
-        return periodUsage(from: events, now: now)
-    }
-
-    private func periodUsage(from events: [PeriodUsageEvent], now: Date) -> PeriodUsage {
-        let dayCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-24 * 60 * 60))
-        let todayCutoff = timestampSecondPrefix(for: localDayStart(for: now))
-        let weekCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-7 * 24 * 60 * 60))
-        let monthCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-30 * 24 * 60 * 60))
-        var usage = PeriodUsage.zero
-
-        for event in events where event.timestampPrefix >= monthCutoff {
-            usage.monthSummary.add(event.summary)
-            if event.timestampPrefix >= weekCutoff {
-                usage.weekSummary.add(event.summary)
-            }
-            if event.timestampPrefix >= dayCutoff {
-                usage.daySummary.add(event.summary)
-            }
-            if event.timestampPrefix >= todayCutoff {
-                usage.todaySummary.add(event.summary)
-            }
-        }
-
-        usage.day = usage.daySummary.totalTokens
-        usage.week = usage.weekSummary.totalTokens
-        usage.month = usage.monthSummary.totalTokens
-        usage.today = usage.todaySummary.totalTokens
-        return usage
-    }
-
-    private func loadPeriodUsageWithRipgrep(
-        now: Date,
-        paths: [String],
-        isCancelled: @Sendable () -> Bool = { false }
-    ) -> PeriodUsage? {
-        guard let executable = ripgrepExecutable(),
-              !paths.isEmpty,
-              !isCancelled() else {
-            return nil
-        }
-
-        let buckets = Dictionary(grouping: paths, by: periodUsageBucket(for:))
-        var staleBuckets: [Int: [String]] = [:]
-        var bucketSignatures: [Int: StoreSignature] = [:]
-
-        cacheLock.lock()
-        for bucket in buckets.keys.sorted() {
-            guard let bucketPaths = buckets[bucket] else {
-                continue
-            }
-            let sortedPaths = bucketPaths.sorted()
-            let signature = StoreSignature(
-                files: sortedPaths.map(fileSignature).sorted { $0.path < $1.path }
-            )
-            bucketSignatures[bucket] = signature
-
-            if periodUsageBatchCache[bucket]?.signature != signature {
-                staleBuckets[bucket] = sortedPaths
-            }
-        }
-        periodUsageBatchCache = periodUsageBatchCache.filter { buckets[$0.key] != nil }
-        cacheLock.unlock()
-
-        if !staleBuckets.isEmpty {
-            guard let refreshedEvents = periodUsageEvents(
-                executable: executable,
-                buckets: staleBuckets,
-                isCancelled: isCancelled
-            ) else {
-                return nil
-            }
-
-            cacheLock.lock()
-            for bucket in staleBuckets.keys.sorted() {
-                let bucketEvents = refreshedEvents[bucket] ?? []
-                if let signature = bucketSignatures[bucket] {
-                    periodUsageBatchCache[bucket] = PeriodUsageBatchCache(
-                        signature: signature,
-                        events: bucketEvents
-                    )
-                }
-            }
-            cacheLock.unlock()
-        }
-
-        cacheLock.lock()
-        let currentBatches = periodUsageBatchCache
-        cacheLock.unlock()
-
-        let dayCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-24 * 60 * 60))
-        let todayCutoff = timestampSecondPrefix(for: localDayStart(for: now))
-        let weekCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-7 * 24 * 60 * 60))
-        let monthCutoff = timestampSecondPrefix(for: now.addingTimeInterval(-30 * 24 * 60 * 60))
-
-        var todaySummary = TokenUsageSummary.zero
-        var daySummary = TokenUsageSummary.zero
-        var weekSummary = TokenUsageSummary.zero
-        var monthSummary = TokenUsageSummary.zero
-
-        for bucket in buckets.keys.sorted() {
-            guard let batch = currentBatches[bucket] else {
-                continue
-            }
-            for event in batch.events {
-                guard event.timestampPrefix >= monthCutoff else {
-                    continue
-                }
-
-                monthSummary.add(event.summary)
-                if event.timestampPrefix >= todayCutoff {
-                    todaySummary.add(event.summary)
-                }
-                if event.timestampPrefix >= weekCutoff {
-                    weekSummary.add(event.summary)
-                }
-                if event.timestampPrefix >= dayCutoff {
-                    daySummary.add(event.summary)
-                }
-            }
-        }
-
-        return PeriodUsage(
-            day: daySummary.totalTokens,
-            week: weekSummary.totalTokens,
-            month: monthSummary.totalTokens,
-            today: todaySummary.totalTokens,
-            daySummary: daySummary,
-            weekSummary: weekSummary,
-            monthSummary: monthSummary,
-            todaySummary: todaySummary
-        )
-    }
-
-    private func localDayStart(for date: Date) -> Date {
-        calendar.startOfDay(for: date)
-    }
-
-    private func periodUsageEvents(
-        executable: String,
-        buckets: [Int: [String]],
-        isCancelled: @Sendable () -> Bool
-    ) -> [Int: [PeriodUsageEvent]]? {
-        let arguments = buckets.keys.sorted().flatMap { bucket -> [String] in
-            ["__CODEX_NOTCH_BUCKET_\(bucket)"] + (buckets[bucket] ?? [])
-        }
-        guard let output = runRipgrepTokenSearch(
-            executable: executable,
-            paths: arguments,
-            isCancelled: isCancelled
-        ) else {
-            return nil
-        }
-
-        var eventsByBucket: [Int: [PeriodUsageEvent]] = [:]
-        var currentBucket: Int?
-        var currentEvents: [PeriodUsageEvent] = []
-        var currentModel: String?
-        let markerPrefix = "{\"__codex_notch_bucket\":"
-        let fileMarker = "{\"__codex_notch_file\":true}"
-
-        func flushCurrentBucket() {
-            guard let currentBucket else {
-                return
-            }
-            eventsByBucket[currentBucket] = currentEvents
-            currentEvents = []
-        }
-
-        for rawLine in output.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard !isCancelled() else {
-                return nil
-            }
-            if rawLine.hasPrefix(markerPrefix) {
-                flushCurrentBucket()
-                let value = rawLine
-                    .dropFirst(markerPrefix.count)
-                    .prefix(while: { $0.isNumber })
-                currentBucket = Int(value)
-                currentModel = nil
-                continue
-            }
-
-            if rawLine.hasPrefix(fileMarker) {
-                currentModel = nil
-                continue
-            }
-
-            guard currentBucket != nil,
-                  let jsonStart = rawLine.firstIndex(of: "{") else {
-                continue
-            }
-            let line = String(rawLine[jsonStart...])
-            if let model = sessionDecoder.turnContextModel(from: line) {
-                currentModel = model
-                continue
-            }
-            guard let event = sessionDecoder.tokenUsageRecord(from: line) else {
-                continue
-            }
-            var summary = TokenUsageSummary.zero
-            summary.add(event.usage, model: currentModel)
-            currentEvents.append(
-                PeriodUsageEvent(
-                    timestampPrefix: event.timestampPrefix,
-                    summary: summary
-                )
-            )
-        }
-        flushCurrentBucket()
-        return eventsByBucket
-    }
-
-    private func periodUsageBucket(for path: String) -> Int {
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in path.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return Int(hash % UInt64(UsageScanPolicy.periodUsageBucketCount))
-    }
-
-    private func runRipgrepTokenSearch(
-        executable: String,
-        paths: [String],
-        isCancelled: @Sendable () -> Bool
-    ) -> String? {
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codex-notch-token-lines-\(UUID().uuidString).txt")
-        defer {
-            try? FileManager.default.removeItem(at: outputURL)
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = [
-            "-c",
-            """
-            rg="$1"
-            out="$2"
-            bytes="$3"
-            shift 3
-            {
-              for path in "$@"; do
-                case "$path" in
-                  __CODEX_NOTCH_BUCKET_*)
-                    bucket="${path#__CODEX_NOTCH_BUCKET_}"
-                    printf '{"__codex_notch_bucket":%s,"token_count":false}\\n' "$bucket"
-                    ;;
-                  *)
-                    printf '{"__codex_notch_file":true}\\n'
-                    /usr/bin/tail -c "$bytes" -- "$path"
-                    printf '\\n'
-                    ;;
-                esac
-              done
-            } | "$rg" --fixed-strings --no-heading --color never \\
-                -e '"token_count"' -e '"turn_context"' \\
-                -e '"__codex_notch_bucket"' -e '"__codex_notch_file"' > "$out"
-            rg_status=$?
-            if [ "$rg_status" -eq 1 ]; then
-              exit 0
-            fi
-            exit "$rg_status"
-            """,
-            "codex-notch-token-search",
-            executable,
-            outputURL.path,
-            String(UsageScanPolicy.periodUsageTailLineLimit * Int(UsageScanPolicy.estimatedTokenLineBytes))
-        ] + paths
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        let completed = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
-            completed.signal()
-        }
-
-        let deadline = DispatchTime.now() + UsageScanPolicy.ripgrepTimeout
-        var didComplete = false
-        while !didComplete, !isCancelled(), DispatchTime.now() < deadline {
-            didComplete = completed.wait(timeout: .now() + .milliseconds(100)) == .success
-        }
-        if !didComplete {
-            Shell.terminateProcessTree(rootPID: process.processIdentifier, signal: SIGTERM)
-            if completed.wait(timeout: .now() + .milliseconds(200)) == .timedOut {
-                Shell.terminateProcessTree(rootPID: process.processIdentifier, signal: SIGKILL)
-                _ = completed.wait(timeout: .now() + .milliseconds(300))
-            }
-            return nil
-        }
-
-        guard let data = try? Data(contentsOf: outputURL) else {
-            return nil
-        }
-
-        if !data.isEmpty {
-            return String(decoding: data, as: UTF8.self)
-        }
-
-        guard process.terminationStatus == 0 else {
-            return nil
-        }
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    private func ripgrepExecutable() -> String? {
-        ripgrepCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     private func loadActiveThreadIDs(now: Date) throws -> Set<String> {
@@ -2841,66 +2138,12 @@ final class CodexUsageStore: @unchecked Sendable {
         }
     }
 
-    private func usageEvents(
-        from rolloutPath: String,
-        lineLimit: Int,
-        resetOnWorldState: Bool
-    ) -> [CodexUsageTailEvent]? {
-        guard FileManager.default.fileExists(atPath: rolloutPath) else {
-            return nil
-        }
-
-        do {
-            let data = try Data(
-                contentsOf: URL(fileURLWithPath: rolloutPath),
-                options: .mappedIfSafe
-            )
-            let bytesPerLine = UsageScanPolicy.estimatedTokenLineBytes
-            let maximumBytes = UInt64(lineLimit) * bytesPerLine
-            let start = max(0, data.count - Int(min(UInt64(data.count), maximumBytes)))
-            return CodexUsageEventLineScanner.events(
-                in: data,
-                lineLimit: lineLimit,
-                dropLeadingPartialLine: start > 0,
-                startingAt: start,
-                resetAfterLastWorldState: resetOnWorldState
-            )
-        } catch {
-            return nil
-        }
-    }
-
     private func tokenCountTokens(from line: String) -> Int? {
         sessionDecoder.tokenCountTokens(from: line)
     }
 
-    private func parseTokenCountEvent(_ line: String) -> (date: Date, tokens: Int)? {
-        guard let event = sessionDecoder.tokenCountEvent(from: line) else {
-            return nil
-        }
-        return (event.date, event.tokens)
-    }
-
-    private func timestampSecondPrefix(for date: Date) -> String {
-        sessionDecoder.timestampSecondPrefix(for: date)
-    }
-
-    private func timestampSecondPrefix(from timestamp: String) -> String? {
-        sessionDecoder.timestampSecondPrefix(from: timestamp)
-    }
-
     private func parseTimestamp(_ value: String) -> Date? {
         sessionDecoder.parseTimestamp(value)
-    }
-
-    private func makeUsageSignature(for rolloutPaths: [String]) -> StoreSignature? {
-        let databasePaths = sqliteFileSet(stateDatabase) + sqliteFileSet(logsDatabase) + [sessionIndexPath]
-        let paths = databasePaths + rolloutPaths.filter { !$0.isEmpty }
-        guard !paths.isEmpty else {
-            return nil
-        }
-
-        return StoreSignature(files: paths.map(fileSignature).sorted { $0.path < $1.path })
     }
 
     private func makeSnapshotSignature(for rolloutPaths: [String]) -> StoreSignature? {
@@ -3013,28 +2256,6 @@ private struct AppServerRateLimitCache {
         case success(RateLimitSnapshot)
         case failure
     }
-}
-
-private struct PeriodUsageCache {
-    let createdAt: Date
-    let signature: StoreSignature
-    let usage: PeriodUsage
-}
-
-private struct PeriodUsageBatchCache {
-    let signature: StoreSignature
-    let events: [PeriodUsageEvent]
-}
-
-private struct PeriodUsageEvent {
-    let timestampPrefix: String
-    let summary: TokenUsageSummary
-}
-
-private struct PeriodUsageTailCacheKey: Hashable {
-    let path: String
-    let resetOnWorldState: Bool
-    let initialModel: String?
 }
 
 private struct AppServerRateLimitResponse: Decodable {

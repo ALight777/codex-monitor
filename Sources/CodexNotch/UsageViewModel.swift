@@ -97,6 +97,11 @@ final class UsageViewModel: ObservableObject {
                 mergedSnapshot.usage7d = self.snapshot.usage7d
                 mergedSnapshot.usage30d = self.snapshot.usage30d
                 mergedSnapshot.usageToday = self.snapshot.usageToday
+                mergedSnapshot.usage24hSummary = self.snapshot.usage24hSummary
+                mergedSnapshot.usage7dSummary = self.snapshot.usage7dSummary
+                mergedSnapshot.usage30dSummary = self.snapshot.usage30dSummary
+                mergedSnapshot.usageTodaySummary = self.snapshot.usageTodaySummary
+                mergedSnapshot.usageCoverage = self.snapshot.usageCoverage
                 self.snapshot = mergedSnapshot
                 self.isRefreshingSnapshot = false
                 self.updateRefreshingState()
@@ -239,6 +244,7 @@ final class UsageViewModel: ObservableObject {
                     self.snapshot.usage7dSummary = usage.weekSummary
                     self.snapshot.usage30dSummary = usage.monthSummary
                     self.snapshot.usageTodaySummary = usage.todaySummary
+                    self.snapshot.usageCoverage = usage.coverage
                 }
                 self.hasLoadedUsageTotals = self.usageLoadState.hasSuccessfulValue
                 switch completion {
@@ -566,7 +572,8 @@ final class UsageViewModel: ObservableObject {
             daySummary: snapshot.usage24hSummary,
             weekSummary: snapshot.usage7dSummary,
             monthSummary: snapshot.usage30dSummary,
-            todaySummary: snapshot.usageTodaySummary
+            todaySummary: snapshot.usageTodaySummary,
+            coverage: snapshot.usageCoverage
         )
     }
 
@@ -593,6 +600,7 @@ final class UsageViewModel: ObservableObject {
             snapshot.usage7dSummary = previous.usage7dSummary
             snapshot.usage30dSummary = previous.usage30dSummary
             snapshot.usageTodaySummary = previous.usageTodaySummary
+            snapshot.usageCoverage = previous.usageCoverage
         }
 
         if snapshot.errorMessage != nil {

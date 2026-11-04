@@ -11,8 +11,15 @@ let package = Package(
         .executable(name: "CodexNotch", targets: ["CodexNotch"])
     ],
     targets: [
+        .target(
+            name: "CZstd",
+            path: "Sources/CZstd",
+            exclude: ["LICENSE", "UPSTREAM.md"],
+            publicHeadersPath: "include"
+        ),
         .executableTarget(
             name: "CodexNotch",
+            dependencies: ["CZstd"],
             path: "Sources/CodexNotch",
             linkerSettings: [
                 .linkedLibrary("sqlite3")

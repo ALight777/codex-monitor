@@ -12,8 +12,12 @@ fi
 
 swift test -c release --build-path "${BUILD_DIR}/package-build"
 
+clang -O2 -c "${ROOT_DIR}/Sources/CZstd/zstddeclib.c" -o "${BUILD_DIR}/zstddeclib.o"
+
 swiftc \
   -swift-version 6 \
+  -I "${ROOT_DIR}/Sources/CZstd/include" \
+  "${BUILD_DIR}/zstddeclib.o" \
   "${ROOT_DIR}/Sources/CodexNotch/DetailPresentation.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/TokenCostEstimator.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/TokenPricingUpdater.swift" \
@@ -31,6 +35,8 @@ swiftc \
   "${ROOT_DIR}/Sources/CodexNotch/KeychainStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/SecretStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexSessionEventDecoder.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/CodexPeriodUsageIndex.swift" \
+  "${ROOT_DIR}/Sources/CodexNotch/CodexZstdReader.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexNotchSettings.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/CodexUsageStore.swift" \
   "${ROOT_DIR}/Sources/CodexNotch/BalanceMonitorModels.swift" \

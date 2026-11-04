@@ -64,7 +64,6 @@ func todayUsageUsesComputerCalendarAndIncludesArchivedThreads() throws {
 
     let store = CodexUsageStore(
         codexDirectory: root,
-        ripgrepCandidates: [],
         calendar: calendar
     )
     let usage = try #require(store.loadUsageTotals(now: now))
@@ -138,7 +137,6 @@ func subagentUsageIgnoresInheritedDatabaseTotalsAndInvalidatesOnlyChangedTailDat
 
     let store = CodexUsageStore(
         codexDirectory: root,
-        ripgrepCandidates: [],
         calendar: calendar
     )
     #expect(store.loadUsageTotals(now: now)?.today == 120)
@@ -230,7 +228,6 @@ func suffixedRolloutsAndDatabasePathsKeepActiveTasksLinkedToTheirThreadIDs() thr
 
     let store = CodexUsageStore(
         codexDirectory: root,
-        ripgrepCandidates: [],
         calendar: calendar
     )
     let snapshot = store.loadSnapshot(

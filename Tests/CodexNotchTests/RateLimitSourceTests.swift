@@ -128,7 +128,7 @@ func rateLimitSourceRetainsLastSuccessDuringFailedRefreshAndRetryBackoff() throw
         insert into threads values('test-quota', 'quota', 0, '', '', '\(rollout.path)',
           \(Int(now.timeIntervalSince1970)), 0, 'cli');
         """])
-    let store = CodexUsageStore(codexDirectory: root, ripgrepCandidates: [], appServerExecutable: executable.path)
+    let store = CodexUsageStore(codexDirectory: root, appServerExecutable: executable.path)
     func writeResponse(remaining: Int, reset: Int) throws {
         try (#"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","planType":"pro","primary":{"usedPercent":\#(100 - remaining),"windowDurationMins":10080,"resetsAt":\#(reset)}}}}"# + "\n")
             .write(to: response, atomically: true, encoding: .utf8)

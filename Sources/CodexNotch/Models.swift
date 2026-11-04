@@ -53,6 +53,7 @@ struct UsageSnapshot: Equatable {
     var usage7dSummary: TokenUsageSummary = .zero
     var usage30dSummary: TokenUsageSummary = .zero
     var usageTodaySummary: TokenUsageSummary = .zero
+    var usageCoverage: UsageCoverage = .init()
     var tasks: [CodexTask]
     var isRunning: Bool
     var lastUpdated: Date
@@ -189,8 +190,32 @@ struct PeriodUsage: Equatable, Sendable {
     var weekSummary: TokenUsageSummary = .zero
     var monthSummary: TokenUsageSummary = .zero
     var todaySummary: TokenUsageSummary = .zero
+    var coverage: UsageCoverage = .init()
 
     static let zero = PeriodUsage(day: 0, week: 0, month: 0)
+}
+
+struct UsageCoverage: Equatable, Sendable, Codable {
+    var missingRolloutCount = 0
+    var unreadableRolloutCount = 0
+    var invalidUsageRecordCount = 0
+    var databaseUnavailable = false
+    var discoveryIncomplete = false
+
+    var isIncomplete: Bool {
+        missingRolloutCount > 0 || unreadableRolloutCount > 0 || invalidUsageRecordCount > 0
+            || databaseUnavailable || discoveryIncomplete
+    }
+
+    var detail: String {
+        var reasons: [String] = []
+        if missingRolloutCount > 0 { reasons.append("\(missingRolloutCount) 个对话日志缺失") }
+        if unreadableRolloutCount > 0 { reasons.append("\(unreadableRolloutCount) 个日志无法读取") }
+        if invalidUsageRecordCount > 0 { reasons.append("\(invalidUsageRecordCount) 条用量记录无法解析") }
+        if databaseUnavailable || discoveryIncomplete { reasons.append("部分历史记录无法读取") }
+        return "仅统计可读取的本地记录。" + reasons.joined(separator: "；")
+            + "。缺失用量无法准确分配到日期，未用对话累计值补算；费用估算也只覆盖已计入的记录。"
+    }
 }
 
 struct CodexTask: Identifiable, Equatable {

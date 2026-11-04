@@ -39,7 +39,6 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 每个对话的 token 用量和 API 等价花费估算，包含该对话下的子代理用量。
 - 今日、7 天、30 天 token 用量与花费估算；“今日”按电脑当前时区的自然日计算，归档会话仍计入已消耗 token。
 - Token 数字支持整块悬停和点击：悬停短暂查看、点击固定弹窗，显示未缓存输入、缓存输入和含推理输出的构成。
-- 可选显示 GPT-5.3-Codex-Spark 专属额度窗口。
 
 “实时接口优先”会自动发现新版 Codex / ChatGPT 应用内的 CLI，即使没有对话或日志写入，也按30秒缓存周期主动查询额度（实际触发随刷新频率）。应用升级后重新发现路径。以接口返回的额度为准，任务日志不会因为写入时间较晚而覆盖它。接口读取失败时保留上次成功值并重试；本次运行尚无成功接口结果时才回退本地记录。“仅本地记录”仍只读取本地数据。
 
@@ -199,7 +198,7 @@ dist/codex-monitor-0.1.19-amd64.dmg
 .build/release/CodexNotch --print-fast-snapshot
 ```
 
-打印稳定 JSON 快照，包含 `usage_today`、`spark_quota_windows` 以及每个任务的 `subagents` 活跃子代理数量：
+打印稳定 JSON 快照，包含 `usage_today` 以及每个任务的 `subagents` 活跃子代理数量：
 
 ```bash
 .build/release/CodexNotch --print-snapshot-json
@@ -273,7 +272,6 @@ It can show:
 - Today, 7-day, and 30-day token totals with estimated API-equivalent cost.
 - Hover or click the enlarged token target to inspect uncached input, cached input, and output including reasoning; clicking pins the popover.
 - Today, 7-day, and 30-day token usage totals. Today starts at midnight in the Mac's current time zone, and archived conversations remain part of consumed-token totals.
-- Optional GPT-5.3-Codex-Spark quota windows.
 
 With the live API preferred, quota comes from the API even when a rollout log has a later write timestamp. Failed reads retain the last successful API value while retrying; local records are used until the first successful API read. Local-only mode continues to use local records exclusively.
 
@@ -429,7 +427,7 @@ Print a fast local snapshot:
 .build/release/CodexNotch --print-fast-snapshot
 ```
 
-Print a stable JSON snapshot, including `usage_today`, `spark_quota_windows`, and each task's `subagents` active subagent count:
+Print a stable JSON snapshot, including `usage_today` and each task's `subagents` active subagent count:
 
 ```bash
 .build/release/CodexNotch --print-snapshot-json

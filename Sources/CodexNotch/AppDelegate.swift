@@ -370,8 +370,8 @@ final class NotchOverlayController {
             .store(in: &cancellables)
 
         settings.$taskHistoryRange
-            .combineLatest(settings.$showPeriodUsage, settings.$showSparkQuota)
-            .sink { [weak self] _, showPeriodUsage, _ in
+            .combineLatest(settings.$showPeriodUsage)
+            .sink { [weak self] _, showPeriodUsage in
                 DispatchQueue.main.async {
                     guard let self else {
                         return
@@ -1014,7 +1014,6 @@ final class NotchOverlayController {
         return IslandMetrics.combinedDetailHeight(
             accountRows: accountRows,
             showsPeriodUsage: settings.showPeriodUsage,
-            showsSparkQuota: settings.showSparkQuota,
             usesTallRemoteRows: usesTallRemoteRows,
             topPadding: topPadding
         )

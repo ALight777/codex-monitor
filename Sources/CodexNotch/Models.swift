@@ -53,7 +53,6 @@ struct UsageSnapshot: Equatable {
     var usage7dSummary: TokenUsageSummary = .zero
     var usage30dSummary: TokenUsageSummary = .zero
     var usageTodaySummary: TokenUsageSummary = .zero
-    var sparkQuotaWindows: [UsageQuotaWindow] = []
     var tasks: [CodexTask]
     var isRunning: Bool
     var lastUpdated: Date
@@ -77,9 +76,6 @@ struct UsageSnapshot: Equatable {
         var copy = self
         if copy.resetCredits == nil {
             copy.resetCredits = previous.resetCredits
-        }
-        if copy.sparkQuotaWindows.isEmpty {
-            copy.sparkQuotaWindows = previous.sparkQuotaWindows
         }
 
         if !copy.rateLimitWindows.isEmpty {
@@ -719,7 +715,6 @@ struct RateLimitSnapshot: Equatable {
     let capturedAt: Date?
     let isPrimaryCodexLimit: Bool
     var windows: [UsageQuotaWindow] = []
-    var sparkWindows: [UsageQuotaWindow] = []
     var resetCredits: RateLimitResetCredits? = nil
     var planType: String? = nil
 
@@ -734,20 +729,6 @@ struct RateLimitSnapshot: Equatable {
         // Rollout timestamps describe when a log was written, not when its quota
         // was fetched. Replayed quota values must not replace a live response.
         var result = appServer
-        let sparkCandidates = appServer.sparkWindows + localFiles.sparkWindows
-        result.sparkWindows = Dictionary(
-            grouping: sparkCandidates,
-            by: { $0.shortLabel.lowercased() }
-        )
-        .values
-        .compactMap { windows in
-            windows.max { lhs, rhs in
-                (lhs.resetsAt ?? .distantPast) < (rhs.resetsAt ?? .distantPast)
-            }
-        }
-        .sorted { lhs, rhs in
-            Self.quotaWindowPriority(lhs.shortLabel) < Self.quotaWindowPriority(rhs.shortLabel)
-        }
         if result.resetCredits == nil {
             result.resetCredits = appServer.resetCredits ?? localFiles.resetCredits
         }
@@ -794,28 +775,6 @@ struct RateLimitSnapshot: Equatable {
                 resetsAt: displayResetDate(window.resetsAt, now: now)
             )
         }
-    }
-
-    func displaySparkWindows(now: Date = Date()) -> [UsageQuotaWindow] {
-        sparkWindows.map { window in
-            UsageQuotaWindow(
-                id: window.id,
-                shortLabel: window.shortLabel,
-                remainingPercent: displayPercent(window.remainingPercent, resetsAt: window.resetsAt, now: now),
-                resetsAt: displayResetDate(window.resetsAt, now: now)
-            )
-        }
-    }
-
-    private static func quotaWindowPriority(_ label: String) -> Int {
-        let normalized = label.lowercased()
-        if normalized.contains("5h") || normalized.contains("5小时") {
-            return 0
-        }
-        if normalized.contains("7d") || normalized.contains("7天") {
-            return 1
-        }
-        return 2
     }
 
     private func displayPercent(_ percent: Int?, resetsAt: Int?, now: Date) -> Int? {

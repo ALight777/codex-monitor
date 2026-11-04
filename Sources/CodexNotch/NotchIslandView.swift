@@ -448,7 +448,6 @@ struct DetailPanelView: View {
             return IslandMetrics.combinedDetailHeight(
                 accountRows: balanceRows.isEmpty ? nil : max(1, balanceRows.max() ?? 1),
                 showsPeriodUsage: settings.showPeriodUsage,
-                showsSparkQuota: settings.showSparkQuota,
                 topPadding: detailTopPadding
             )
         }
@@ -460,7 +459,6 @@ struct DetailPanelView: View {
         return IslandMetrics.combinedDetailHeight(
             accountRows: max(1, rows.max() ?? 1),
             showsPeriodUsage: settings.showPeriodUsage,
-            showsSparkQuota: settings.showSparkQuota,
             usesTallRemoteRows: remoteViewModel.snapshot.accounts.contains { $0.displayQuotaWindows.count > 2 },
             topPadding: detailTopPadding
         )
@@ -736,9 +734,6 @@ struct DetailPanelView: View {
 
     private var localContent: some View {
         VStack(spacing: 10) {
-            if settings.showSparkQuota {
-                sparkQuotaRow
-            }
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 7) {
@@ -759,41 +754,6 @@ struct DetailPanelView: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .bottom)
-    }
-
-    private var sparkQuotaRow: some View {
-        HStack(spacing: 8) {
-            Text("Spark")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(0.72))
-
-            if snapshot.sparkQuotaWindows.isEmpty {
-                Text("暂无专属额度数据")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.38))
-            } else {
-                ForEach(snapshot.sparkQuotaWindows) { window in
-                    HStack(spacing: 4) {
-                        Text(window.shortLabel)
-                            .foregroundStyle(.white.opacity(0.46))
-                        Text(Formatters.percent(window.remainingPercent))
-                            .foregroundStyle(Color(red: 0.70, green: 0.62, blue: 1.0))
-                        Text(Formatters.quotaResetTime(window.resetsAt))
-                            .foregroundStyle(.white.opacity(0.42))
-                    }
-                    .font(.system(size: 9.2, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 32)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
     }
 
     private var codexRadarContent: some View {

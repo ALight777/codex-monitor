@@ -74,20 +74,17 @@ enum IslandMetrics {
     static func detailHeight(
         taskRows: Int,
         showsPeriodUsage: Bool,
-        showsSparkQuota: Bool = false,
         topPadding: CGFloat = detailTopPadding
     ) -> CGFloat {
         let rows = max(1, min(visibleTaskRows, taskRows))
         let taskStackHeight = CGFloat(rows) * 48 + CGFloat(max(0, rows - 1)) * 7
         let periodHeight: CGFloat = showsPeriodUsage ? 10 + 65 : 0
-        let sparkHeight: CGFloat = showsSparkQuota ? 42 : 0
         let contentHeight = topPadding
             + detailHeaderHeight
             + 10
             + detailPageSwitcherHeight
             + 10
             + taskStackHeight
-            + sparkHeight
             + periodHeight
             + detailBottomPadding
         return max(minimumDetailHeight, ceil(contentHeight))
@@ -96,14 +93,12 @@ enum IslandMetrics {
     static func combinedDetailHeight(
         accountRows: Int?,
         showsPeriodUsage: Bool,
-        showsSparkQuota: Bool = false,
         usesTallRemoteRows: Bool = false,
         topPadding: CGFloat = detailTopPadding
     ) -> CGFloat {
         let localHeight = detailHeight(
             taskRows: visibleTaskRows,
             showsPeriodUsage: showsPeriodUsage,
-            showsSparkQuota: showsSparkQuota,
             topPadding: topPadding
         )
         guard let accountRows else {

@@ -465,9 +465,6 @@ let snapshotFormatterSnapshot = UsageSnapshot(
     usage7d: 222,
     usage30d: 333,
     usageToday: 99,
-    sparkQuotaWindows: [
-        UsageQuotaWindow(id: "spark-primary", shortLabel: "5h", remainingPercent: 77, resetsAt: Date(timeIntervalSince1970: 4_200))
-    ],
     tasks: [snapshotFormatterTask],
     isRunning: true,
     lastUpdated: Date(timeIntervalSince1970: 0),
@@ -500,8 +497,7 @@ runner.check(
     "JSON snapshot output should expose sorted reset-credit expiry epoch seconds"
 )
 runner.check(jsonSnapshot?["usage_today"] as? Int == 99, "JSON snapshot output should expose local-calendar today usage")
-let jsonSparkWindows = jsonSnapshot?["spark_quota_windows"] as? [[String: Any]]
-runner.check(jsonSparkWindows?.first?["remaining_percent"] as? Int == 77, "JSON snapshot output should expose Spark quota windows")
+runner.check(jsonSnapshot?["spark_quota_windows"] == nil, "JSON snapshot output should omit the removed Spark quota windows")
 let snapshotWithoutResetCredits = UsageSnapshot(
     primaryPercent: nil,
     secondaryPercent: nil,
@@ -698,8 +694,8 @@ runner.check(
 let appServerSparkOutput = #"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":12,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":34,"resetsAt":1786557546,"windowDurationMins":10080}},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":12,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":34,"resetsAt":1786557546,"windowDurationMins":10080}},"spark":{"limitId":"codex-spark","limitName":"GPT-5.3-Codex-Spark","primary":{"usedPercent":30,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":40,"resetsAt":1786557546,"windowDurationMins":10080}}}}}"#
 let parsedAppServerSpark = appServerParserStore.parseAppServerRateLimits(output: appServerSparkOutput, now: appServerParserNow)
 runner.check(
-    parsedAppServerSpark?.displaySparkWindows(now: appServerParserNow).map(\.remainingPercent) == [70, 60],
-    "app-server parsing should expose GPT-5.3-Codex-Spark quota separately"
+    parsedAppServerSpark?.displayWindows(now: appServerParserNow).map(\.remainingPercent) == [88, 66],
+    "app-server parsing should keep standard Codex quota when Spark quota is also present"
 )
 let appServerPlusOutput = #"{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"limitId":"codex","planType":"plus","primary":{"usedPercent":12,"resetsAt":1786557546,"windowDurationMins":300},"secondary":{"usedPercent":34,"resetsAt":1786557546,"windowDurationMins":10080}}}}"#
 let parsedAppServerPlus = appServerParserStore.parseAppServerRateLimits(output: appServerPlusOutput, now: appServerParserNow)

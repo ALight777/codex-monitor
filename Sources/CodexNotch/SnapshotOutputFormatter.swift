@@ -33,7 +33,6 @@ enum SnapshotOutputFormatter {
             secondaryPercent: snapshot.secondaryPercent,
             quotaWindows: snapshot.displayRateLimitWindows.map(SnapshotQuotaWindowJSON.init(window:)),
             resetCredits: snapshot.resetCredits.map(SnapshotResetCreditsJSON.init(resetCredits:)),
-            sparkQuotaWindows: snapshot.sparkQuotaWindows.map(SnapshotQuotaWindowJSON.init(window:)),
             running: snapshot.isRunning,
             usageToday: snapshot.usageToday,
             usage24h: snapshot.usage24h,
@@ -55,7 +54,6 @@ private struct SnapshotJSON: Encodable {
     let secondaryPercent: Int?
     let quotaWindows: [SnapshotQuotaWindowJSON]
     let resetCredits: SnapshotResetCreditsJSON?
-    let sparkQuotaWindows: [SnapshotQuotaWindowJSON]
     let running: Bool
     let usageToday: Int
     let usage24h: Int
@@ -70,7 +68,6 @@ private struct SnapshotJSON: Encodable {
         case secondaryPercent = "secondary_percent"
         case quotaWindows = "quota_windows"
         case resetCredits = "reset_credits"
-        case sparkQuotaWindows = "spark_quota_windows"
         case running
         case usageToday = "usage_today"
         case usage24h = "usage_24h"

@@ -147,7 +147,6 @@ func codexRadarTokenUsesSecretVaultInsteadOfUserDefaults() throws {
     )
 
     settings.codexRadarEnabled = true
-    settings.showSparkQuota = true
     settings.codexRadarAPIToken = "  radar-secret  "
 
     #expect(try keychainStore.loadVault().value(for: .codexRadarAPI) == "radar-secret")
@@ -163,7 +162,6 @@ func codexRadarTokenUsesSecretVaultInsteadOfUserDefaults() throws {
         loadSecretsSynchronously: true
     )
     #expect(reloaded.codexRadarEnabled)
-    #expect(reloaded.showSparkQuota)
     #expect(reloaded.codexRadarAPIToken == "radar-secret")
 }
 

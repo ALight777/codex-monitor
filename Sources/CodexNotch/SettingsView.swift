@@ -475,7 +475,7 @@ struct SettingsView: View {
                 }
                 .disabled(pricingUpdater.isRefreshing || draft.pricing != pricingUpdater.settings)
             }
-            Text("先保存价格配置，再立即更新。更新失败时保留上次有效价格，未覆盖模型使用内置价格。")
+            Text("开启后，发现缺价模型时会提前检查。修改价格配置后先保存，再使用「立即更新」。")
                 .font(.caption).foregroundStyle(.secondary)
             Text(pricingUpdater.status).font(.caption).textSelection(.enabled)
             if let activeSource = pricingUpdater.activeSource {
@@ -486,7 +486,10 @@ struct SettingsView: View {
                 Text("上次成功检查：\(lastChecked.formatted(date: .numeric, time: .shortened))")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Text(TokenCostCatalog.priceVersion).font(.caption).foregroundStyle(.secondary)
+            if let nextCheckAt = pricingUpdater.nextCheckAt {
+                Text("下次自动检查：\(nextCheckAt.formatted(date: .numeric, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
 
         Section("Codex 数据") {

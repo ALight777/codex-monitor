@@ -132,12 +132,14 @@ private final class TopAnchoredClippingView: NSView {
 @MainActor
 final class NotchOverlayController {
     private let settings = CodexNotchSettings(loadSecretsSynchronously: false)
-    private lazy var viewModel = UsageViewModel(
-        settings: settings,
-        previewSnapshot: CommandLine.arguments.contains("--qa-static-preview")
-            ? Self.visualQASnapshot()
-            : nil
-    )
+    private lazy var viewModel: UsageViewModel = {
+        let isPreview = CommandLine.arguments.contains("--qa-static-preview")
+        return UsageViewModel(
+            settings: settings,
+            previewSnapshot: isPreview ? Self.visualQASnapshot() : nil,
+            pricingUpdater: isPreview ? nil : .shared
+        )
+    }()
     private lazy var remoteViewModel = RemoteMonitorViewModel(settings: settings)
     private lazy var newAPIViewModel = BalanceMonitorViewModel(source: .newAPI, settings: settings)
     private lazy var subAPIViewModel = BalanceMonitorViewModel(source: .subAPI, settings: settings)
@@ -365,6 +367,7 @@ final class NotchOverlayController {
                     return
                 }
                 self.setDetailVisible(isExpanded)
+                self.viewModel.setTaskUsageVisible(isExpanded)
                 if isExpanded, self.settings.showPeriodUsage {
                     self.viewModel.refreshUsageTotalsIfStale()
                 } else if self.settings.showPeriodUsage {

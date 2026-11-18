@@ -58,6 +58,10 @@ private func compressedFixture(_ name: String = "compressed-usage") throws -> Da
                               model: "gpt-5.4", reasoningEffort: nil, rolloutPath: raw.path,
                               updatedAt: Int(f.now.timeIntervalSince1970))
     #expect(try f.load(threads: [thread]).today == 300)
+    let taskUsage = f.index.loadTaskUsage(directory: f.root, taskIDs: [thread.id], threads: [thread],
+                                          now: f.now, isCancelled: { false })
+    #expect(taskUsage?[thread.id]?.totalTokens == 300)
+    #expect(f.index.bytesScanned == 0)
     try FileManager.default.removeItem(at: raw)
     try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 0)],
                                          ofItemAtPath: compressed.path)
@@ -72,8 +76,71 @@ private func compressedFixture(_ name: String = "compressed-usage") throws -> Da
     let archive = f.root.appendingPathComponent("archived_sessions")
     try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
     try FileManager.default.moveItem(at: compressed, to: archive.appendingPathComponent(compressed.lastPathComponent))
+    let archivedTaskUsage = f.index.loadTaskUsage(directory: f.root, taskIDs: [thread.id], threads: [thread],
+                                                  now: f.now.addingTimeInterval(31 * 86_400), isCancelled: { false })
+    #expect(archivedTaskUsage?[thread.id]?.totalTokens == 300)
     #expect(try f.load(threads: [thread]).today == 300)
     #expect(try f.load(threads: [thread]).coverage.missingRolloutCount == 0)
+}
+
+@MainActor
+@Test func taskListRecoversCostsForCompressedAndLargeRolloutsWithPeriodTotalsOff() async throws {
+    let f = UsageFixture()
+    defer { f.remove() }
+    let suite = "task-usage-recovery-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(false, forKey: "showPeriodUsage")
+    defaults.set(RateLimitSourcePreference.localFilesOnly.rawValue, forKey: "rateLimitSource")
+    let settings = CodexNotchSettings(
+        defaults: defaults, initialManagementKey: "", initialNewAPIKey: "", initialSubAPIKey: "",
+        secretStores: SecretStoreFactory(keychain: MemorySecretStore(), database: MemorySecretStore())
+    )
+    let compressed = try f.file("compressed", lines: [])
+    try FileManager.default.removeItem(at: compressed)
+    try compressedFixture().write(to: compressed.appendingPathExtension("zst"))
+    let large = try f.file("large", lines: [
+        usageMeta("large"), usageModel, usageEvent(100, cumulative: 100),
+        #"{"type":"response_item","payload":{"text":"\#(String(repeating: "x", count: 21 * 1_024 * 1_024))"}}"#,
+        #"{"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}"#,
+        usageEvent(200, cumulative: 300, date: "2026-11-04T03:00:00Z")
+    ])
+    let updatedAt = Date().addingTimeInterval(-3_600)
+    try FileManager.default.setAttributes([.modificationDate: updatedAt], ofItemAtPath: large.path)
+    _ = try Shell.run("/usr/bin/sqlite3", [f.root.appendingPathComponent("state_5.sqlite").path, """
+        create table threads(id text, title text, tokens_used integer, model text,
+          reasoning_effort text, rollout_path text, updated_at integer, archived integer, thread_source text);
+        insert into threads values
+          ('compressed-thread', 'compressed', 330, 'gpt-5.4', 'high', '\(compressed.path)', \(Int(updatedAt.timeIntervalSince1970)), 0, 'cli'),
+          ('large', 'large', 300, 'gpt-5.6-sol', 'high', '\(large.path)', \(Int(updatedAt.timeIntervalSince1970)), 0, 'cli');
+        """])
+
+    let viewModel = UsageViewModel(store: CodexUsageStore(codexDirectory: f.root), settings: settings)
+    for _ in 0..<200 where viewModel.snapshot.tasks.isEmpty {
+        try await Task.sleep(for: .milliseconds(25))
+    }
+    #expect(viewModel.snapshot.tasks.count == 2)
+    #expect(viewModel.snapshot.tasks.allSatisfy { $0.tokenUsage.costUSD == nil })
+    viewModel.setTaskUsageVisible(true)
+    defer { viewModel.setTaskUsageVisible(false) }
+    for _ in 0..<200 where viewModel.snapshot.tasks.contains(where: \.needsUsageRecovery) {
+        try await Task.sleep(for: .milliseconds(25))
+    }
+    let compressedTask = try #require(viewModel.snapshot.tasks.first { $0.id == "compressed-thread" })
+    let largeTask = try #require(viewModel.snapshot.tasks.first { $0.id == "large" })
+    #expect(compressedTask.tokenCount == 330)
+    #expect(compressedTask.tokenUsage.pricedTokens == 300)
+    #expect(compressedTask.tokenUsage.unpricedTokens == 30)
+    #expect(abs((largeTask.tokenUsage.costUSD ?? 0) - 0.00105) < 1e-9)
+    #expect(!viewModel.hasLoadedUsageTotals)
+
+    let previousRefresh = viewModel.snapshot.lastUpdated
+    viewModel.refresh()
+    for _ in 0..<200 where viewModel.snapshot.lastUpdated <= previousRefresh {
+        try await Task.sleep(for: .milliseconds(25))
+    }
+    #expect(viewModel.snapshot.lastUpdated > previousRefresh)
+    #expect(viewModel.snapshot.tasks.allSatisfy { $0.tokenUsage.costUSD != nil })
 }
 
 @Test func periodIndexRejectsTruncatedAndCorruptCompressedFilesWithoutPartialUsage() throws {

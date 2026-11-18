@@ -1762,6 +1762,7 @@ private enum TokenUsageTriggerStyle: Equatable {
 }
 
 private struct TokenUsageTrigger: View {
+    @ObservedObject private var pricingUpdater = TokenPricingUpdater.shared
     let title: String
     let tokenText: String
     let summary: TokenUsageSummary
@@ -1776,6 +1777,10 @@ private struct TokenUsageTrigger: View {
 
     private var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private var priceStatus: String {
+        pricingUpdater.isRefreshing ? "正在检查模型价格…" : TokenCostCatalog.priceVersion
     }
 
     private var presentationBinding: Binding<Bool> {
@@ -1816,7 +1821,7 @@ private struct TokenUsageTrigger: View {
         .onHover(perform: triggerHoverChanged)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isTriggerHovered)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isPinned)
-        .help("悬停查看 Token 构成，点击固定")
+        .help("悬停查看 Token 构成，点击固定\n\(priceStatus)")
         .accessibilityLabel(title)
         .accessibilityValue("\(tokenText)，\(Formatters.estimatedCostUSD(summary.costUSD))")
         .accessibilityHint("悬停查看，点击可固定弹窗")
@@ -1824,6 +1829,7 @@ private struct TokenUsageTrigger: View {
             TokenUsagePopover(
                 title: title,
                 summary: summary,
+                priceStatus: priceStatus,
                 isPinned: isPinned,
                 onHoverChanged: popoverHoverChanged
             )
@@ -1932,6 +1938,7 @@ private struct TokenUsageTrigger: View {
 private struct TokenUsagePopover: View {
     let title: String
     let summary: TokenUsageSummary
+    let priceStatus: String
     let isPinned: Bool
     let onHoverChanged: (Bool) -> Void
 
@@ -1969,8 +1976,11 @@ private struct TokenUsagePopover: View {
             }
             .font(.system(size: 11.5, weight: .semibold))
 
+            Text(priceStatus)
+                .foregroundStyle(.secondary)
+
             if !summary.hasComponentData, summary.totalTokens > 0 {
-                Text("本地记录未提供完整的 Token 构成明细")
+                Text("尚未读取到可估算的 Token 构成明细")
                     .foregroundStyle(.secondary)
             } else if !summary.unknownModels.isEmpty {
                 Text("部分 Token 未计入估算：\(summary.unknownModels.joined(separator: "、"))")

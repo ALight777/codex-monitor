@@ -10,6 +10,7 @@ final class UsageViewModel: ObservableObject {
 
     private let store: CodexUsageStore
     private let settings: CodexNotchSettings
+    private let pricingUpdater: TokenPricingUpdater?
     private let isPreviewMode: Bool
     private var fastTimer: Timer?
     private var usageTimer: Timer?
@@ -38,16 +39,22 @@ final class UsageViewModel: ObservableObject {
     private var usageRefreshTask: Task<Void, Never>?
     private var usageRefreshGeneration = 0
     private var usageLoadState = PeriodUsageLoadState()
+    private var taskUsageVisible = false
+    private var tasksBeforeUsageRecovery: [CodexTask] = []
+    private var taskUsageChecks: [TaskUsageRequest: TaskUsageCheck] = [:]
+    private var taskUsageRefreshTask: Task<Void, Never>?
     private var watcherRefreshGeneration = 0
     private var observedSettings: LocalUsageSettingsSnapshot?
 
     init(
         store: CodexUsageStore = CodexUsageStore(),
         settings: CodexNotchSettings = CodexNotchSettings(),
-        previewSnapshot: UsageSnapshot? = nil
+        previewSnapshot: UsageSnapshot? = nil,
+        pricingUpdater: TokenPricingUpdater? = nil
     ) {
         self.store = store
         self.settings = settings
+        self.pricingUpdater = pricingUpdater
         isPreviewMode = previewSnapshot != nil
         if let previewSnapshot {
             snapshot = previewSnapshot
@@ -105,9 +112,17 @@ final class UsageViewModel: ObservableObject {
                 mergedSnapshot.usage30dSummary = self.snapshot.usage30dSummary
                 mergedSnapshot.usageTodaySummary = self.snapshot.usageTodaySummary
                 mergedSnapshot.usageCoverage = self.snapshot.usageCoverage
+                self.tasksBeforeUsageRecovery = mergedSnapshot.tasks
+                let requests = Set(mergedSnapshot.tasks.lazy.filter(\.needsUsageRecovery).map(TaskUsageRequest.init))
+                self.taskUsageChecks = self.taskUsageChecks.filter { requests.contains($0.key) }
+                mergedSnapshot.tasks = self.tasksWithRecoveredUsage
                 self.snapshot = mergedSnapshot
+                if snapshotLoadSucceeded {
+                    self.pricingUpdater?.refreshForMissingPrices(in: mergedSnapshot.tasks.lazy.map(\.tokenUsage))
+                }
                 self.isRefreshingSnapshot = false
                 self.updateRefreshingState()
+                self.refreshTaskUsageIfNeeded()
                 let shouldRefreshAgain = self.pendingSnapshotRefresh
                 let shouldBypassFastCache = self.pendingSnapshotBypassFastCache
                 let shouldForceRateLimitRefresh = self.pendingSnapshotForceRateLimitRefresh
@@ -136,11 +151,54 @@ final class UsageViewModel: ObservableObject {
             return
         }
         refresh(bypassFastCache: true, forceRateLimitRefresh: true)
+        refreshTaskUsageIfNeeded(force: true)
         refreshUsageTotals(scheduleNext: periodUsageRefreshEnabled)
     }
 
+    func setTaskUsageVisible(_ visible: Bool) {
+        taskUsageVisible = visible
+        if visible { refreshTaskUsageIfNeeded() }
+    }
+
+    private var tasksWithRecoveredUsage: [CodexTask] {
+        tasksBeforeUsageRecovery.map { task in
+            task.recoveringUsage(from: taskUsageChecks[TaskUsageRequest(task)]?.summary)
+        }
+    }
+
+    private func refreshTaskUsageIfNeeded(force: Bool = false) {
+        guard !isPreviewMode, taskUsageVisible || force, taskUsageRefreshTask == nil else { return }
+        let staleBefore = Date().addingTimeInterval(-settings.usageRefreshInterval)
+        let requests = tasksBeforeUsageRecovery.lazy.filter(\.needsUsageRecovery)
+            .map(TaskUsageRequest.init)
+            .filter { request in
+                force || (self.taskUsageChecks[request]?.checkedAt ?? .distantPast) <= staleBefore
+            }
+        let pending = Set(requests)
+        guard !pending.isEmpty else { return }
+        let ids = Set(pending.map(\.id))
+        taskUsageRefreshTask = Task.detached(priority: .utility) { [weak self, store] in
+            let summaries = store.loadTaskUsage(for: ids)
+            await MainActor.run {
+                guard let self else { return }
+                self.taskUsageRefreshTask = nil
+                guard let summaries else { return }
+                let checkedAt = Date()
+                let current = Set(self.tasksBeforeUsageRecovery.lazy.filter(\.needsUsageRecovery).map(TaskUsageRequest.init))
+                for request in pending.intersection(current) {
+                    self.taskUsageChecks[request] = TaskUsageCheck(checkedAt: checkedAt, summary: summaries[request.id])
+                }
+                let tasks = self.tasksWithRecoveredUsage
+                if tasks != self.snapshot.tasks {
+                    self.snapshot.tasks = tasks
+                    self.pricingUpdater?.refreshForMissingPrices(in: tasks.lazy.map(\.tokenUsage))
+                }
+            }
+        }
+    }
+
     func resumeAfterSystemActivity() {
-        TokenPricingUpdater.shared.refreshIfDue()
+        pricingUpdater?.refreshIfDue()
         fastTimer?.invalidate()
         fastTimer = nil
         pendingSnapshotTimer?.invalidate()
@@ -250,6 +308,7 @@ final class UsageViewModel: ObservableObject {
                     self.snapshot.usage30dSummary = usage.monthSummary
                     self.snapshot.usageTodaySummary = usage.todaySummary
                     self.snapshot.usageCoverage = usage.coverage
+                    self.pricingUpdater?.refreshForMissingPrices(in: CollectionOfOne(usage.monthSummary))
                 }
                 self.hasLoadedUsageTotals = self.usageLoadState.hasSuccessfulValue
                 switch completion {
@@ -629,6 +688,23 @@ final class UsageViewModel: ObservableObject {
 
         return snapshot
     }
+}
+
+private struct TaskUsageRequest: Hashable, Sendable {
+    let id: String
+    let updatedAt: Date
+    let tokenCount: Int
+
+    init(_ task: CodexTask) {
+        id = task.id.lowercased()
+        updatedAt = task.updatedAt
+        tokenCount = task.tokenCount
+    }
+}
+
+private struct TaskUsageCheck {
+    let checkedAt: Date
+    let summary: TokenUsageSummary?
 }
 
 private struct LocalUsageSettingsSnapshot: Equatable {

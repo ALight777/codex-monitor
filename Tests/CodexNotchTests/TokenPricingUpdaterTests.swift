@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import CodexNotch
 
-private func priceData(input: Double = 0.000002) -> Data {
+private func priceData(input: Double = 0.000002, model: String = "gpt-price-test") -> Data {
     Data("""
-    {"gpt-price-test":{"litellm_provider":"openai","mode":"responses",
+    {"\(model)":{"litellm_provider":"openai","mode":"responses",
     "input_cost_per_token":\(input),"cache_read_input_token_cost":0.0000002,"output_cost_per_token":0.00001,
     "input_cost_per_token_above_272k_tokens":0.000007,
     "cache_read_input_token_cost_above_272k_tokens":0.0000009,
@@ -76,22 +76,90 @@ struct PricingUpdateLifecycleTests {
         let diskBefore = try Data(contentsOf: cacheURL)
         updater.refreshIfDue(now: checked.addingTimeInterval(60))
         #expect(await transport.calls == 1)
-        await transport.fail()
+        await transport.setFailure(true)
         updater.refreshNow()
         try await waitForUpdate(updater)
         #expect(updater.status.contains("失败"))
         #expect(updater.lastChecked == checked)
         #expect(try Data(contentsOf: cacheURL) == diskBefore)
+        let retryAt = try #require(updater.nextCheckAt)
+        #expect(retryAt < checked.addingTimeInterval(24 * 3_600))
+        updater.refreshIfDue(now: retryAt.addingTimeInterval(-1))
+        #expect(!updater.isRefreshing)
+        await transport.setFailure(false)
+        updater.refreshIfDue(now: retryAt)
+        #expect(updater.isRefreshing)
+        try await waitForUpdate(updater)
+        let checkedAfterRetry = try #require(updater.lastChecked)
+        #expect(checkedAfterRetry > checked)
         var settings = updater.settings
         settings.automatic = false
         settings.intervalHours = 6
         updater.save(settings)
         updater.refreshIfDue(now: checked.addingTimeInterval(90_000))
-        #expect(await transport.calls == 2)
+        #expect(updater.nextCheckAt == nil)
+        #expect(await transport.calls == 3)
         let reloaded = TokenPricingUpdater(defaults: defaults, cacheURL: cacheURL) { _ in throw URLError(.notConnectedToInternet) }
-        #expect(reloaded.lastChecked == checked)
+        #expect(reloaded.lastChecked == checkedAfterRetry)
         #expect(reloaded.settings == settings)
         #expect(reloaded.modelCount == 1)
+    }
+
+    @Test func aMissingModelRefreshesBeforeTheDailyCheckAndRepricesExistingUsage() async throws {
+        let suite = "pricing-tests-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        let cacheURL = directory.appendingPathComponent("current.json")
+        let original = TokenCostCatalog.remoteSnapshot
+        let version = TokenCostCatalog.priceVersion
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+            TokenCostCatalog.install(original, version: version)
+        }
+        let now = Date()
+        let lastCheck = now.addingTimeInterval(-600)
+        try TokenPricingCache(sourceURL: TokenPricingSettings.defaultSource, checkedAt: lastCheck,
+                              data: priceData(model: "gpt-old-price-test")).write(to: cacheURL)
+        let transport = PricingTestTransport()
+        let updater = TokenPricingUpdater(defaults: defaults, cacheURL: cacheURL) { _ in try await transport.fetch() }
+        updater.start()
+        #expect(updater.nextCheckAt == lastCheck.addingTimeInterval(24 * 3_600))
+
+        let usage = TokenUsageBreakdown(inputTokens: 1_000, cachedInputTokens: 500, outputTokens: 100, totalTokens: 1_100)
+        var missingDetails = TokenUsageSummary.unpriced(totalTokens: 1_100, model: "gpt-price-test")
+        missingDetails.add(usage, model: nil)
+        updater.refreshForMissingPrices(in: [missingDetails], now: now)
+        #expect(!updater.isRefreshing)
+
+        var newModel = TokenUsageSummary.zero
+        newModel.add(usage, model: "openai/GPT-price-test")
+        var unavailableModel = TokenUsageSummary.zero
+        unavailableModel.add(usage, model: "gpt-unavailable-price-test")
+        #expect(newModel.costUSD == nil)
+        updater.refreshForMissingPrices(in: [newModel, unavailableModel], now: now)
+        #expect(updater.isRefreshing)
+        updater.refreshForMissingPrices(in: [newModel, unavailableModel], now: now)
+        try await waitForUpdate(updater)
+        #expect(abs((newModel.costUSD ?? 0) - 0.0021) < 1e-9)
+        #expect(newModel.breakdown == usage)
+        #expect(unavailableModel.costUSD == nil)
+
+        let checked = try #require(updater.lastChecked)
+        var anotherNewModel = TokenUsageSummary.zero
+        anotherNewModel.add(usage, model: "gpt-another-price-test")
+        updater.refreshForMissingPrices(in: [anotherNewModel], now: checked.addingTimeInterval(60))
+        #expect(!updater.isRefreshing)
+        updater.refreshForMissingPrices(in: [unavailableModel], now: checked.addingTimeInterval(600))
+        #expect(!updater.isRefreshing)
+        #expect(await transport.calls == 1)
+
+        var settings = updater.settings
+        settings.automatic = false
+        updater.save(settings)
+        updater.refreshForMissingPrices(in: [anotherNewModel], now: checked.addingTimeInterval(600))
+        #expect(!updater.isRefreshing)
+        #expect(await transport.calls == 1)
     }
 
     private func waitForUpdate(_ updater: TokenPricingUpdater) async throws {
@@ -106,7 +174,7 @@ struct PricingUpdateLifecycleTests {
 private actor PricingTestTransport {
     var calls = 0
     var shouldFail = false
-    func fail() { shouldFail = true }
+    func setFailure(_ failure: Bool) { shouldFail = failure }
     func fetch() throws -> Data {
         calls += 1
         if shouldFail { throw URLError(.notConnectedToInternet) }

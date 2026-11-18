@@ -291,6 +291,20 @@ struct CodexTask: Identifiable, Equatable {
     func displayDetail(now: Date = Date()) -> String {
         return "\(detailPrefix) · \(Formatters.relativeAge(updatedAt, now: now))前"
     }
+
+    var needsUsageRecovery: Bool {
+        tokenCount > 0 && !tokenUsage.hasComponentData
+    }
+
+    func recoveringUsage(from summary: TokenUsageSummary?) -> CodexTask {
+        guard needsUsageRecovery, var summary else { return self }
+        summary.addUnpricedTokens(max(0, tokenCount - summary.totalTokens))
+        return CodexTask(
+            id: id, title: title, status: status, detailPrefix: detailPrefix,
+            tokenCount: summary.totalTokens, tokenUsage: summary,
+            updatedAt: updatedAt, activeSubagentCount: activeSubagentCount
+        )
+    }
 }
 
 enum TaskStatus: String, Equatable {

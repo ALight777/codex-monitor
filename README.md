@@ -39,7 +39,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 - 每个对话的 token 用量和 API 等价花费估算，包含该对话下的子代理用量。
 - 今日、7 天、30 天 token 用量与花费估算；“今日”按电脑当前时区的自然日计算，归档会话仍计入已消耗 token。
 - 历史用量完整读取本机所有会话及归档日志，合并同一对话的多个日志文件，并去除重复累计用量快照；首次建立内存索引，后续只读取新增内容。日志缺失或读取不完整时会显示提示，不将对话生命周期累计用量直接分摊到今日。
-- 同时支持普通 `.jsonl` 和 Codex 自动压缩的 `.jsonl.zst` 历史日志。压缩日志由应用内置解码器流式读取并校验，不依赖 Homebrew，不生成解压副本；未变化的文件直接复用内存索引。
+- 同时支持普通 `.jsonl` 和 Codex 自动压缩的 `.jsonl.zst` 历史日志。压缩日志由应用内置解码器流式读取并校验，不依赖 Homebrew，不生成解压副本；未变化的文件直接复用内存索引。打开任务列表时，会在后台从压缩日志和大型会话日志补读缺少的任务明细，读到后更新费用。
 - Token 数字支持整块悬停和点击：悬停短暂查看、点击固定弹窗，显示未缓存输入、缓存输入和含推理输出的构成。
 
 “实时接口优先”会自动发现新版 Codex / ChatGPT 应用内的 CLI，即使没有对话或日志写入，也按30秒缓存周期主动查询额度（实际触发随刷新频率）。应用升级后重新发现路径。以接口返回的额度为准，任务日志不会因为写入时间较晚而覆盖它。接口读取失败时保留上次成功值并重试；本次运行尚无成功接口结果时才回退本地记录。“仅本地记录”仍只读取本地数据。 手动刷新和唤醒会直接重新查询额度；自动刷新保留缓存限流。到达重置时间后显示待确认（`--`），收到新窗口后才恢复数字，不按本机时间推算为 100%。接口失败保留上次成功值，以橙色和 `*` 标明旧值，并在详情中显示上次成功读取时间；本地兜底明确标注记录时间。任务数据库异常不会阻断额度查询，本地额度兜底同时读取普通和压缩日志，损坏压缩文件不会贡献部分结果。
@@ -55,7 +55,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 花费按记录中的实际模型逐次套用当前价格表中的标准 API 单价，并分别计算未缓存输入、缓存输入和输出；长上下文模型按单次请求规则处理。`codex-auto-review` 按 `gpt-5.6-sol` 的同一套价格和长上下文规则估算。对于模型未知或无可匹配价格的 Token，应用会将其排除后继续估算已知部分，并在界面中明确提示未计入的部分。该数字只是 API 等价估算，不是 Codex 订阅账单。价格源和同步时间会显示在用量卡片下方。
 
-模型价格默认每日从 [LiteLLM 公开价格表](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) 检查更新；这是社区维护的数据源，并非 OpenAI 官方实时接口。可在「设置 → Codex → 模型价格」调整自动更新开关、每小时/6 小时/每天/每周频率、HTTPS JSON 更新源，并手动更新。自定义源须使用同一 LiteLLM JSON 格式。只导入含完整输入、缓存输入、输出及支持的长上下文费率的 OpenAI 文本模型；失败保留上次成功缓存，未覆盖的模型回退内置价格。应用启动或从睡眠恢复时检查是否到期。价格变化直接重估内存中的分模型 Token 明细，不重新扫描完整历史文件。估算采用当前标准费率，不还原历史成交价，也不包括 Priority/Flex 等服务档位。
+模型价格默认每日从 [LiteLLM 公开价格表](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) 检查更新；这是社区维护的数据源，并非 OpenAI 官方实时接口。可在「设置 → Codex → 模型价格」调整自动更新开关、每小时/6 小时/每天/每周频率、HTTPS JSON 更新源，手动更新并查看下次自动检查时间。应用启动或从睡眠恢复时检查是否到期。识别到有用量明细但缺价的模型时，后台可提前检查，每次运行中同一模型仅触发一次，距上次成功检查至少间隔 5 分钟。自定义源须使用同一 LiteLLM JSON 格式。只导入含完整输入、缓存输入、输出及支持的长上下文费率的 OpenAI 文本模型；失败保留上次成功缓存并在 1 小时后自动重试，未覆盖的模型回退内置价格。价格变化直接重估内存中的分模型 Token 明细，不重新扫描完整历史文件。估算采用当前标准费率，不还原历史成交价，也不包括 Priority/Flex 等服务档位。
 
 缓存：`~/Library/Application Support/codex监测/ModelPricing/current.json`。
 
@@ -166,8 +166,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.22-arm64.dmg
-dist/codex-monitor-0.1.22-amd64.dmg
+dist/codex-monitor-0.1.23-arm64.dmg
+dist/codex-monitor-0.1.23-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -275,7 +275,7 @@ It can show:
 - Hover or click the enlarged token target to inspect uncached input, cached input, and output including reasoning; clicking pins the popover.
 - Today, 7-day, and 30-day token usage totals. Today starts at midnight in the Mac's current time zone, and archived conversations remain part of consumed-token totals.
 - Historical totals scan all local session and archive logs, merge multiple rollouts for each conversation, and deduplicate repeated cumulative usage snapshots. An in-memory index reads only appended data after the first scan. Missing or unreadable logs are flagged; lifetime database totals are not assigned to today.
-- Both `.jsonl` and Codex-compressed `.jsonl.zst` logs are supported. A bundled streaming decoder validates compressed files without Homebrew or unpacked copies on disk; unchanged files reuse the in-memory index.
+- Both `.jsonl` and Codex-compressed `.jsonl.zst` logs are supported. A bundled streaming decoder validates compressed files without Homebrew or unpacked copies on disk; unchanged files reuse the in-memory index. Opening the task list fills in missing estimates in the background from compressed and large session logs.
 
 With the live API preferred, quota comes from the API even when a rollout log has a later write timestamp. Failed reads retain the last successful API value while retrying; local records are used until the first successful API read. Local-only mode continues to use local records exclusively. Manual refresh and wake bypass the quota cache. Expired windows show `--` until confirmed by the server. Failed reads mark retained values in orange with `*` and show the original successful-read time in details. Quota queries continue if the task database is unavailable; local quota fallback supports validated `.jsonl.zst` logs as well as plain logs.
 
@@ -288,7 +288,7 @@ Local data is read from Codex files under the current user account, including:
 
 The app reads these files only. It does not modify local Codex data.
 
-Costs are estimated per recorded request using the matching standard API model price from the active catalog, with uncached input, cached input, output, and supported long-context rules calculated separately. `codex-auto-review` uses the same price and long-context rules as `gpt-5.6-sol`. Tokens whose model is missing or has no matching price are excluded while the known portion remains estimated, and the omitted portion stays explicitly identified in the UI. This is an API-equivalent estimate, not Codex subscription billing. The pricing source and sync time appear below the local usage cells. Prices refresh daily from the community-maintained LiteLLM JSON catalog by default. Settings → Codex → Model prices includes automatic updates, cadence, a custom HTTPS LiteLLM JSON source, and manual refresh. Failed updates preserve the last valid disk cache; missing entries fall back to bundled prices. Cached token components are repriced without rescanning rollout files. Estimates use current standard rates, not historical billing or Priority/Flex tiers.
+Costs are estimated per recorded request using the matching standard API model price from the active catalog, with uncached input, cached input, output, and supported long-context rules calculated separately. `codex-auto-review` uses the same price and long-context rules as `gpt-5.6-sol`. Tokens whose model is missing or has no matching price are excluded while the known portion remains estimated, and the omitted portion stays explicitly identified in the UI. This is an API-equivalent estimate, not Codex subscription billing. The pricing source and sync time appear below the local usage cells and in the usage popover. Prices refresh daily from the community-maintained LiteLLM JSON catalog by default. A model with token details and a missing price can trigger an early check once per app run, at least five minutes after the last successful check. Settings → Codex → Model prices includes automatic updates, cadence, a custom HTTPS LiteLLM JSON source, manual refresh, and the next scheduled check. Failed updates preserve the last valid disk cache and retry after one hour with automatic updates enabled. Missing entries fall back to bundled prices. Cached token components are repriced without rescanning rollout files. Estimates use current standard rates, not historical billing or Priority/Flex tiers.
 
 ### CodexRadar
 
@@ -397,8 +397,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.22-arm64.dmg
-dist/codex-monitor-0.1.22-amd64.dmg
+dist/codex-monitor-0.1.23-arm64.dmg
+dist/codex-monitor-0.1.23-amd64.dmg
 ```
 
 Install into the current user's Applications folder:

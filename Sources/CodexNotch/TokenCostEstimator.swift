@@ -41,7 +41,7 @@ struct TokenUsageSummary: Equatable, Sendable {
     private var missingModels: Set<String> = []
 
     private struct PriceBucket: Hashable, Sendable {
-        let model: String
+        let model: String?
         let longContext: Bool
     }
 
@@ -69,7 +69,7 @@ struct TokenUsageSummary: Equatable, Sendable {
         hasComponentData = hasComponentData || usage.hasComponentData
         let label = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let bucket = PriceBucket(
-            model: label.isEmpty ? "模型未知" : label,
+            model: label.isEmpty ? nil : label,
             longContext: usage.inputTokens > TokenCostCatalog.longContextThreshold
         )
         components[bucket, default: .zero].add(usage)
@@ -93,6 +93,16 @@ struct TokenUsageSummary: Equatable, Sendable {
         missingModels.insert(label.isEmpty ? "明细缺失" : label)
     }
 
+    func modelsMissingPrices(in catalog: [String: ModelTokenPrice], excluding checkedModels: Set<String>) -> Set<String> {
+        Set(components.compactMap { bucket, usage in
+            guard usage.totalTokens > 0, usage.hasComponentData,
+                  let model = TokenCostCatalog.normalizedModel(bucket.model), !model.contains("/"),
+                  !checkedModels.contains(model),
+                  TokenCostCatalog.price(for: bucket.model, remote: catalog) == nil else { return nil }
+            return model
+        })
+    }
+
     private func valuation() -> (cost: Double, unpriced: Int, unknown: [String]) {
         let catalog = TokenCostCatalog.remoteSnapshot
         var cost = 0.0
@@ -104,7 +114,7 @@ struct TokenUsageSummary: Equatable, Sendable {
                 cost += price.cost(for: usage, longContext: bucket.longContext)
             } else {
                 unpriced = Self.saturatingAdd(unpriced, usage.totalTokens)
-                unknown.insert(bucket.model)
+                unknown.insert(bucket.model ?? "模型未知")
             }
         }
         return (cost, unpriced, unknown.sorted())
@@ -211,7 +221,7 @@ enum TokenCostCatalog {
         return price.cost(for: usage, longContext: usage.inputTokens > longContextThreshold)
     }
 
-    private static func normalizedModel(_ model: String?) -> String? {
+    fileprivate static func normalizedModel(_ model: String?) -> String? {
         guard var value = model?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased(),
@@ -221,6 +231,7 @@ enum TokenCostCatalog {
         if value.hasPrefix("openai/") {
             value.removeFirst("openai/".count)
         }
+        guard !value.isEmpty else { return nil }
         return modelAliases[value] ?? value
     }
 }

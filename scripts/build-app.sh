@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="codex监测"
 PACKAGE_NAME="codex-monitor"
-APP_VERSION="0.1.22"
+APP_VERSION="0.1.23"
 BUNDLE_ID="com.alight.codexnotch"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
@@ -16,6 +16,7 @@ if [[ "${CODEX_NOTCH_SKIP_TESTS:-0}" != "1" ]]; then
   "$ROOT_DIR/scripts/run-regression-tests.sh"
 fi
 swift "$ROOT_DIR/scripts/generate-app-icon.swift"
+mkdir -p "$DIST_DIR"
 find "$DIST_DIR" -maxdepth 1 -type f \( -name "$APP_NAME.dmg" -o -name "$APP_NAME-*.dmg" -o -name "$PACKAGE_NAME-*.dmg" \) -delete
 rm -rf "$DMG_STAGE_DIR" "$PACKAGE_STAGE_DIR"
 

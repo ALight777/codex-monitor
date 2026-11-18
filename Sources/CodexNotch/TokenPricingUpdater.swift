@@ -21,8 +21,8 @@ enum TokenPricingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidSource: "请填写有效的 HTTPS 价格 JSON 地址"
-        case .invalidData: "价格源没有完整、有效的 OpenAI 文本模型价格，已保留原价格"
-        case .httpStatus(let code): "价格源返回 HTTP \(code)，已保留原价格"
+        case .invalidData: "价格源没有完整、有效的 OpenAI 文本模型价格"
+        case .httpStatus(let code): "价格源返回 HTTP \(code)"
         }
     }
 }
@@ -92,6 +92,7 @@ final class TokenPricingUpdater: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var status = "使用内置价格"
     @Published private(set) var lastChecked: Date?
+    @Published private(set) var nextCheckAt: Date?
     @Published private(set) var modelCount = 0
     @Published private(set) var activeSource: String?
     private let defaults: UserDefaults
@@ -101,7 +102,11 @@ final class TokenPricingUpdater: ObservableObject {
     private var task: Task<Void, Never>?
     private var generation = 0
     private var started = false
+    private var retryAt: Date?
+    private var checkedMissingModels: Set<String> = []
     private static let settingsKey = "modelPricingUpdateSettings.v1"
+    private static let retryInterval: TimeInterval = 3_600
+    private static let earlyCheckCooldown: TimeInterval = 300
 
     init(
         defaults: UserDefaults = .standard,
@@ -155,56 +160,97 @@ final class TokenPricingUpdater: ObservableObject {
         next.intervalHours = min(168, max(1, next.intervalHours))
         guard next.validatedURL != nil else { status = TokenPricingError.invalidSource.localizedDescription; return }
         guard next != settings else { return }
-        generation += 1
-        task?.cancel()
-        task = nil
-        isRefreshing = false
-        timer?.invalidate()
+        let sourceChanged = next.sourceURL != settings.sourceURL
+        if sourceChanged || !next.automatic {
+            generation += 1
+            task?.cancel()
+            task = nil
+            if isRefreshing {
+                isRefreshing = false
+                status = "检查已取消"
+            }
+        }
+        if sourceChanged {
+            retryAt = nil
+            checkedMissingModels.removeAll()
+        }
         settings = next
         defaults.set(try? JSONEncoder().encode(next), forKey: Self.settingsKey)
         refreshIfDue()
     }
 
     func refreshIfDue(now: Date = Date()) {
-        guard settings.automatic else { timer?.invalidate(); return }
-        let interval = Double(settings.intervalHours) * 3_600
-        if activeSource != settings.sourceURL || lastChecked == nil
-            || now.timeIntervalSince(lastChecked!) >= interval {
+        guard settings.automatic else { clearScheduledCheck(); return }
+        guard !isRefreshing else { return }
+        let dueAt: Date
+        if let retryAt {
+            dueAt = retryAt
+        } else if activeSource == settings.sourceURL, let lastChecked, lastChecked <= now {
+            dueAt = lastChecked.addingTimeInterval(Double(settings.intervalHours) * 3_600)
+        } else {
+            dueAt = now
+        }
+        if dueAt <= now {
             refreshNow()
         } else {
-            schedule(after: max(1, interval - now.timeIntervalSince(lastChecked!)))
+            schedule(at: dueAt, now: now)
         }
     }
 
+    func refreshForMissingPrices(in summaries: some Sequence<TokenUsageSummary>, now: Date = Date()) {
+        guard settings.automatic, !isRefreshing, retryAt == nil else { return }
+        if activeSource == settings.sourceURL, let lastChecked,
+           now.timeIntervalSince(lastChecked) < Self.earlyCheckCooldown { return }
+        let catalog = TokenCostCatalog.remoteSnapshot
+        var missingModels = Set<String>()
+        for summary in summaries {
+            missingModels.formUnion(summary.modelsMissingPrices(in: catalog, excluding: checkedMissingModels))
+        }
+        guard !missingModels.isEmpty else { return }
+        refresh(missingModels: missingModels)
+    }
+
     func refreshNow() {
+        refresh(missingModels: [])
+    }
+
+    private func refresh(missingModels: Set<String>) {
         guard !isRefreshing else { return }
         guard let url = settings.validatedURL else { status = TokenPricingError.invalidSource.localizedDescription; return }
-        timer?.invalidate()
+        clearScheduledCheck()
         isRefreshing = true
         status = "正在检查模型价格…"
         let currentGeneration = generation
         let fetch = fetch
         let source = settings.sourceURL
         task = Task {
-            var succeeded = false
+            let download = Task.detached(priority: .utility) {
+                try Task.checkCancellation()
+                let data = try await fetch(url)
+                try Task.checkCancellation()
+                return (data, try TokenPricingParser.parse(data))
+            }
             do {
-                let (data, prices) = try await Task.detached(priority: .utility) {
-                    let data = try await fetch(url)
-                    return (data, try TokenPricingParser.parse(data))
-                }.value
+                let (data, prices) = try await withTaskCancellationHandler {
+                    try await download.value
+                } onCancel: {
+                    download.cancel()
+                }
                 guard !Task.isCancelled, currentGeneration == generation else { return }
                 let cache = TokenPricingCache(sourceURL: source, checkedAt: Date(), data: data)
                 try cache.write(to: cacheURL)
                 apply(cache, prices: prices)
-                succeeded = true
+                retryAt = nil
                 status = "更新成功 · \(prices.count) 个模型，未覆盖的模型使用内置价格"
             } catch {
                 guard !Task.isCancelled, currentGeneration == generation else { return }
+                retryAt = Date().addingTimeInterval(Self.retryInterval)
                 status = "更新失败，保留原价格：\(error.localizedDescription.redactedForDisplay)"
             }
+            checkedMissingModels.formUnion(missingModels)
             isRefreshing = false
             task = nil
-            schedule(after: succeeded ? Double(settings.intervalHours) * 3_600 : 3_600)
+            refreshIfDue()
         }
     }
 
@@ -218,13 +264,22 @@ final class TokenPricingUpdater: ObservableObject {
         NotificationCenter.default.post(name: .tokenPricingDidChange, object: nil)
     }
 
-    private func schedule(after interval: TimeInterval) {
+    private func clearScheduledCheck() {
         timer?.invalidate()
-        guard settings.automatic else { return }
-        let timer = Timer.scheduledTimer(withTimeInterval: max(1, interval), repeats: false) { [weak self] _ in
+        timer = nil
+        if nextCheckAt != nil { nextCheckAt = nil }
+    }
+
+    private func schedule(at date: Date, now: Date) {
+        guard nextCheckAt != date || timer?.isValid != true else { return }
+        timer?.invalidate()
+        nextCheckAt = date
+        let interval = max(1, date.timeIntervalSince(now))
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.refreshIfDue() }
         }
         timer.tolerance = min(60, interval * 0.1)
+        RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
 }

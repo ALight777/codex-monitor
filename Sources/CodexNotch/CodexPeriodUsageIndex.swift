@@ -23,29 +23,9 @@ final class CodexPeriodUsageIndex: @unchecked Sendable {
         bytesScanned = 0
 
         var coverage = UsageCoverage(databaseUnavailable: !databaseAvailable)
-        var paths = Set<String>()
-        for name in ["sessions", "archived_sessions"] {
-            let root = directory.appendingPathComponent(name)
-            guard FileManager.default.fileExists(atPath: root.path) else { continue }
-            let enumerator = FileManager.default.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles],
-                errorHandler: { _, _ in
-                    coverage.discoveryIncomplete = true
-                    return true
-                }
-            )
-            guard let enumerator else {
-                coverage.discoveryIncomplete = true
-                continue
-            }
-            for case let url as URL in enumerator
-                where url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl.zst") {
-                guard !isCancelled() else { return nil }
-                paths.insert(url.resolvingSymlinksInPath().path)
-            }
-        }
+        guard let discovery = discoverRollouts(in: directory, isCancelled: isCancelled) else { return nil }
+        var paths = discovery.paths
+        coverage.discoveryIncomplete = discovery.incomplete
 
         let discoveredNames = Set(paths.map { Self.rolloutName($0) })
         var threadIDsByPath: [String: String] = [:]
@@ -69,6 +49,122 @@ final class CodexPeriodUsageIndex: @unchecked Sendable {
 
         // Removed files must not leave ghost usage behind. Archives are rediscovered above.
         files = files.filter { paths.contains($0.key) }
+        guard let grouped = collectEvents(paths: paths, threadIDsByPath: threadIDsByPath,
+                                          now: now, coverage: &coverage, isCancelled: isCancelled) else { return nil }
+
+        let monthStart = now.addingTimeInterval(-30 * 86_400)
+        let weekStart = now.addingTimeInterval(-7 * 86_400)
+        let dayStart = now.addingTimeInterval(-86_400)
+        let todayStart = calendar.startOfDay(for: now)
+        var usage = PeriodUsage.zero
+        usage.coverage = coverage
+
+        for events in grouped.values {
+            let completed = forEachRequest(in: events, isCancelled: isCancelled) { event in
+                guard event.date >= monthStart else { return }
+                usage.monthSummary.add(event.usage, model: event.model)
+                if event.date >= weekStart { usage.weekSummary.add(event.usage, model: event.model) }
+                if event.date >= dayStart { usage.daySummary.add(event.usage, model: event.model) }
+                if event.date >= todayStart { usage.todaySummary.add(event.usage, model: event.model) }
+            }
+            guard completed else { return nil }
+        }
+        usage.today = usage.todaySummary.totalTokens
+        usage.day = usage.daySummary.totalTokens
+        usage.week = usage.weekSummary.totalTokens
+        usage.month = usage.monthSummary.totalTokens
+        return usage
+    }
+
+    func loadTaskUsage(
+        directory: URL,
+        taskIDs: Set<String>,
+        threads: [ThreadRecord],
+        now: Date,
+        isCancelled: @Sendable () -> Bool
+    ) -> [String: TokenUsageSummary]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isCancelled() else { return nil }
+        bytesScanned = 0
+
+        let taskIDs = Set(taskIDs.map { $0.lowercased() })
+        var threadIDsByName: [String: String] = [:]
+        var threadIDsByPath: [String: String] = [:]
+        for thread in threads where !thread.rolloutPath.isEmpty && taskIDs.contains(thread.id.lowercased()) {
+            let id = thread.id.lowercased()
+            let path = URL(fileURLWithPath: thread.rolloutPath).resolvingSymlinksInPath().path
+            threadIDsByName[Self.rolloutName(thread.rolloutPath)] = id
+            threadIDsByPath[path] = id
+            if !path.hasSuffix(".zst") {
+                let compressed = URL(fileURLWithPath: path + ".zst").resolvingSymlinksInPath().path
+                threadIDsByPath[compressed] = id
+            }
+        }
+
+        var coverage = UsageCoverage()
+        guard let discovery = discoverRollouts(in: directory, isCancelled: isCancelled, matching: { url in
+            threadIDsByName[Self.rolloutName(url.path)] != nil || taskIDs.contains(Self.threadID(from: url.path))
+        }) else { return nil }
+        var paths = discovery.paths
+        paths.formUnion(threadIDsByPath.keys.filter { FileManager.default.fileExists(atPath: $0) })
+        for path in paths {
+            if let id = threadIDsByName[Self.rolloutName(path)] { threadIDsByPath[path] = id }
+        }
+        guard let grouped = collectEvents(paths: paths, threadIDsByPath: threadIDsByPath,
+                                          now: now, coverage: &coverage, isCancelled: isCancelled) else { return nil }
+
+        var summaries: [String: TokenUsageSummary] = [:]
+        for (id, events) in grouped where taskIDs.contains(id) {
+            var summary = TokenUsageSummary.zero
+            let completed = forEachRequest(in: events, isCancelled: isCancelled) { event in
+                summary.add(event.usage, model: event.model)
+            }
+            guard completed else { return nil }
+            if summary.hasComponentData { summaries[id] = summary }
+        }
+        return summaries
+    }
+
+    private func discoverRollouts(
+        in directory: URL,
+        isCancelled: @Sendable () -> Bool,
+        matching: (URL) -> Bool = { _ in true }
+    ) -> (paths: Set<String>, incomplete: Bool)? {
+        var paths = Set<String>()
+        var incomplete = false
+        for name in ["sessions", "archived_sessions"] {
+            let root = directory.appendingPathComponent(name)
+            guard FileManager.default.fileExists(atPath: root.path) else { continue }
+            let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles],
+                errorHandler: { _, _ in
+                    incomplete = true
+                    return true
+                }
+            )
+            guard let enumerator else {
+                incomplete = true
+                continue
+            }
+            for case let url as URL in enumerator
+                where url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl.zst") {
+                guard !isCancelled() else { return nil }
+                if matching(url) { paths.insert(url.resolvingSymlinksInPath().path) }
+            }
+        }
+        return (paths, incomplete)
+    }
+
+    private func collectEvents(
+        paths: Set<String>,
+        threadIDsByPath: [String: String],
+        now: Date,
+        coverage: inout UsageCoverage,
+        isCancelled: @Sendable () -> Bool
+    ) -> [String: [LocatedEvent]]? {
         var grouped: [String: [LocatedEvent]] = [:]
         for path in paths.sorted() {
             guard !isCancelled() else { return nil }
@@ -91,43 +187,33 @@ final class CodexPeriodUsageIndex: @unchecked Sendable {
             }
         }
 
-        let monthStart = now.addingTimeInterval(-30 * 86_400)
-        let weekStart = now.addingTimeInterval(-7 * 86_400)
-        let dayStart = now.addingTimeInterval(-86_400)
-        let todayStart = calendar.startOfDay(for: now)
-        var usage = PeriodUsage.zero
-        usage.coverage = coverage
+        return grouped
+    }
 
-        for events in grouped.values {
-            var previous: CounterSnapshot?
-            var seen: [EventIdentity: String] = [:]
-            for located in events.sorted(by: LocatedEvent.ordered) {
-                guard !isCancelled() else { return nil }
-                let event = located.event
-                let identity = EventIdentity(date: event.date, usage: event.usage, cumulative: event.cumulative)
-                // A restored rollout can replay an exact prefix. Do not merge unrelated threads,
-                // or discard equal-sized requests without an authoritative cumulative counter.
-                if let firstPath = seen[identity], firstPath != located.path { continue }
-                seen[identity] = located.path
-                if let cumulative = event.cumulative {
-                    let counter = CounterSnapshot(cumulative: cumulative, last: event.usage)
-                    if previous == counter { continue }
-                    previous = counter
-                } else {
-                    previous = nil
-                }
-                guard event.date >= monthStart else { continue }
-                usage.monthSummary.add(event.usage, model: event.model)
-                if event.date >= weekStart { usage.weekSummary.add(event.usage, model: event.model) }
-                if event.date >= dayStart { usage.daySummary.add(event.usage, model: event.model) }
-                if event.date >= todayStart { usage.todaySummary.add(event.usage, model: event.model) }
+    private func forEachRequest(
+        in events: [LocatedEvent],
+        isCancelled: @Sendable () -> Bool,
+        apply: (Event) -> Void
+    ) -> Bool {
+        var previous: CounterSnapshot?
+        var seen: [EventIdentity: String] = [:]
+        for located in events.sorted(by: LocatedEvent.ordered) {
+            guard !isCancelled() else { return false }
+            let event = located.event
+            let identity = EventIdentity(date: event.date, usage: event.usage, cumulative: event.cumulative)
+            // Exact replays across copies and repeated cumulative counters describe the same usage.
+            if let firstPath = seen[identity], firstPath != located.path { continue }
+            seen[identity] = located.path
+            if let cumulative = event.cumulative {
+                let counter = CounterSnapshot(cumulative: cumulative, last: event.usage)
+                if previous == counter { continue }
+                previous = counter
+            } else {
+                previous = nil
             }
+            apply(event)
         }
-        usage.today = usage.todaySummary.totalTokens
-        usage.day = usage.daySummary.totalTokens
-        usage.week = usage.weekSummary.totalTokens
-        usage.month = usage.monthSummary.totalTokens
-        return usage
+        return true
     }
 
     private func scan(

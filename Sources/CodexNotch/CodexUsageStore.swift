@@ -228,6 +228,22 @@ final class CodexUsageStore: @unchecked Sendable {
         )
     }
 
+    func loadTaskUsage(
+        for taskIDs: Set<String>,
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false }
+    ) -> [String: TokenUsageSummary]? {
+        guard !isCancelled() else { return nil }
+        let threads = (try? loadThreadsForPeriodUsage(now: now)) ?? []
+        return periodUsageIndex.loadTaskUsage(
+            directory: codexDirectory,
+            taskIDs: taskIDs,
+            threads: threads,
+            now: now,
+            isCancelled: isCancelled
+        )
+    }
+
     func rateLimitWatchPaths() -> [String] {
         let threads = (try? loadRecentThreads()) ?? []
         return uniqueExistingPaths(

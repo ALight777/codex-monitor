@@ -118,6 +118,36 @@ func rateLimitSourceWaitsForDelayedReplyWithoutClosingInput() throws {
 }
 
 @Test
+func rateLimitSourceAcceptsSlowAppServerReplyWithinProductionTimeout() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("NotchSlowQuota-\(UUID())")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let executable = root.appendingPathComponent("mock-codex")
+    let reset = Int(Date().timeIntervalSince1970) + 604_800
+    let response = #"{"id":2,"result":{"rateLimits":{"limitId":"codex","planType":"pro","primary":{"usedPercent":22,"windowDurationMins":10080,"resetsAt":\#(reset)}}}}"#
+    try """
+    #!/bin/sh
+    read -r initialize
+    read -r initialized
+    read -r request
+    sleep 5.2
+    printf '%s\\n' '\(response)'
+    read -r still_open
+    """.write(to: executable, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+
+    let snapshot = CodexUsageStore(
+        codexDirectory: root,
+        appServerExecutable: executable.path
+    ).loadSnapshot(includePeriodUsage: false, bypassFastCache: true)
+
+    #expect(snapshot.secondaryPercent == 78)
+    #expect(snapshot.rateLimitStatus.source == .live)
+    #expect(!snapshot.rateLimitStatus.refreshFailed)
+}
+
+@Test
 func rateLimitSourceBoundsUnresponsiveServerAndCleansUpProcess() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("NotchQuotaTimeout-\(UUID())")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

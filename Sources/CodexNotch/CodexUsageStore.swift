@@ -14,6 +14,7 @@ private enum UsageScanPolicy {
     static let recentRateLimitPathCacheCapacity = 32
     static let appServerSuccessCacheTTL: TimeInterval = 30
     static let appServerFailureCacheTTL: TimeInterval = 45
+    static let appServerRequestTimeout: TimeInterval = 10
 }
 
 final class CodexUsageStore: @unchecked Sendable {
@@ -1827,7 +1828,8 @@ final class CodexUsageStore: @unchecked Sendable {
 
         let output = try? Shell.runJSONRPC(
             appServerExecutable, ["app-server", "--stdio"],
-            input: appServerRateLimitInput(), responseID: 2, timeout: 4
+            input: appServerRateLimitInput(), responseID: 2,
+            timeout: UsageScanPolicy.appServerRequestTimeout
         )
         guard let output,
               let snapshot = parseAppServerRateLimits(output: output, now: now) else {

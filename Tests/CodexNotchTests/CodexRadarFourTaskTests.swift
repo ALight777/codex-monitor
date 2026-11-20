@@ -11,6 +11,10 @@ func fourTaskHomepage() throws -> Data {
     try officialFourTaskFixture("radar-four-total-panel-20261028", extension: "html")
 }
 
+private func currentFourTaskHomepage() throws -> Data {
+    try officialFourTaskFixture("radar-four-total-panel-20261120", extension: "html")
+}
+
 private func fourTaskSnapshots(source: Data? = nil, homepage: Data? = nil) throws -> [CodexRadarTask: CodexRadarSnapshot] {
     try CodexRadarFourTaskDocument.assemble(homepage: homepage ?? fourTaskHomepage(), source: source ?? officialFourTaskFixture())
         .snapshots(fetchedAt: Date())
@@ -39,6 +43,31 @@ private func fourTaskSnapshots(source: Data? = nil, homepage: Data? = nil) throw
     let document = try CodexRadarFourTaskDocument.assemble(homepage: fourTaskHomepage(), source: officialFourTaskFixture())
     let restored = try CodexRadarPublicDocument.snapshots(data: document.encode(), fetchedAt: Date())
     #expect(restored[.total]?.models == total.models)
+}
+
+@Test func radarFourTaskAdaptsToNovember58ConfigurationRound() throws {
+    let snapshots = try CodexRadarFourTaskDocument.assemble(
+        homepage: currentFourTaskHomepage(),
+        source: officialFourTaskFixture("radar-four-task-20261120")
+    ).snapshots(fetchedAt: Date())
+    #expect(snapshots.count == 5)
+    #expect(snapshots.values.allSatisfy { $0.models.count == 58 && $0.state == .ready && $0.dataSource == .publicFourTask })
+    #expect(snapshots[.total]?.models.first?.id == "gpt-6.2-astra|ultra")
+    #expect(snapshots[.total]?.models.first?.scoreText == "131.18")
+    #expect(snapshots[.total]?.models.contains { $0.label.hasPrefix("GPT-6.2 Sol") } == true)
+    #expect(snapshots[.total]?.models.contains { $0.label.hasPrefix("GPT-6.2 Astra") } == true)
+    #expect(snapshots[.combined]?.models.allSatisfy { $0.status == "机翼v2" } == true)
+    #expect(snapshots[.pelican]?.models.allSatisfy { $0.status == "可见v2" } == true)
+    #expect(snapshots[.total]?.monitoredAt == CodexRadarDateParser.parse("2026-11-20T01:09:52.642596+00:00"))
+}
+
+@Test func radarNewsAdaptsToCurrentHomeAnnouncementMarkup() throws {
+    let data = try officialFourTaskFixture("radar-homepage-20261120", extension: "html")
+    let news = try CodexRadarNewsParser.decode(data, fetchedAt: Date())
+    #expect(news.items.count == 1)
+    #expect(news.items.first?.title == "OpenAI会在11月20日24:00前发布新主力模型吗？")
+    #expect(news.items.first?.summary?.contains("第六期竞猜题目") == true)
+    #expect(news.items.first?.url.absoluteString == "https://codexradar.com/predictions/?market=openai-agent-flagship-20261120")
 }
 
 @Test func radarFourTaskRejectsChangedWeightsScopeRubricsAndCrossRoundTotals() throws {

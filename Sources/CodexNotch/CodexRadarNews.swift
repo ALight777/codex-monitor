@@ -17,7 +17,7 @@ enum CodexRadarNewsParser {
     // Extract only that section; never execute HTML or load embedded resources.
     static func decode(_ data: Data, fetchedAt: Date) throws -> CodexRadarNewsSnapshot {
         guard let html = String(data: data, encoding: .utf8),
-              html.contains("data-radar-station") || html.contains("site-announcement") else {
+              html.contains("data-radar-station") || html.contains("site-announcement") || html.contains("home-announcement") else {
             throw CodexRadarClientError.invalidResponse
         }
         if let section = element(className: "speed-site-announcement", in: html) {
@@ -28,6 +28,18 @@ enum CodexRadarNewsParser {
             return CodexRadarNewsSnapshot(items: [CodexRadarNewsItem(
                 title: plainText(heading), summary: summary,
                 url: href.flatMap { safeURL(decodeEntities($0)) } ?? CodexRadarSnapshot.siteURL
+            )], fetchedAt: fetchedAt)
+        }
+        if let section = element(className: "home-announcement", in: html),
+           let heading = element(className: "home-announcement-title", in: section),
+           !plainText(heading).isEmpty {
+            let summary = element(className: "home-announcement-summary", in: section)
+                .map(plainText)
+                ?? element(className: "home-announcement-preview", in: section).map(plainText)
+            let link = firstMatch(#"(?is)<a\b[^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*>"#, in: section, group: 1)
+            return CodexRadarNewsSnapshot(items: [CodexRadarNewsItem(
+                title: plainText(heading), summary: summary.flatMap { $0.isEmpty ? nil : $0 },
+                url: link.flatMap { safeURL(decodeEntities($0)) } ?? CodexRadarSnapshot.siteURL
             )], fetchedAt: fetchedAt)
         }
         guard let section = element(className: "site-announcement", in: html),

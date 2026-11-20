@@ -84,6 +84,7 @@ struct CodexRadarFourTaskDocument: Codable, Sendable {
             switch rubric {
             case "pelican-candy-static-standalone-v1-20261027",
                  "pelican-animation-standalone-v1-20261027": "独立v1"
+            case "pelican-candy-static-standalone-v2-aircraft-wing-20261119": "机翼v2"
             case "pelican-animation-standalone-v2-visible-evidence-20261027": "可见v2"
             default: nil
             }
@@ -115,7 +116,7 @@ struct CodexRadarFourTaskDocument: Codable, Sendable {
             }
             if let score = grade(for: task), task == .combined || task == .pelican {
                 let known = task == .combined
-                    ? rubric == "pelican-candy-static-standalone-v1-20261027"
+                    ? ["pelican-candy-static-standalone-v1-20261027", "pelican-candy-static-standalone-v2-aircraft-wing-20261119"].contains(rubric ?? "")
                     : ["pelican-animation-standalone-v1-20261027", "pelican-animation-standalone-v2-visible-evidence-20261027"].contains(rubric ?? "")
                 guard known else { throw CodexRadarClientError.unsupportedFormat }
                 if let completionCap, score > completionCap { throw CodexRadarClientError.invalidResponse }

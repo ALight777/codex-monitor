@@ -149,7 +149,7 @@ runner.check(
     "expanded detail frame height should equal detail height"
 )
 
-runner.check(AppInfo.version == "0.1.24", "app info should expose version 0.1.24")
+runner.check(AppInfo.version == "0.1.25", "app info should expose version 0.1.25")
 runner.check(AppInfo.displayVersion == AppInfo.version, "app info should fall back to source version when bundle version is unavailable")
 
 let resetCreditsNow = Date(timeIntervalSince1970: 1_784_500_000)

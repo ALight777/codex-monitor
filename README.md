@@ -63,7 +63,7 @@ codex监测是一款原生 macOS 刘海屏监测工具。它会贴合 MacBook �
 
 可在设置中启用独立的 `Radar` 页。当前与官网「降智雷达」一致：默认显示官网发布的四题加权总分（满分150），可切换秦始皇、庞贝、鹈鹕、糖果分项并记住选择。四题分别占60、45、22.5、22.5分；秦始皇采用完成度门槛后的最终分，鹈鹕标注独立v1/可见证据v2评分规则，糖果按对错显示。按官网提供的模型和档位展示，不假造尚未支持的组合。
 
-根据官网首页当前链接选择公开四题 JSON，兼容旧三题页面和缓存；四题请求失败时不会改用旧三题文件。总分直接读取官网公布值，以两位小数显示，并按数据中的已知加权规则核对分项；不一致时保留上次有效缓存。当前支持46档（含GPT-5.6 Terra），不混入旧三题成绩。费用与模型耗时仅在四题度量完整时显示合计；耗时按模型开始/结束时间校验，以分钟显示。费用是 API 等价估算，不是订阅实际扣款；耗时不含排队与评分。缺失值显示 `--`，未评分显示“待测”；官网评分快照时间与本机最近检查时间分开显示。已移除旧三维度及64题雷达Bench入口、请求和选择记录。
+根据官网首页当前链接选择公开四题 JSON，兼容旧三题页面和缓存；四题请求失败时不会改用旧三题文件。总分直接读取官网公布值，以两位小数显示，并按数据中的已知加权规则核对分项；不一致时保留上次有效缓存。当前支持58档，包含 GPT-6.2 Sol 与 GPT-6.2 Astra，不混入旧三题成绩。费用与模型耗时仅在四题度量完整时显示合计；耗时按模型开始/结束时间校验，以分钟显示。费用是 API 等价估算，不是订阅实际扣款；耗时不含排队与评分。缺失值显示 `--`，未评分显示“待测”；官网评分快照时间与本机最近检查时间分开显示。已移除旧三维度及64题雷达Bench入口、请求和选择记录。
 
 每小时及北京时间 08:20、14:20 自动检查，唤醒后检查是否到期；失败5分钟后重试，保留最近一次有效评分缓存。手动成功后间隔5分钟，失败可立即重试。官网公告适配当前与旧版公告结构，评分/公告分别解析和缓存；格式改变时明确报错并保留有效缓存。
 
@@ -166,8 +166,8 @@ swift build -c release
 DMG 会输出到 `dist/`，文件名包含软件名、版本号和支持架构，例如：
 
 ```text
-dist/codex-monitor-0.1.24-arm64.dmg
-dist/codex-monitor-0.1.24-amd64.dmg
+dist/codex-monitor-0.1.25-arm64.dmg
+dist/codex-monitor-0.1.25-amd64.dmg
 ```
 
 安装到当前用户的 Applications 目录：
@@ -292,7 +292,7 @@ Costs are estimated per recorded request using the matching standard API model p
 
 ### CodexRadar
 
-The optional `Radar` tab defaults to the site's published weighted four-task total out of 150, with Qin Shi Huang, Pompeii, Pelican, and Candy views and a remembered selection. Their weights are 60, 45, 22.5, and 22.5. Qin Shi Huang uses the final capped score; Pelican cards identify standalone v1 / visible-evidence v2 rubrics. Candy shows correct/incorrect. The current source has 46 configurations including GPT-5.6 Terra.
+The optional `Radar` tab defaults to the site's published weighted four-task total out of 150, with Qin Shi Huang, Pompeii, Pelican, and Candy views and a remembered selection. Their weights are 60, 45, 22.5, and 22.5. Qin Shi Huang uses the final capped score; current combined cards identify the aircraft-wing v2 rubric and Pelican cards identify the visible-evidence v2 rubric. Candy shows correct/incorrect. The current source has 58 configurations including GPT-6.2 Sol and GPT-6.2 Astra.
 
 Anonymous requests select the current public four-task JSON from the homepage link, retaining compatibility with earlier three-task pages and caches. A failed four-task request never falls back to the obsolete three-task file. Published totals use two decimals and are checked against the source's known weighted scoring contract. Mismatched page/file results preserve the valid cache without mixing rounds. Total costs and durations require all four components; otherwise they remain unknown. Costs are API-equivalent estimates, not subscription charges. Native model durations are checked against start/end timestamps, exclude queueing and grading, and display in minutes. Missing metrics remain unknown and ungraded results are marked pending. The site's score snapshot timestamp stays separate from the local check time. Retired IQ dimensions and the 64-task RadarBench are no longer requested or displayed.
 
@@ -397,8 +397,8 @@ Build a double-clickable `.app` and `.dmg`:
 The DMG is written to `dist/` with the app name, version, and supported architecture in the filename, for example:
 
 ```text
-dist/codex-monitor-0.1.24-arm64.dmg
-dist/codex-monitor-0.1.24-amd64.dmg
+dist/codex-monitor-0.1.25-arm64.dmg
+dist/codex-monitor-0.1.25-amd64.dmg
 ```
 
 Install into the current user's Applications folder:
